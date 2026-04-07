@@ -1,0 +1,84 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── White-label CSS Variables ─────────────────────────────────────── */
+/* Тези стойности се презаписват от TenantProvider при зареждане */
+:root {
+  --color-primary: #7c3aed;
+  --color-secondary: #a855f7;
+  --color-accent: #f59e0b;
+  --radius: 8px;
+  --font-sans: 'Inter', system-ui, sans-serif;
+
+  /* Backgrounds */
+  --bg-surface: #f8f7ff;
+  --bg-card: #ffffff;
+}
+
+/* ─── Base styles ────────────────────────────────────────────────────── */
+body {
+  font-family: var(--font-sans);
+  background-color: var(--bg-surface);
+  color: #1a1a2e;
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+/* ─── React Day Picker customization ────────────────────────────────── */
+.rdp {
+  --rdp-accent-color: var(--color-primary) !important;
+  --rdp-background-color: color-mix(in srgb, var(--color-primary) 10%, transparent) !important;
+  --rdp-outline: 2px solid var(--color-primary) !important;
+  margin: 0 !important;
+}
+
+.rdp-button:hover:not([disabled]):not(.rdp-day_selected) {
+  background-color: color-mix(in srgb, var(--color-primary) 10%, transparent) !important;
+}
+
+.rdp-day_selected,
+.rdp-day_selected:focus-visible,
+.rdp-day_selected:hover {
+  background-color: var(--color-primary) !important;
+  color: white !important;
+}
+
+.rdp-day_today:not(.rdp-day_selected) {
+  color: var(--color-primary) !important;
+  font-weight: 700;
+}
+
+/* ─── Focus styles ───────────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* ─── Animations ─────────────────────────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.25s ease-out forwards;
+}
+
+/* ─── Utility classes ────────────────────────────────────────────────── */
+.btn-primary {
+  @apply px-6 py-3 rounded-xl font-semibold text-white transition-all duration-150;
+  background-color: var(--color-primary);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--color-primary) 35%, transparent);
+}
+
+.btn-primary:hover { opacity: 0.9; }
+.btn-primary:active { transform: scale(0.99); }
+
+.card {
+  @apply bg-white rounded-2xl shadow-sm border border-gray-100 p-5;
+}

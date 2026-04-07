@@ -1,0 +1,130 @@
+// SalonIQ — Prisma Schema
+// Multi-tenant: публичната схема съдържа tenants/billing
+// Всеки tenant получава отделна PostgreSQL схема (schema-per-tenant)
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema", "postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  schemas    = ["public"]
+  extensions = [pgcrypto, pg_trgm]
+}
+
+// ─────────────────────────────────────────────
+// PUBLIC SCHEMA — платформени данни
+// ─────────────────────────────────────────────
+
+model Tenant {
+  id               String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug             String           @unique // salon-aurora → salon-aurora.saloniq.bg
+  customDomain     String?          @unique // rezervacii.salon-aurora.com
+  schemaName       String           @unique // tenant_salon_aurora
+
+  // Бизнес информация
+  businessName     String
+  businessType     BusinessType     @default(SALON)
+  description      String?
+  address          String?
+  city             String?
+  phone            String?
+  email            String?
+  website          String?
+  googleMapsUrl    String?
+
+  // Работно време (JSON: { mon: {open: "09:00", close: "18:00", isOpen: true}, ... })
+  workingHours     Json             @default("{}")
+
+  // Абонамент
+  plan             SubscriptionPlan @default(BASIC)
+  planStatus       PlanStatus       @default(TRIAL)
+  trialEndsAt      DateTime?
+  planRenewsAt     DateTime?
+
+  // Известявания — credentials
+  telegramBotToken String?          // За тест фаза
+  telegramChatId   String?          // Chat ID на собственика за известявания
+  smsApiKey        String?          // smsapi.bg
+  smsSenderId      String?          // Изпращач на SMS
+  viberBotToken    String?          // Бъдеще
+  emailFrom        String?          // noreply@salon-aurora.saloniq.bg
+
+  // White-label тема
+  themeConfig      Json             @default("{}") // primaryColor, secondaryColor, logo, favicon, font
+
+  // Политики
+  requiresConfirmation  Boolean     @default(false) // Изисква одобрение от собственика
+  cancellationHours     Int         @default(24)    // До колко часа преди може да се откаже
+  reminderHours         Int[]       @default([24, 2]) // Напомняния на X часа преди
+  maxAdvanceBookingDays Int         @default(60)    // До колко дни напред може да се резервира
+  minAdvanceBookingHours Int        @default(1)     // Минимум X часа преди
+
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  isActive         Boolean          @default(true)
+
+  owners           TenantOwner[]
+
+  @@map("tenants")
+  @@schema("public")
+}
+
+model TenantOwner {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String   @db.Uuid
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         OwnerRole @default(OWNER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("tenant_owners")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum BusinessType {
+  SALON       // Козметичен салон
+  BARBERSHOP  // Бръснарница
+  HAIR_SALON  // Фризьорски салон
+  NAIL_STUDIO // Нокти
+  SPA         // Спа
+  DENTAL      // Зъболекар
+  MASSAGE     // Масаж
+  BEAUTY      // Общо красота
+  OTHER
+
+  @@schema("public")
+}
+
+enum SubscriptionPlan {
+  BASIC      // 29 лв/м — до 2 служители, 200 резервации
+  PRO        // 59 лв/м — до 8 служители, неограничени
+  ENTERPRISE // 99 лв/м — неограничени, мулти-локации
+
+  @@schema("public")
+}
+
+enum PlanStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+
+  @@schema("public")
+}
+
+enum OwnerRole {
+  OWNER
+  ADMIN
+
+  @@schema("public")
+}

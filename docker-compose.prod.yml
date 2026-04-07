@@ -1,0 +1,107 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: saloniq-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: saloniq_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: saloniq_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/prisma/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U saloniq_user -d saloniq_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: saloniq-redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    container_name: saloniq-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      PORT: 3001
+      NODE_ENV: production
+      DATABASE_URL: postgresql://saloniq_user:${POSTGRES_PASSWORD}@postgres:5432/saloniq_db?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      APP_DOMAIN: ${APP_DOMAIN}
+      FRONTEND_URL: ${FRONTEND_URL}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+    ports:
+      - "3001:3001"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3001/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: production
+    container_name: saloniq-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_APP_DOMAIN: ${APP_DOMAIN}
+      BACKEND_URL: http://backend:3001
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: saloniq-nginx
+    restart: unless-stopped
+    depends_on:
+      frontend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local

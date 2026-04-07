@@ -1,0 +1,33 @@
+# Node
+node_modules/
+dist/
+.next/
+build/
+
+# Env files — НИКОГА в git!
+.env
+.env.local
+.env.production
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Prisma
+prisma/migrations/*.sql.bak
+
+# PM2
+.pm2/
+ecosystem.config.js.bak
+
+# Docker
+docker-compose.override.yml

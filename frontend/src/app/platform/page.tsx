@@ -35,6 +35,9 @@ export default function PlatformDashboardPage() {
   const router = useRouter();
   const qc = useQueryClient();
   const [drafts, setDrafts] = useState<Record<string, { businessType: string; planStatus: string; planRenewsAt: string; isActive: boolean; tempPassword: string }>>({});
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'attention' | 'dueSoon' | 'blocked' | 'healthy'>('all');
+  const [businessTypeFilter, setBusinessTypeFilter] = useState<'ALL' | BusinessTypeKey>('ALL');
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['platform-tenants'],
@@ -82,17 +85,101 @@ export default function PlatformDashboardPage() {
     },
   });
 
+  const tenantCards = useMemo(() => {
+    return tenants.map((tenant) => {
+      const renewsAt = tenant.planRenewsAt ? new Date(tenant.planRenewsAt) : null;
+      const daysUntilRenewal = renewsAt
+        ? Math.ceil((renewsAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+        : null;
+      const dueSoon = daysUntilRenewal !== null && daysUntilRenewal >= 0 && daysUntilRenewal <= 7;
+      const overdue = daysUntilRenewal !== null && daysUntilRenewal < 0;
+      const attention =
+        tenant.access.blocked ||
+        dueSoon ||
+        overdue ||
+        tenant.summary.pending > 0 ||
+        tenant.planStatus === 'PAST_DUE' ||
+        tenant.planStatus === 'CANCELLED';
+
+      return {
+        tenant,
+        renewsAt,
+        daysUntilRenewal,
+        dueSoon,
+        overdue,
+        attention,
+      };
+    });
+  }, [tenants]);
+
+  const filteredTenantCards = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+
+    return tenantCards
+      .filter(({ tenant, attention, dueSoon }) => {
+        if (businessTypeFilter !== 'ALL' && tenant.businessType !== businessTypeFilter) {
+          return false;
+        }
+
+        if (statusFilter === 'attention' && !attention) {
+          return false;
+        }
+
+        if (statusFilter === 'dueSoon' && !dueSoon) {
+          return false;
+        }
+
+        if (statusFilter === 'blocked' && !tenant.access.blocked) {
+          return false;
+        }
+
+        if (statusFilter === 'healthy' && (attention || tenant.access.blocked)) {
+          return false;
+        }
+
+        if (!normalizedQuery) {
+          return true;
+        }
+
+        return [
+          tenant.businessName,
+          tenant.slug,
+          tenant.owner.name || '',
+          tenant.owner.email || '',
+          BUSINESS_TYPE_LABELS[(tenant.businessType as BusinessTypeKey) || 'OTHER'] || tenant.businessType,
+        ]
+          .join(' ')
+          .toLowerCase()
+          .includes(normalizedQuery);
+      })
+      .sort((a, b) => {
+        const attentionDelta = Number(b.attention) - Number(a.attention);
+        if (attentionDelta !== 0) return attentionDelta;
+
+        const pendingDelta = b.tenant.summary.pending - a.tenant.summary.pending;
+        if (pendingDelta !== 0) return pendingDelta;
+
+        const renewalA = a.renewsAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
+        const renewalB = b.renewsAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
+        if (renewalA !== renewalB) return renewalA - renewalB;
+
+        return a.tenant.businessName.localeCompare(b.tenant.businessName, 'bg');
+      });
+  }, [businessTypeFilter, query, statusFilter, tenantCards]);
+
   const totals = useMemo(() => {
-    return tenants.reduce(
-      (acc, tenant) => {
+    return tenantCards.reduce(
+      (acc, card) => {
         acc.tenants += 1;
-        acc.blocked += tenant.access.blocked ? 1 : 0;
-        acc.pending += tenant.summary.pending;
+        acc.blocked += card.tenant.access.blocked ? 1 : 0;
+        acc.pending += card.tenant.summary.pending;
+        acc.dueSoon += card.dueSoon ? 1 : 0;
+        acc.unpaid += card.overdue || card.tenant.planStatus === 'PAST_DUE' || card.tenant.planStatus === 'CANCELLED' ? 1 : 0;
         return acc;
       },
-      { tenants: 0, blocked: 0, pending: 0 },
+      { tenants: 0, blocked: 0, pending: 0, dueSoon: 0, unpaid: 0 },
     );
-  }, [tenants]);
+  }, [tenantCards]);
 
   const updateDraft = (tenant: TenantCard, patch: Partial<{ businessType: string; planStatus: string; planRenewsAt: string; isActive: boolean; tempPassword: string }>) => {
     setDrafts((current) => ({
@@ -149,7 +236,7 @@ export default function PlatformDashboardPage() {
           <div>
             <h1 style={{ margin: 0, fontSize: 34, fontWeight: 900, color: '#111827', letterSpacing: '-0.04em' }}>Platform Admin</h1>
             <p style={{ margin: '8px 0 0', color: '#6b7280' }}>
-              Бизнеси: {totals.tenants} · Блокирани: {totals.blocked} · Чакащи заявки: {totals.pending}
+              Бизнеси: {totals.tenants} · Блокирани: {totals.blocked} · Плащане скоро: {totals.dueSoon} · Чакащи заявки: {totals.pending}
             </p>
           </div>
           <button
@@ -162,14 +249,60 @@ export default function PlatformDashboardPage() {
           </button>
         </div>
 
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>
+          <DashboardKpi label="Всички бизнеси" value={String(totals.tenants)} tone="neutral" />
+          <DashboardKpi label="Блокирани" value={String(totals.blocked)} tone={totals.blocked ? 'danger' : 'neutral'} />
+          <DashboardKpi label="Плащане до 7 дни" value={String(totals.dueSoon)} tone={totals.dueSoon ? 'warning' : 'neutral'} />
+          <DashboardKpi label="Неплатени / overdue" value={String(totals.unpaid)} tone={totals.unpaid ? 'danger' : 'neutral'} />
+          <DashboardKpi label="Чакащи заявки" value={String(totals.pending)} tone={totals.pending ? 'warning' : 'neutral'} />
+        </div>
+
+        <div style={{ marginBottom: 16, display: 'grid', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(220px, 1fr)', gap: 12 }}>
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Търси по име, slug, owner или email..."
+              style={{ width: '100%', border: '1px solid #d1d5db', borderRadius: 16, padding: '12px 14px', fontSize: 14, background: '#fff' }}
+            />
+            <select
+              value={businessTypeFilter}
+              onChange={(e) => setBusinessTypeFilter(e.target.value as 'ALL' | BusinessTypeKey)}
+              style={{ width: '100%', border: '1px solid #d1d5db', borderRadius: 16, padding: '12px 14px', fontSize: 14, background: '#fff' }}
+            >
+              <option value="ALL">Всички типове бизнес</option>
+              {BUSINESS_TYPES.map((value) => (
+                <option key={value} value={value}>
+                  {BUSINESS_TYPE_LABELS[value]}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <FilterChip active={statusFilter === 'all'} onClick={() => setStatusFilter('all')} label="Всички" />
+            <FilterChip active={statusFilter === 'attention'} onClick={() => setStatusFilter('attention')} label="Искат внимание" />
+            <FilterChip active={statusFilter === 'dueSoon'} onClick={() => setStatusFilter('dueSoon')} label="Плащане скоро" />
+            <FilterChip active={statusFilter === 'blocked'} onClick={() => setStatusFilter('blocked')} label="Блокирани" />
+            <FilterChip active={statusFilter === 'healthy'} onClick={() => setStatusFilter('healthy')} label="Без проблеми" />
+          </div>
+        </div>
+
         {tenants.length === 0 && (
           <div style={{ marginBottom: 16, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 24, padding: 20, boxShadow: '0 18px 42px rgba(15,23,42,0.06)', color: '#6b7280' }}>
             Няма заредени бизнеси. Ако очакваш да виждаш бизнеси тук, провери дали таблицата <code>public.tenants</code> в базата съдържа записи.
           </div>
         )}
 
+        {tenants.length > 0 && filteredTenantCards.length === 0 && (
+          <div style={{ marginBottom: 16, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 24, padding: 20, boxShadow: '0 18px 42px rgba(15,23,42,0.06)', color: '#6b7280' }}>
+            Няма бизнеси по текущите филтри.
+          </div>
+        )}
+
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 }}>
-          {tenants.map((tenant) => {
+          {filteredTenantCards.map(({ tenant, dueSoon, overdue, daysUntilRenewal, attention }) => {
             const draft = drafts[tenant.id] ?? {
               businessType: tenant.businessType,
               planStatus: tenant.planStatus,
@@ -189,18 +322,29 @@ export default function PlatformDashboardPage() {
                     <h2 style={{ margin: 0, fontSize: 24, fontWeight: 900, color: '#111827', letterSpacing: '-0.03em' }}>{tenant.businessName}</h2>
                     <p style={{ margin: '6px 0 0', color: '#6b7280', fontSize: 14 }}>{tenant.slug}</p>
                   </div>
-                  <span
-                    style={{
-                      padding: '6px 10px',
-                      borderRadius: 999,
-                      fontSize: 12,
-                      fontWeight: 800,
-                      background: tenant.access.blocked ? 'rgba(220,38,38,0.1)' : 'rgba(16,185,129,0.12)',
-                      color: tenant.access.blocked ? '#dc2626' : '#047857',
-                    }}
-                  >
-                    {tenant.access.blocked ? (tenant.access.reason === 'suspended' ? 'Спрян' : 'Неплатен') : 'Активен'}
-                  </span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
+                    <span
+                      style={{
+                        padding: '6px 10px',
+                        borderRadius: 999,
+                        fontSize: 12,
+                        fontWeight: 800,
+                        background: tenant.access.blocked ? 'rgba(220,38,38,0.1)' : attention ? 'rgba(245,158,11,0.12)' : 'rgba(16,185,129,0.12)',
+                        color: tenant.access.blocked ? '#dc2626' : attention ? '#b45309' : '#047857',
+                      }}
+                    >
+                      {tenant.access.blocked ? (tenant.access.reason === 'suspended' ? 'Спрян' : 'Неплатен') : attention ? 'Иска внимание' : 'Активен'}
+                    </span>
+                    {daysUntilRenewal !== null && (
+                      <span style={{ fontSize: 12, fontWeight: 700, color: overdue ? '#dc2626' : dueSoon ? '#b45309' : '#64748b' }}>
+                        {overdue
+                          ? `Просрочен с ${Math.abs(daysUntilRenewal)} дни`
+                          : dueSoon
+                            ? `Платено до ${daysUntilRenewal} дни`
+                            : `Платено още ${daysUntilRenewal} дни`}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: 10 }}>
@@ -365,6 +509,58 @@ function Stat({ label, value }: { label: string; value: string | number }) {
       <div style={{ fontSize: 12, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</div>
       <div style={{ marginTop: 6, fontSize: 20, fontWeight: 900, color: '#111827' }}>{value}</div>
     </div>
+  );
+}
+
+function DashboardKpi({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: 'neutral' | 'warning' | 'danger';
+}) {
+  const colors =
+    tone === 'danger'
+      ? { border: '#fecaca', background: '#fff5f5', text: '#b91c1c', sub: '#ef4444' }
+      : tone === 'warning'
+        ? { border: '#fde68a', background: '#fffbeb', text: '#b45309', sub: '#f59e0b' }
+        : { border: '#e5e7eb', background: '#ffffff', text: '#111827', sub: '#6b7280' };
+
+  return (
+    <div style={{ border: `1px solid ${colors.border}`, borderRadius: 24, padding: 16, background: colors.background, boxShadow: '0 18px 42px rgba(15,23,42,0.04)' }}>
+      <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', color: colors.sub }}>{label}</div>
+      <div style={{ marginTop: 8, fontSize: 30, fontWeight: 900, color: colors.text }}>{value}</div>
+    </div>
+  );
+}
+
+function FilterChip({
+  active,
+  onClick,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: '10px 14px',
+        borderRadius: 999,
+        border: active ? '1px solid rgba(15,23,42,0.12)' : '1px solid #e5e7eb',
+        background: active ? '#111827' : '#fff',
+        color: active ? '#fff' : '#374151',
+        fontWeight: 700,
+        cursor: 'pointer',
+      }}
+    >
+      {label}
+    </button>
   );
 }
 

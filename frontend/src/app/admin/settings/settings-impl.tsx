@@ -28,6 +28,7 @@ import {
 } from '@/lib/notification-templates';
 
 type Tab = 'general' | 'notifications' | 'booking' | 'theme';
+type TemplateGroup = 'customer' | 'reminders' | 'owner';
 
 const BUSINESS_TYPE_OPTIONS = [
   { value: 'SALON', label: 'Козметичен салон' },
@@ -426,8 +427,30 @@ function NotificationSettings() {
   const [telegramSaving, setTelegramSaving] = useState(false);
   const [openingTelegramBot, setOpeningTelegramBot] = useState(false);
   const [notificationSettingsLoaded, setNotificationSettingsLoaded] = useState(false);
+  const [telegramStatusLoading, setTelegramStatusLoading] = useState(false);
   const [openTemplateId, setOpenTemplateId] = useState<string | null>('booking-pending');
+  const [activeTemplateGroup, setActiveTemplateGroup] = useState<TemplateGroup>('customer');
   const [telegramBotLink, setTelegramBotLink] = useState<string | null>(null);
+  const [telegramStatus, setTelegramStatus] = useState<null | {
+    hasBotToken: boolean;
+    botProfile: null | {
+      ok: boolean;
+      username?: string;
+      firstName?: string;
+      description?: string;
+    };
+    linkedChatId: string | null;
+    ownerChatLinked: boolean;
+    ownerSetupPending: boolean;
+    ownerSetupExpiresAt: string | null;
+    expectedWebhookUrl: string | null;
+    webhook: {
+      connected: boolean;
+      webhookUrl: string;
+      pendingUpdateCount?: number;
+      lastErrorMessage?: string;
+    };
+  }>(null);
   const [webhookStatus, setWebhookStatus] = useState<null | {
     connected: boolean;
     webhookUrl: string;
@@ -458,6 +481,23 @@ function NotificationSettings() {
       ownerNewBookingTemplate: tenant.notificationTemplates.ownerNewBooking,
     },
   });
+
+  const templatePreviewValues = useMemo(
+    () => ({
+      Бизнес: tenant.businessName,
+      Име: 'Мария',
+      ПълноИме: 'Мария Иванова',
+      Телефон: '0888123456',
+      Услуга: 'Подстригване',
+      Специалист: 'Елена',
+      Дата: '12 април',
+      Час: '14:30',
+      Адрес: tenant.address || 'ул. Витоша 42',
+      Цена: '35 €',
+      Причина: 'Салонът няма свободен слот',
+    }),
+    [tenant.address, tenant.businessName],
+  );
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -506,6 +546,54 @@ function NotificationSettings() {
     };
   }, [reset]);
 
+  const getWebhookPayload = (values: any) => ({
+    publicBaseUrl,
+    telegramBotToken: normalizeOptionalString(values.telegramBotToken),
+    telegramChatId: normalizeOptionalString(values.telegramChatId),
+  });
+
+  const refreshTelegramStatus = async (values = getValues(), silent = true) => {
+    if (!publicBaseUrl) return;
+
+    try {
+      setTelegramStatusLoading(true);
+      const result = await apiClient.post<{
+        hasBotToken: boolean;
+        botProfile: null | {
+          ok: boolean;
+          username?: string;
+          firstName?: string;
+          description?: string;
+        };
+        linkedChatId: string | null;
+        ownerChatLinked: boolean;
+        ownerSetupPending: boolean;
+        ownerSetupExpiresAt: string | null;
+        expectedWebhookUrl: string | null;
+        webhook: {
+          connected: boolean;
+          webhookUrl: string;
+          pendingUpdateCount?: number;
+          lastErrorMessage?: string;
+        };
+      }>('/tenants/settings/notifications/telegram/status', getWebhookPayload(values));
+
+      setTelegramStatus(result);
+      setWebhookStatus(result.webhook);
+    } catch (error: any) {
+      if (!silent) {
+        toast.error(getApiErrorMessage(error, 'Неуспешна проверка на Telegram статуса.'));
+      }
+    } finally {
+      setTelegramStatusLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!notificationSettingsLoaded || !publicBaseUrl) return;
+    void refreshTelegramStatus(getValues(), true);
+  }, [notificationSettingsLoaded, publicBaseUrl]);
+
   useEffect(() => {
     setValue('reminder24h', tenant.reminderHours.includes(24), { shouldDirty: false });
     setValue('reminder2h', tenant.reminderHours.includes(2), { shouldDirty: false });
@@ -527,6 +615,9 @@ function NotificationSettings() {
   const ownerNewBookingTemplate = watch('ownerNewBookingTemplate');
   const webhookUrl = publicBaseUrl ? `${publicBaseUrl}/api/v1/webhooks/telegram/${tenant.slug}` : '';
   const hasSmsConfig = Boolean(watch('smsApiKey') || watch('smsSenderId'));
+  const activeReminderCount = [reminder24h, reminder2h].filter(Boolean).length;
+  const resolvedWebhookStatus = telegramStatus?.webhook ?? webhookStatus;
+  const botUsername = telegramStatus?.botProfile?.username ? `@${telegramStatus.botProfile.username}` : null;
 
   const buildNotificationPayload = (values: any) => {
     const reminderHours = [values.reminder24h ? 24 : null, values.reminder2h ? 2 : null].filter(
@@ -547,12 +638,6 @@ function NotificationSettings() {
       ownerNewBookingTemplate: values.ownerNewBookingTemplate.trim(),
     };
   };
-
-  const getWebhookPayload = (values: any) => ({
-    publicBaseUrl,
-    telegramBotToken: normalizeOptionalString(values.telegramBotToken),
-    telegramChatId: normalizeOptionalString(values.telegramChatId),
-  });
 
   const persistNotificationSettings = async (values: any, silent = false) => {
     const payload = buildNotificationPayload(values);
@@ -587,7 +672,9 @@ function NotificationSettings() {
   const saveTelegramCredentials = async () => {
     try {
       setTelegramSaving(true);
-      await persistNotificationSettings(getValues());
+      const values = getValues();
+      await persistNotificationSettings(values);
+      await refreshTelegramStatus(values, true);
     } catch (error: any) {
       toast.error(getApiErrorMessage(error));
     } finally {
@@ -598,6 +685,7 @@ function NotificationSettings() {
   const onSubmit = async (values: any) => {
     try {
       await persistNotificationSettings(values);
+      await refreshTelegramStatus(values, true);
     } catch (error: any) {
       toast.error(getApiErrorMessage(error));
     }
@@ -620,6 +708,7 @@ function NotificationSettings() {
         pendingUpdateCount: result.info.pendingUpdateCount,
         lastErrorMessage: result.info.lastErrorMessage,
       });
+      await refreshTelegramStatus(values, true);
       toast.success(result.connected ? 'Webhook-ът е свързан.' : 'Webhook-ът не беше потвърден от Telegram.');
     } catch (error: any) {
       toast.error(getApiErrorMessage(error, 'Грешка при свързване на webhook-а.'));
@@ -641,6 +730,7 @@ function NotificationSettings() {
         pendingUpdateCount: result.info.pendingUpdateCount,
         lastErrorMessage: result.info.lastErrorMessage,
       });
+      await refreshTelegramStatus(values, true);
       toast.success(result.connected ? 'Webhook информацията е обновена.' : 'За този бот няма активен webhook.');
     } catch (error: any) {
       toast.error(getApiErrorMessage(error, 'Грешка при проверка на webhook-а.'));
@@ -661,6 +751,7 @@ function NotificationSettings() {
         pendingUpdateCount: result.info.pendingUpdateCount,
         lastErrorMessage: result.info.lastErrorMessage,
       });
+      await refreshTelegramStatus(getValues(), true);
       toast.success('Webhook-ът е премахнат.');
     } catch (error: any) {
       toast.error(getApiErrorMessage(error, 'Грешка при премахване на webhook-а.'));
@@ -681,6 +772,7 @@ function NotificationSettings() {
       });
 
       setTelegramBotLink(result.botLink);
+      await refreshTelegramStatus(values, true);
       window.location.assign(result.botLink);
     } catch (error: any) {
       toast.error(getApiErrorMessage(error, 'Грешка при отваряне на Telegram бота.'));
@@ -691,13 +783,58 @@ function NotificationSettings() {
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-5 pb-28">
-      <Card title="Telegram канал">
-        <div className="space-y-4 overflow-x-hidden">
+      <Card title="Telegram onboarding">
+        <div className="space-y-5 overflow-x-hidden">
+          <div className="grid gap-3 md:grid-cols-3">
+            <TelegramStatusTile
+              label="Bot Token"
+              status={
+                telegramStatus?.hasBotToken
+                  ? telegramStatus.botProfile?.ok
+                    ? 'success'
+                    : 'error'
+                  : 'idle'
+              }
+              title={
+                telegramStatus?.hasBotToken
+                  ? telegramStatus.botProfile?.ok
+                    ? botUsername || 'Bot token е валиден'
+                    : telegramStatus.botProfile?.description || 'Невалиден Bot Token'
+                  : 'Няма записан token'
+              }
+              hint="Първо трябва да имаш валиден bot token от @BotFather."
+            />
+            <TelegramStatusTile
+              label="Owner чат"
+              status={telegramStatus?.ownerChatLinked ? 'success' : telegramStatus?.ownerSetupPending ? 'warning' : 'idle'}
+              title={
+                telegramStatus?.ownerChatLinked
+                  ? `Свързан чат ${telegramStatus.linkedChatId}`
+                  : telegramStatus?.ownerSetupPending
+                    ? 'Чака Start в Telegram'
+                    : 'Още не е свързан'
+              }
+              hint="Собственикът трябва да отвори бота и да натисне Start."
+            />
+            <TelegramStatusTile
+              label="Webhook"
+              status={resolvedWebhookStatus?.connected ? 'success' : telegramStatus?.hasBotToken ? 'warning' : 'idle'}
+              title={
+                resolvedWebhookStatus?.connected
+                  ? 'Webhook-ът е активен'
+                  : telegramStatus?.hasBotToken
+                    ? 'Не е свързан'
+                    : 'Чака валиден token'
+              }
+              hint={resolvedWebhookStatus?.lastErrorMessage || 'Telegram update-ите ще идват тук след успешен connect.'}
+            />
+          </div>
+
           <div className="rounded-xl bg-blue-50 p-4 text-sm leading-relaxed text-blue-700">
-            1. Създавате бот през <strong>@BotFather</strong> с <code>/newbot</code>.<br />
-            2. Запазвате Bot Token-а тук.<br />
-            3. Натискате бутона за webhook отдолу. Той вика Telegram Bot API вместо команда в BotFather.<br />
-            4. Chat ID на собственика се взима най-лесно чрез <strong>@userinfobot</strong>, не чрез Вашия бот.
+            1. Създаваш бот през <strong>@BotFather</strong> с <code>/newbot</code>.<br />
+            2. Поставяш Bot Token-а тук и го записваш.<br />
+            3. Отваряш своя бот и натискаш <strong>Start</strong>, за да свържем owner чата.<br />
+            4. Накрая свързваш webhook-а, за да може Telegram да праща update-и към приложението.
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -719,6 +856,15 @@ function NotificationSettings() {
               <ExternalLink className="h-4 w-4" />
               Отвори @userinfobot
             </a>
+            <button
+              type="button"
+              onClick={() => void refreshTelegramStatus(getValues(), false)}
+              disabled={telegramStatusLoading || !publicBaseUrl}
+              className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50 disabled:opacity-50"
+            >
+              {telegramStatusLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4" />}
+              Провери Telegram статуса
+            </button>
             <button
               type="button"
               onClick={openTelegramBot}
@@ -760,6 +906,21 @@ function NotificationSettings() {
               </p>
             </div>
           </div>
+
+          {telegramStatus?.botProfile?.ok && botUsername && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
+              <p className="font-semibold">Ботът е разпознат успешно</p>
+              <p className="mt-1">
+                Профил: <strong>{botUsername}</strong>
+                {telegramStatus.botProfile.firstName ? ` (${telegramStatus.botProfile.firstName})` : ''}
+              </p>
+              {telegramStatus.ownerSetupPending && telegramStatus.ownerSetupExpiresAt && (
+                <p className="mt-1">
+                  Чака Start от собственика до {new Date(telegramStatus.ownerSetupExpiresAt).toLocaleTimeString('bg-BG', { hour: '2-digit', minute: '2-digit' })}.
+                </p>
+              )}
+            </div>
+          )}
 
           {telegramBotLink && (
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
@@ -830,29 +991,50 @@ function NotificationSettings() {
             </button>
           </div>
 
-          {webhookStatus && (
-            <div className={`rounded-xl p-4 text-sm ${webhookStatus.connected ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+          {resolvedWebhookStatus && (
+            <div className={`rounded-xl p-4 text-sm ${resolvedWebhookStatus.connected ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
               <p className="font-semibold">
-                {webhookStatus.connected ? 'Webhook-ът е активен.' : 'Няма активен webhook.'}
+                {resolvedWebhookStatus.connected ? 'Webhook-ът е активен.' : 'Няма активен webhook.'}
               </p>
-              {webhookStatus.webhookUrl && (
-                <p className="mt-1 break-all">URL: {webhookStatus.webhookUrl}</p>
+              {resolvedWebhookStatus.webhookUrl && (
+                <p className="mt-1 break-all">URL: {resolvedWebhookStatus.webhookUrl}</p>
               )}
-              {typeof webhookStatus.pendingUpdateCount === 'number' && (
-                <p className="mt-1">Чакащи update-и: {webhookStatus.pendingUpdateCount}</p>
+              {telegramStatus?.expectedWebhookUrl && !resolvedWebhookStatus.connected && (
+                <p className="mt-1 break-all">Очакван URL: {telegramStatus.expectedWebhookUrl}</p>
               )}
-              {webhookStatus.lastErrorMessage && (
-                <p className="mt-1">Последна грешка: {webhookStatus.lastErrorMessage}</p>
+              {typeof resolvedWebhookStatus.pendingUpdateCount === 'number' && (
+                <p className="mt-1">Чакащи update-и: {resolvedWebhookStatus.pendingUpdateCount}</p>
+              )}
+              {resolvedWebhookStatus.lastErrorMessage && (
+                <p className="mt-1">Последна грешка: {resolvedWebhookStatus.lastErrorMessage}</p>
               )}
             </div>
           )}
         </div>
       </Card>
 
-      <Card title="Тригери и резервен SMS">
+      <Card title="Канали и тригери">
         <div className="space-y-5">
           <div className="rounded-xl bg-gray-50 p-4 text-sm text-gray-600">
             Тук управляваш кога да се изпращат известията. Telegram е основният интерактивен канал. SMS остава резервен вариант за клиенти без Telegram.
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <InlineStat
+              label="Telegram"
+              value={telegramStatus?.botProfile?.ok ? 'Свързан бот' : 'Не е готов'}
+              tone={telegramStatus?.botProfile?.ok ? 'success' : 'neutral'}
+            />
+            <InlineStat
+              label="Активни напомняния"
+              value={activeReminderCount ? `${activeReminderCount} включени` : 'Няма'}
+              tone={activeReminderCount ? 'success' : 'neutral'}
+            />
+            <InlineStat
+              label="Резервен SMS"
+              value={hasSmsConfig ? 'Активен' : 'Изключен'}
+              tone={hasSmsConfig ? 'warning' : 'neutral'}
+            />
           </div>
 
           <div className="grid gap-3">
@@ -934,199 +1116,154 @@ function NotificationSettings() {
       <Card title="Шаблони за съобщения">
         <div className="space-y-4">
           <div className="rounded-xl bg-gray-50 p-4 text-sm text-gray-600">
-            Шаблоните са групирани по тип. Отвори само секцията, която редактираш. Напомнянията се показват само ако съответният trigger е включен.
+            Шаблоните са разделени на три групи. Работи само в групата, която ти трябва в момента. Напомнянията се появяват само ако съответният trigger е включен.
           </div>
 
-          <TemplateSectionTitle
-            title="Клиентски flow"
-            description="Основните съобщения към клиента при заявка, потвърждение и отмяна."
-          />
-
-          <TemplateAccordion
-            id="booking-pending"
-            label="Клиент: нова заявка"
-            hint="Използва се когато резервацията чака ръчно потвърждение."
-            openTemplateId={openTemplateId}
-            setOpenTemplateId={setOpenTemplateId}
-          >
-            <TemplateEditor
-              label="Клиент: нова заявка"
-              hint="Използва се когато резервацията чака ръчно потвърждение."
-              value={bookingPendingTemplate}
-              onChange={(value) => setValue('bookingPendingTemplate', value, { shouldDirty: true })}
-              preview={renderTemplatePreview(bookingPendingTemplate || DEFAULT_NOTIFICATION_TEMPLATES.bookingPending, {
-                Бизнес: tenant.businessName,
-                Име: 'Мария',
-                ПълноИме: 'Мария Иванова',
-                Телефон: '0888123456',
-                Услуга: 'Подстригване',
-                Специалист: 'Елена',
-                Дата: '12 април',
-                Час: '14:30',
-                Адрес: tenant.address || 'ул. Витоша 42',
-                Цена: '35 €',
-                Причина: 'По преценка на салона',
-              })}
+          <div className="grid grid-cols-1 gap-2 rounded-2xl border border-white/60 bg-gray-50/80 p-2 sm:grid-cols-3">
+            <TemplateGroupButton
+              active={activeTemplateGroup === 'customer'}
+              onClick={() => {
+                setActiveTemplateGroup('customer');
+                setOpenTemplateId('booking-pending');
+              }}
+              title="Клиентски flow"
+              subtitle="Заявка, потвърждение, отмяна"
             />
-          </TemplateAccordion>
-
-          <TemplateAccordion
-            id="booking-confirmed"
-            label="Клиент: потвърден час"
-            hint="Използва се когато резервацията е вече потвърдена."
-            openTemplateId={openTemplateId}
-            setOpenTemplateId={setOpenTemplateId}
-          >
-            <TemplateEditor
-              label="Клиент: потвърден час"
-              hint="Използва се когато резервацията е вече потвърдена."
-              value={bookingConfirmedTemplate}
-              onChange={(value) => setValue('bookingConfirmedTemplate', value, { shouldDirty: true })}
-              preview={renderTemplatePreview(bookingConfirmedTemplate || DEFAULT_NOTIFICATION_TEMPLATES.bookingConfirmed, {
-                Бизнес: tenant.businessName,
-                Име: 'Мария',
-                ПълноИме: 'Мария Иванова',
-                Телефон: '0888123456',
-                Услуга: 'Подстригване',
-                Специалист: 'Елена',
-                Дата: '12 април',
-                Час: '14:30',
-                Адрес: tenant.address || 'ул. Витоша 42',
-                Цена: '35 €',
-                Причина: 'По преценка на салона',
-              })}
-            />
-          </TemplateAccordion>
-
-          {(reminder24h || reminder2h) && (
-            <TemplateSectionTitle
+            <TemplateGroupButton
+              active={activeTemplateGroup === 'reminders'}
+              onClick={() => {
+                setActiveTemplateGroup('reminders');
+                setOpenTemplateId(reminder24h ? 'reminder-24h' : reminder2h ? 'reminder-2h' : null);
+              }}
               title="Напомняния"
-              description="Появяват се само за активните reminder-и и не зависят от това дали използваш SMS."
+              subtitle={activeReminderCount ? `${activeReminderCount} активни trigger-а` : 'Няма активни напомняния'}
             />
-          )}
+            <TemplateGroupButton
+              active={activeTemplateGroup === 'owner'}
+              onClick={() => {
+                setActiveTemplateGroup('owner');
+                setOpenTemplateId('owner-booking');
+              }}
+              title="Собственик"
+              subtitle="Нови резервации и owner известия"
+            />
+          </div>
 
-          {reminder24h && (
+          {activeTemplateGroup === 'customer' && (
             <>
               <TemplateAccordion
-                id="reminder-24h"
-                label="Клиент: напомняне 24 часа"
-                hint="Използва се само ако е включено напомняне 24 часа по-рано."
+                id="booking-pending"
+                label="Клиент: нова заявка"
+                hint="Използва се когато резервацията чака ръчно потвърждение."
                 openTemplateId={openTemplateId}
                 setOpenTemplateId={setOpenTemplateId}
               >
                 <TemplateEditor
-                  label="Клиент: напомняне 24 часа"
-                  hint="Използва се само ако е включено напомняне 24 часа по-рано."
-                  value={reminder24hTemplate}
-                  onChange={(value) => setValue('reminder24hTemplate', value, { shouldDirty: true })}
-                  preview={renderTemplatePreview(reminder24hTemplate || DEFAULT_NOTIFICATION_TEMPLATES.reminder24h, {
-                    Бизнес: tenant.businessName,
-                    Име: 'Мария',
-                    ПълноИме: 'Мария Иванова',
-                    Телефон: '0888123456',
-                    Услуга: 'Подстригване',
-                    Специалист: 'Елена',
-                    Дата: '12 април',
-                    Час: '14:30',
-                    Адрес: tenant.address || 'ул. Витоша 42',
-                    Цена: '35 €',
-                    Причина: 'По преценка на салона',
-                  })}
+                  label="Клиент: нова заявка"
+                  hint="Използва се когато резервацията чака ръчно потвърждение."
+                  value={bookingPendingTemplate}
+                  onChange={(value) => setValue('bookingPendingTemplate', value, { shouldDirty: true })}
+                  preview={renderTemplatePreview(bookingPendingTemplate || DEFAULT_NOTIFICATION_TEMPLATES.bookingPending, templatePreviewValues)}
+                />
+              </TemplateAccordion>
+
+              <TemplateAccordion
+                id="booking-confirmed"
+                label="Клиент: потвърден час"
+                hint="Използва се когато резервацията е вече потвърдена."
+                openTemplateId={openTemplateId}
+                setOpenTemplateId={setOpenTemplateId}
+              >
+                <TemplateEditor
+                  label="Клиент: потвърден час"
+                  hint="Използва се когато резервацията е вече потвърдена."
+                  value={bookingConfirmedTemplate}
+                  onChange={(value) => setValue('bookingConfirmedTemplate', value, { shouldDirty: true })}
+                  preview={renderTemplatePreview(bookingConfirmedTemplate || DEFAULT_NOTIFICATION_TEMPLATES.bookingConfirmed, templatePreviewValues)}
+                />
+              </TemplateAccordion>
+
+              <TemplateAccordion
+                id="cancellation"
+                label="Клиент: отменен час"
+                hint="Използва се при отказ или отмяна."
+                openTemplateId={openTemplateId}
+                setOpenTemplateId={setOpenTemplateId}
+              >
+                <TemplateEditor
+                  label="Клиент: отменен час"
+                  hint="Използва се при отказ или отмяна."
+                  value={cancellationTemplate}
+                  onChange={(value) => setValue('cancellationTemplate', value, { shouldDirty: true })}
+                  preview={renderTemplatePreview(cancellationTemplate || DEFAULT_NOTIFICATION_TEMPLATES.cancellation, templatePreviewValues)}
                 />
               </TemplateAccordion>
             </>
           )}
 
-          {reminder2h && (
+          {activeTemplateGroup === 'reminders' && (
+            <>
+              {!reminder24h && !reminder2h && (
+                <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-4 text-sm text-gray-500">
+                  Включи поне едно напомняне от горната секция, за да редактираш reminder шаблоните.
+                </div>
+              )}
+
+              {reminder24h && (
+                <TemplateAccordion
+                  id="reminder-24h"
+                  label="Клиент: напомняне 24 часа"
+                  hint="Използва се само ако е включено напомняне 24 часа по-рано."
+                  openTemplateId={openTemplateId}
+                  setOpenTemplateId={setOpenTemplateId}
+                >
+                  <TemplateEditor
+                    label="Клиент: напомняне 24 часа"
+                    hint="Използва се само ако е включено напомняне 24 часа по-рано."
+                    value={reminder24hTemplate}
+                    onChange={(value) => setValue('reminder24hTemplate', value, { shouldDirty: true })}
+                    preview={renderTemplatePreview(reminder24hTemplate || DEFAULT_NOTIFICATION_TEMPLATES.reminder24h, templatePreviewValues)}
+                  />
+                </TemplateAccordion>
+              )}
+
+              {reminder2h && (
+                <TemplateAccordion
+                  id="reminder-2h"
+                  label="Клиент: напомняне 2 часа"
+                  hint="Използва се само ако е включено напомняне 2 часа по-рано."
+                  openTemplateId={openTemplateId}
+                  setOpenTemplateId={setOpenTemplateId}
+                >
+                  <TemplateEditor
+                    label="Клиент: напомняне 2 часа"
+                    hint="Използва се само ако е включено напомняне 2 часа по-рано."
+                    value={reminder2hTemplate}
+                    onChange={(value) => setValue('reminder2hTemplate', value, { shouldDirty: true })}
+                    preview={renderTemplatePreview(reminder2hTemplate || DEFAULT_NOTIFICATION_TEMPLATES.reminder2h, templatePreviewValues)}
+                  />
+                </TemplateAccordion>
+              )}
+            </>
+          )}
+
+          {activeTemplateGroup === 'owner' && (
             <TemplateAccordion
-              id="reminder-2h"
-              label="Клиент: напомняне 2 часа"
-              hint="Използва се само ако е включено напомняне 2 часа по-рано."
+              id="owner-booking"
+              label="Собственик: нова резервация"
+              hint="Известие, което получава собственикът при нов запис."
               openTemplateId={openTemplateId}
               setOpenTemplateId={setOpenTemplateId}
             >
               <TemplateEditor
-                label="Клиент: напомняне 2 часа"
-                hint="Използва се само ако е включено напомняне 2 часа по-рано."
-                value={reminder2hTemplate}
-                onChange={(value) => setValue('reminder2hTemplate', value, { shouldDirty: true })}
-                preview={renderTemplatePreview(reminder2hTemplate || DEFAULT_NOTIFICATION_TEMPLATES.reminder2h, {
-                  Бизнес: tenant.businessName,
-                  Име: 'Мария',
-                  ПълноИме: 'Мария Иванова',
-                  Телефон: '0888123456',
-                  Услуга: 'Подстригване',
-                  Специалист: 'Елена',
-                  Дата: '12 април',
-                  Час: '14:30',
-                  Адрес: tenant.address || 'ул. Витоша 42',
-                  Цена: '35 €',
-                  Причина: 'По преценка на салона',
-                })}
+                label="Собственик: нова резервация"
+                hint="Известие, което получава собственикът при нов запис."
+                value={ownerNewBookingTemplate}
+                onChange={(value) => setValue('ownerNewBookingTemplate', value, { shouldDirty: true })}
+                preview={renderTemplatePreview(ownerNewBookingTemplate || DEFAULT_NOTIFICATION_TEMPLATES.ownerNewBooking, templatePreviewValues)}
               />
             </TemplateAccordion>
           )}
-
-          <TemplateAccordion
-            id="cancellation"
-            label="Клиент: отменен час"
-            hint="Използва се при отказ или отмяна."
-            openTemplateId={openTemplateId}
-            setOpenTemplateId={setOpenTemplateId}
-          >
-            <TemplateEditor
-              label="Клиент: отменен час"
-              hint="Използва се при отказ или отмяна."
-              value={cancellationTemplate}
-              onChange={(value) => setValue('cancellationTemplate', value, { shouldDirty: true })}
-              preview={renderTemplatePreview(cancellationTemplate || DEFAULT_NOTIFICATION_TEMPLATES.cancellation, {
-                Бизнес: tenant.businessName,
-                Име: 'Мария',
-                ПълноИме: 'Мария Иванова',
-                Телефон: '0888123456',
-                Услуга: 'Подстригване',
-                Специалист: 'Елена',
-                Дата: '12 април',
-                Час: '14:30',
-                Адрес: tenant.address || 'ул. Витоша 42',
-                Цена: '35 €',
-                Причина: 'Салонът няма свободен слот',
-              })}
-            />
-          </TemplateAccordion>
-
-          <TemplateSectionTitle
-            title="Собственик"
-            description="Известията, които получаваш ти при нови резервации."
-          />
-
-          <TemplateAccordion
-            id="owner-booking"
-            label="Собственик: нова резервация"
-            hint="Известие, което получава собственикът при нов запис."
-            openTemplateId={openTemplateId}
-            setOpenTemplateId={setOpenTemplateId}
-          >
-            <TemplateEditor
-              label="Собственик: нова резервация"
-              hint="Известие, което получава собственикът при нов запис."
-              value={ownerNewBookingTemplate}
-              onChange={(value) => setValue('ownerNewBookingTemplate', value, { shouldDirty: true })}
-              preview={renderTemplatePreview(ownerNewBookingTemplate || DEFAULT_NOTIFICATION_TEMPLATES.ownerNewBooking, {
-                Бизнес: tenant.businessName,
-                Име: 'Мария',
-                ПълноИме: 'Мария Иванова',
-                Телефон: '0888123456',
-                Услуга: 'Подстригване',
-                Специалист: 'Елена',
-                Дата: '12 април',
-                Час: '14:30',
-                Адрес: tenant.address || 'ул. Витоша 42',
-                Цена: '35 €',
-                Причина: '',
-              })}
-            />
-          </TemplateAccordion>
         </div>
       </Card>
 
@@ -1172,18 +1309,83 @@ function TemplateAccordion({
   );
 }
 
-function TemplateSectionTitle({
+function TelegramStatusTile({
+  label,
   title,
-  description,
+  hint,
+  status,
 }: {
+  label: string;
   title: string;
-  description: string;
+  hint: string;
+  status: 'success' | 'warning' | 'error' | 'idle';
+}) {
+  const toneClass =
+    status === 'success'
+      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+      : status === 'warning'
+        ? 'border-amber-200 bg-amber-50 text-amber-700'
+        : status === 'error'
+          ? 'border-red-200 bg-red-50 text-red-700'
+          : 'border-gray-200 bg-gray-50 text-gray-600';
+
+  return (
+    <div className={`rounded-2xl border p-4 ${toneClass}`}>
+      <p className="text-xs font-semibold uppercase tracking-[0.14em]">{label}</p>
+      <p className="mt-2 text-sm font-semibold">{title}</p>
+      <p className="mt-1 text-xs leading-relaxed opacity-90">{hint}</p>
+    </div>
+  );
+}
+
+function InlineStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: 'success' | 'warning' | 'neutral';
+}) {
+  const toneClass =
+    tone === 'success'
+      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+      : tone === 'warning'
+        ? 'border-amber-200 bg-amber-50 text-amber-700'
+        : 'border-gray-200 bg-gray-50 text-gray-600';
+
+  return (
+    <div className={`rounded-2xl border px-4 py-3 ${toneClass}`}>
+      <p className="text-xs font-semibold uppercase tracking-[0.14em]">{label}</p>
+      <p className="mt-1 text-sm font-semibold">{value}</p>
+    </div>
+  );
+}
+
+function TemplateGroupButton({
+  active,
+  onClick,
+  title,
+  subtitle,
+}: {
+  active: boolean;
+  onClick: () => void;
+  title: string;
+  subtitle: string;
 }) {
   return (
-    <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-3">
-      <p className="text-sm font-semibold text-gray-900">{title}</p>
-      <p className="mt-1 text-xs leading-relaxed text-gray-500">{description}</p>
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-2xl px-4 py-3 text-left transition-all ${
+        active
+          ? 'bg-white text-gray-900 shadow-[0_10px_24px_rgba(15,23,42,0.08)]'
+          : 'bg-transparent text-gray-500 hover:bg-white/70 hover:text-gray-800'
+      }`}
+    >
+      <p className="text-sm font-semibold">{title}</p>
+      <p className="mt-1 text-xs leading-relaxed opacity-80">{subtitle}</p>
+    </button>
   );
 }
 

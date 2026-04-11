@@ -16,6 +16,7 @@ import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { AppointmentStatus, NotificationJobType } from '../../common/types/enums';
 import { buildBulgarianPhoneVariants, normalizeBulgarianPhone } from '../../common/utils/phone';
 import type { Tenant } from '@prisma/client';
+import { NotificationProcessor } from '../notifications/notification.processor';
 
 const TIMEZONE = 'Europe/Sofia';
 
@@ -50,6 +51,7 @@ export class AppointmentsService {
   constructor(
     private readonly prisma: TenantPrismaService,
     @InjectQueue('notifications') private readonly notificationQueue: Queue,
+    private readonly notificationProcessor: NotificationProcessor,
   ) {}
 
   async createByAdmin(tenant: Tenant, dto: CreateAppointmentDto) {
@@ -495,7 +497,7 @@ export class AppointmentsService {
 
     // 8. Постави в notification queue
     if (status === AppointmentStatus.PROPOSAL_PENDING) {
-      await this.safeAddNotificationJob(
+      await this.processNotificationNow(
         NotificationJobType.BOOKING_PROPOSAL,
         {
           tenantId: tenant.id,
@@ -603,7 +605,7 @@ export class AppointmentsService {
       ],
     );
 
-    await this.safeAddNotificationJob(
+    await this.processNotificationNow(
       NotificationJobType.BOOKING_PROPOSAL,
       {
         tenantId: tenant.id,
@@ -886,7 +888,7 @@ export class AppointmentsService {
     );
 
     // Изпрати известие за промяната
-    await this.safeAddNotificationJob(
+    await this.processNotificationNow(
       'status-changed',
       {
         tenantId: tenant.id,
@@ -963,7 +965,7 @@ export class AppointmentsService {
     };
 
     // Незабавно потвърждение
-    await this.safeAddNotificationJob(
+    await this.processNotificationNow(
       NotificationJobType.BOOKING_CONFIRMED,
       { ...baseData, status },
       {
@@ -1051,6 +1053,25 @@ export class AppointmentsService {
           delay: reminder2h,
           jobId: `reminder-2h-${appointmentId}`,
         },
+      );
+    }
+  }
+
+  private async processNotificationNow(
+    name: string,
+    data: unknown,
+    meta: { tenantSlug: string; appointmentId: string; context: string; delay?: number; jobId?: string },
+  ) {
+    try {
+      await this.notificationProcessor.process({
+        id: `inline-${name}-${Date.now()}`,
+        name,
+        data,
+      } as any);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `Immediate notification failed (${meta.context}) for appointment ${meta.appointmentId} in tenant ${meta.tenantSlug}: ${message}`,
       );
     }
   }

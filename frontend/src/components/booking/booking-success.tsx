@@ -49,12 +49,18 @@ export function BookingSuccess({ appointment, formData, onNewBooking }: BookingS
         if (!response.ok) {
           return null;
         }
-        return response.json() as Promise<{ botLink?: string; linkedChatId?: string | null }>;
+        return response.json() as Promise<{
+          success?: boolean;
+          data?: { botLink?: string; linkedChatId?: string | null };
+          botLink?: string;
+          linkedChatId?: string | null;
+        }>;
       })
       .then((data) => {
         if (!mounted) return;
-        setTelegramBotLink(data?.botLink || null);
-        setTelegramLinked(Boolean(data?.linkedChatId));
+        const payload = data?.data ?? data;
+        setTelegramBotLink(payload?.botLink || null);
+        setTelegramLinked(Boolean(payload?.linkedChatId));
       })
       .catch(() => {
         if (!mounted) return;

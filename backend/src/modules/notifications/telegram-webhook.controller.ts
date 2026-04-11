@@ -314,6 +314,8 @@ export class TelegramWebhookController {
     const chatId = message.chat.id.toString();
     const rawText = message.text?.trim() || '';
     const text = rawText.toLowerCase();
+    const possiblePhone = normalizeBulgarianPhone(rawText);
+    const possiblePhoneVariants = buildBulgarianPhoneVariants(possiblePhone);
 
     // /start command — регистрира chat_id на клиент
     if (text === '/start' || text?.startsWith('/start ')) {
@@ -329,6 +331,7 @@ export class TelegramWebhookController {
         chatId,
         `👋 *Здравейте!*\n\nТова е официалният бот на *${tenant.business_name}*.\n\n` +
         `Ще получавате потвърждения и напомняния за вашите часове тук.\n\n` +
+        `За автоматично свързване използвайте бутона след резервация, или изпратете телефона си в този чат.\n\n` +
         `За записване на час: https://${tenant.slug}.saloniq.bg`,
       );
 
@@ -347,6 +350,34 @@ export class TelegramWebhookController {
           `UPDATE clients SET telegram_chat_id = $1 WHERE phone = ANY($2::text[])`,
           [chatId, phoneVariants],
         );
+
+        await this.telegramService.sendMessage(
+          tenant.telegram_bot_token,
+          chatId,
+          `✅ Чатът е свързан успешно с Вашия телефон и ще получавате известия от *${tenant.business_name}*.`,
+        );
+      }
+
+      return;
+    }
+
+    if (possiblePhoneVariants.length) {
+      const updateResult = await this.prisma.queryInSchema<{ id: string }[]>(
+        tenant.schema_name,
+        `UPDATE clients
+         SET telegram_chat_id = $1
+         WHERE phone = ANY($2::text[])
+         RETURNING id`,
+        [chatId, possiblePhoneVariants],
+      );
+
+      if (updateResult.length > 0) {
+        await this.telegramService.sendMessage(
+          tenant.telegram_bot_token,
+          chatId,
+          `✅ Чатът е свързан успешно с Вашия телефон и ще получавате известия от *${tenant.business_name}*.`,
+        );
+        return;
       }
     }
   }

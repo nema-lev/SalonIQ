@@ -386,10 +386,10 @@ export class NotificationProcessor extends WorkerHost {
     // 5. Логвай резултата
     await this.prisma.queryInSchema(
       tenantSchemaName,
-      `INSERT INTO notifications_log (
+       `INSERT INTO notifications_log (
         appointment_id, client_id, channel, type, status,
         external_id, error_message, sent_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+      ) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, NOW())`,
       [
         appointmentId,
         clientId,

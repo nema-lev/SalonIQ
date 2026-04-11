@@ -23,6 +23,7 @@ type AppointmentBookedBy = 'client' | 'owner' | 'staff';
 type ProposalKind = 'admin_inquiry' | 'counter_offer';
 type ProposalDecision = 'accept' | 'reject';
 type UpcomingMode = 'all' | 'attention' | 'pending';
+type SlotResult = { start: string; end: string; remainingSpots?: number; capacity?: number };
 
 interface ProposalMetadata {
   kind: ProposalKind;
@@ -136,14 +137,25 @@ export class AppointmentsService {
     serviceId: string,
     staffId: string,
     date: Date,
-  ): Promise<{ start: string; end: string }[]> {
+  ): Promise<SlotResult[]> {
+    await this.prisma.ensureServiceGroupColumns(tenant.schemaName);
+
     const minAdvanceBookingHours = Number((tenant as any).minAdvanceBookingHours ?? 1);
     const maxAdvanceBookingDays = Number((tenant as any).maxAdvanceBookingDays ?? 60);
 
     // 1. Вземи услугата
-    const services = await this.prisma.queryInSchema<{ duration_minutes: number; buffer_before_min: number; buffer_after_min: number }[]>(
+    const services = await this.prisma.queryInSchema<{
+      duration_minutes: number;
+      buffer_before_min: number;
+      buffer_after_min: number;
+      booking_mode: string;
+      slot_capacity: number;
+      group_days: string[] | null;
+      group_time_slots: string[] | null;
+    }[]>(
       tenant.schemaName,
-      `SELECT duration_minutes, buffer_before_min, buffer_after_min FROM services WHERE id = $1::uuid`,
+      `SELECT duration_minutes, buffer_before_min, buffer_after_min, booking_mode, slot_capacity, group_days, group_time_slots
+       FROM services WHERE id = $1::uuid`,
       [serviceId],
     );
 
@@ -169,10 +181,10 @@ export class AppointmentsService {
     const dayStart = fromZonedTime(startOfDay(zonedDate), TIMEZONE);
     const dayEnd = fromZonedTime(endOfDay(zonedDate), TIMEZONE);
 
-    const bookedSlots = await this.prisma.queryInSchema<{ start_at: Date; end_at: Date }[]>(
+    const bookedSlots = await this.prisma.queryInSchema<{ start_at: Date; end_at: Date; service_id: string }[]>(
       tenant.schemaName,
       `
-      SELECT start_at, end_at FROM appointments
+      SELECT start_at, end_at, service_id FROM appointments
       WHERE staff_id = $1::uuid
         AND start_at >= $2
         AND end_at <= $3
@@ -210,7 +222,71 @@ export class AppointmentsService {
     const minAdvanceTime = addHours(new Date(), minAdvanceBookingHours);
     const maxAdvanceTime = addHours(new Date(), maxAdvanceBookingDays * 24);
 
-    const slots: { start: string; end: string }[] = [];
+    const slots: SlotResult[] = [];
+
+    if (service.booking_mode === 'group') {
+      const allowedDays = service.group_days || [];
+      const allowedTimes = [...new Set((service.group_time_slots || []).filter(Boolean))].sort();
+      const capacity = Math.max(Number(service.slot_capacity || 1), 1);
+
+      if (!allowedDays.includes(dayOfWeek) || !allowedTimes.length) {
+        return [];
+      }
+
+      for (const time of allowedTimes) {
+        const [hour, minute] = time.split(':').map(Number);
+        const slotStart = fromZonedTime(
+          new Date(toZonedTime(date, TIMEZONE).setHours(hour, minute, 0, 0)),
+          TIMEZONE,
+        );
+        const slotEnd = addMinutes(slotStart, totalDuration);
+
+        const isInFuture = isAfter(slotStart, minAdvanceTime);
+        const isNotTooFar = isBefore(slotStart, maxAdvanceTime);
+        const fitsWorkingDay =
+          (isAfter(slotStart, workStart) || slotStart.getTime() === workStart.getTime()) &&
+          (isBefore(slotEnd, workEnd) || slotEnd.getTime() === workEnd.getTime());
+
+        if (!isInFuture || !isNotTooFar || !fitsWorkingDay) {
+          continue;
+        }
+
+        const isException = exceptions.some(
+          (e) => isBefore(slotStart, new Date(e.end_at)) && isAfter(slotEnd, new Date(e.start_at)),
+        );
+
+        const sameSessionBookings = bookedSlots.filter(
+          (booking) =>
+            booking.service_id === serviceId &&
+            new Date(booking.start_at).getTime() === slotStart.getTime() &&
+            new Date(booking.end_at).getTime() === slotEnd.getTime(),
+        );
+
+        const hasOtherConflict = bookedSlots.some((booking) => {
+          const bookingStart = new Date(booking.start_at);
+          const bookingEnd = new Date(booking.end_at);
+          const overlaps = isBefore(slotStart, bookingEnd) && isAfter(slotEnd, bookingStart);
+          const sameSession =
+            booking.service_id === serviceId &&
+            bookingStart.getTime() === slotStart.getTime() &&
+            bookingEnd.getTime() === slotEnd.getTime();
+          return overlaps && !sameSession;
+        });
+
+        const remainingSpots = capacity - sameSessionBookings.length;
+        if (!isException && !hasOtherConflict && remainingSpots > 0) {
+          slots.push({
+            start: format(toZonedTime(slotStart, TIMEZONE), 'HH:mm'),
+            end: format(toZonedTime(slotEnd, TIMEZONE), 'HH:mm'),
+            remainingSpots,
+            capacity,
+          });
+        }
+      }
+
+      return slots;
+    }
+
     let cursor = workStart;
 
     while (isBefore(addMinutes(cursor, totalDuration), workEnd) || 
@@ -263,7 +339,21 @@ export class AppointmentsService {
     const requiresConfirmation = Boolean((tenant as any).requiresConfirmation ?? false);
 
     // 1. Валидация на услугата
-    const services = await this.prisma.queryInSchema<{ id: string; duration_minutes: number; price: number; name: string; requires_confirmation: boolean; buffer_before_min: number; buffer_after_min: number }[]>(
+    await this.prisma.ensureServiceGroupColumns(tenant.schemaName);
+
+    const services = await this.prisma.queryInSchema<{
+      id: string;
+      duration_minutes: number;
+      price: number;
+      name: string;
+      requires_confirmation: boolean;
+      buffer_before_min: number;
+      buffer_after_min: number;
+      booking_mode: string;
+      slot_capacity: number;
+      group_days: string[] | null;
+      group_time_slots: string[] | null;
+    }[]>(
       tenant.schemaName,
       `SELECT * FROM services WHERE id = $1::uuid AND is_public = true`,
       [dto.serviceId],
@@ -279,19 +369,67 @@ export class AppointmentsService {
     const clientId = await this.findOrCreateClient(tenant.schemaName, dto);
 
     // 4. Провери конфликти (atomic check)
-    const conflicts = await this.prisma.queryInSchema<unknown[]>(
-      tenant.schemaName,
-      `
-      SELECT id FROM appointments
-      WHERE staff_id = $1::uuid
-        AND status NOT IN ('cancelled', 'no_show')
-        AND (start_at, end_at) OVERLAPS ($2::timestamptz, $3::timestamptz)
-      `,
-      [dto.staffId, startAt.toISOString(), endAt.toISOString()],
-    );
+    if (service.booking_mode === 'group') {
+      const dayOfWeek = format(toZonedTime(startAt, TIMEZONE), 'EEE').toLowerCase();
+      const allowedDays = service.group_days || [];
+      const allowedTimes = service.group_time_slots || [];
+      const startTime = format(toZonedTime(startAt, TIMEZONE), 'HH:mm');
 
-    if (conflicts.length > 0) {
-      throw new ConflictException('Избраният час вече е зает. Моля, изберете друг.');
+      if (!allowedDays.includes(dayOfWeek) || !allowedTimes.includes(startTime)) {
+        throw new BadRequestException('Тази тренировка може да се резервира само в предварително зададените дни и часове.');
+      }
+
+      const overlaps = await this.prisma.queryInSchema<{ service_id: string; start_at: Date; end_at: Date }[]>(
+        tenant.schemaName,
+        `
+        SELECT service_id, start_at, end_at FROM appointments
+        WHERE staff_id = $1::uuid
+          AND status NOT IN ('cancelled', 'no_show')
+          AND (start_at, end_at) OVERLAPS ($2::timestamptz, $3::timestamptz)
+        `,
+        [dto.staffId, startAt.toISOString(), endAt.toISOString()],
+      );
+
+      const sameSessionBookings = overlaps.filter(
+        (booking) =>
+          booking.service_id === dto.serviceId &&
+          new Date(booking.start_at).getTime() === startAt.getTime() &&
+          new Date(booking.end_at).getTime() === endAt.getTime(),
+      );
+
+      const hasOtherConflict = overlaps.some((booking) => {
+        const bookingStart = new Date(booking.start_at);
+        const bookingEnd = new Date(booking.end_at);
+        const sameSession =
+          booking.service_id === dto.serviceId &&
+          bookingStart.getTime() === startAt.getTime() &&
+          bookingEnd.getTime() === endAt.getTime();
+        return !sameSession;
+      });
+
+      if (hasOtherConflict) {
+        throw new ConflictException('Треньорът е зает в този интервал. Избери друг слот.');
+      }
+
+      const capacity = Math.max(Number(service.slot_capacity || 1), 1);
+      if (sameSessionBookings.length >= capacity) {
+        throw new ConflictException('Няма свободни места за тази тренировка.');
+      }
+    } else {
+      const conflicts = await this.prisma.queryInSchema<unknown[]>(
+        tenant.schemaName,
+        `
+        SELECT id FROM appointments
+        WHERE staff_id = $1::uuid
+          AND status NOT IN ('cancelled', 'no_show')
+          AND (start_at, end_at) OVERLAPS ($2::timestamptz, $3::timestamptz)
+        `,
+        [dto.staffId, startAt.toISOString(), endAt.toISOString()],
+      );
+
+      if (conflicts.length > 0) {
+        throw new ConflictException('Избраният час вече е зает. Моля, изберете друг.');
+      }
     }
 
     // 5. Провери напред/назад лимити

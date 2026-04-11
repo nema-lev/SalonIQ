@@ -33,6 +33,7 @@ export class TenantPrismaService extends PrismaClient implements OnModuleInit, O
 
   async onModuleInit() {
     await this.$connect();
+    await this.ensurePlatformCompatibility();
     this.logger.log('Prisma connected to PostgreSQL');
   }
 
@@ -94,9 +95,35 @@ export class TenantPrismaService extends PrismaClient implements OnModuleInit, O
 
     // Изпълняваме SQL функцията от migration файла
     await this.$executeRawUnsafe(`SELECT create_tenant_schema('${schemaName}')`);
+    await this.ensureServiceGroupColumns(schemaName);
 
     this.schemaCache.set(schemaName, true);
     this.logger.log(`Tenant schema ${schemaName} created successfully`);
+  }
+
+  async ensurePlatformCompatibility(): Promise<void> {
+    await this.$executeRawUnsafe(
+      `ALTER TYPE public.business_type ADD VALUE IF NOT EXISTS 'GROUP_TRAINING'`,
+    );
+  }
+
+  async ensureServiceGroupColumns(schemaName: string): Promise<void> {
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(schemaName)) {
+      throw new Error(`Invalid schema name: ${schemaName}`);
+    }
+
+    await this.$executeRawUnsafe(
+      `ALTER TABLE "${schemaName}".services ADD COLUMN IF NOT EXISTS booking_mode VARCHAR(20) NOT NULL DEFAULT 'standard'`,
+    );
+    await this.$executeRawUnsafe(
+      `ALTER TABLE "${schemaName}".services ADD COLUMN IF NOT EXISTS slot_capacity INTEGER NOT NULL DEFAULT 1`,
+    );
+    await this.$executeRawUnsafe(
+      `ALTER TABLE "${schemaName}".services ADD COLUMN IF NOT EXISTS group_days TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]`,
+    );
+    await this.$executeRawUnsafe(
+      `ALTER TABLE "${schemaName}".services ADD COLUMN IF NOT EXISTS group_time_slots TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]`,
+    );
   }
 
   /**

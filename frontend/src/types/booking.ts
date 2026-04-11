@@ -41,4 +41,8 @@ export interface Service {
   price: number | null;
   color: string;
   staff_ids: string[];
+  booking_mode?: 'standard' | 'group';
+  slot_capacity?: number;
+  group_days?: string[];
+  group_time_slots?: string[];
 }

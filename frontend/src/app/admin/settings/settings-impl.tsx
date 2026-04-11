@@ -40,6 +40,7 @@ const BUSINESS_TYPE_OPTIONS = [
   { value: 'DENTAL', label: 'Дентален кабинет' },
   { value: 'MASSAGE', label: 'Масажно студио' },
   { value: 'BEAUTY', label: 'Студио за красота' },
+  { value: 'GROUP_TRAINING', label: 'Групови тренировки' },
   { value: 'OTHER', label: 'Друг бизнес' },
 ] as const;
 

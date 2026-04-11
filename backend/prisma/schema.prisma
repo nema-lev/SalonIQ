@@ -101,6 +101,7 @@ enum BusinessType {
   DENTAL      // Зъболекар
   MASSAGE     // Масаж
   BEAUTY      // Общо красота
+  GROUP_TRAINING // Групови тренировки
   OTHER
 
   @@schema("public")

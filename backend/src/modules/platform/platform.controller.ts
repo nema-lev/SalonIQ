@@ -28,7 +28,7 @@ class PlatformLoginDto {
 
 class UpdatePlatformTenantDto {
   @IsOptional()
-  @IsIn(['SALON', 'BARBERSHOP', 'HAIR_SALON', 'NAIL_STUDIO', 'SPA', 'DENTAL', 'MASSAGE', 'BEAUTY', 'OTHER'])
+  @IsIn(['SALON', 'BARBERSHOP', 'HAIR_SALON', 'NAIL_STUDIO', 'SPA', 'DENTAL', 'MASSAGE', 'BEAUTY', 'GROUP_TRAINING', 'OTHER'])
   businessType?: string;
 
   @IsOptional()

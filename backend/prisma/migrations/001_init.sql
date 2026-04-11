@@ -17,6 +17,7 @@ BEGIN
       'DENTAL',
       'MASSAGE',
       'BEAUTY',
+      'GROUP_TRAINING',
       'OTHER'
     );
   END IF;
@@ -130,6 +131,10 @@ BEGIN
       is_public             BOOLEAN NOT NULL DEFAULT true,
       requires_confirmation BOOLEAN NOT NULL DEFAULT false,
       max_daily_bookings    INTEGER,
+      booking_mode          VARCHAR(20) NOT NULL DEFAULT ''standard'',
+      slot_capacity         INTEGER NOT NULL DEFAULT 1,
+      group_days            TEXT[] NOT NULL DEFAULT ''{}'',
+      group_time_slots      TEXT[] NOT NULL DEFAULT ''{}'',
       -- Сортиране
       display_order         INTEGER DEFAULT 0,
       created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),

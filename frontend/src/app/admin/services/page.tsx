@@ -6,8 +6,9 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { toast } from 'sonner';
-import { Plus, Pencil, Loader2, Clock, Tag } from 'lucide-react';
+import { Plus, Pencil, Loader2, Clock, Tag, Users } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
+import { useTenant } from '@/lib/tenant-context';
 
 interface Service {
   id: string;
@@ -18,7 +19,22 @@ interface Service {
   price: number | null;
   color: string;
   is_public: boolean;
+  booking_mode?: 'standard' | 'group';
+  slot_capacity?: number;
+  group_days?: string[];
+  group_time_slots?: string[];
 }
+
+const GROUP_DAY_OPTIONS = [
+  { value: 'mon', label: 'Пон' },
+  { value: 'tue', label: 'Вт' },
+  { value: 'wed', label: 'Ср' },
+  { value: 'thu', label: 'Чет' },
+  { value: 'fri', label: 'Пет' },
+  { value: 'sat', label: 'Съб' },
+  { value: 'sun', label: 'Нед' },
+] as const;
+const GROUP_DAY_LABELS = Object.fromEntries(GROUP_DAY_OPTIONS.map((item) => [item.value, item.label])) as Record<(typeof GROUP_DAY_OPTIONS)[number]['value'], string>;
 
 const schema = z.object({
   name: z.string().min(2, 'Минимум 2 символа'),
@@ -32,6 +48,10 @@ const schema = z.object({
   color: z.string().regex(/^#[0-9a-f]{6}$/i),
   is_public: z.boolean(),
   showPrice: z.boolean().default(true),
+  booking_mode: z.enum(['standard', 'group']).default('standard'),
+  slot_capacity: z.coerce.number().min(1).max(100).default(1),
+  group_days: z.array(z.string()).default([]),
+  group_time_slots_text: z.string().optional(),
 });
 type FormValues = z.infer<typeof schema>;
 
@@ -39,6 +59,8 @@ const COLORS = ['#7c3aed','#8b5cf6','#a855f7','#ec4899','#ef4444','#f59e0b','#10
 
 export default function AdminServicesPage() {
   const qc = useQueryClient();
+  const tenant = useTenant();
+  const isGroupTrainingBusiness = tenant.businessType === 'GROUP_TRAINING';
   const [editing, setEditing] = useState<Service | null>(null);
   const [showForm, setShowForm] = useState(false);
 
@@ -49,16 +71,33 @@ export default function AdminServicesPage() {
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { color: '#7c3aed', is_public: true, duration_minutes: 60 },
+    defaultValues: {
+      color: '#7c3aed',
+      is_public: true,
+      duration_minutes: 60,
+      booking_mode: isGroupTrainingBusiness ? 'group' : 'standard',
+      slot_capacity: 1,
+      group_days: [],
+      group_time_slots_text: '',
+    },
   });
 
   const mutation = useMutation({
     mutationFn: (data: FormValues) => {
+      const parsedGroupTimeSlots = (data.group_time_slots_text || '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
       const payload = {
         ...data,
         price: data.showPrice ? data.price ?? null : null,
+        booking_mode: isGroupTrainingBusiness ? 'group' : 'standard',
+        slot_capacity: isGroupTrainingBusiness ? data.slot_capacity : 1,
+        group_days: isGroupTrainingBusiness ? data.group_days : [],
+        group_time_slots: isGroupTrainingBusiness ? parsedGroupTimeSlots : [],
       };
       delete (payload as Partial<FormValues>).showPrice;
+      delete (payload as Partial<FormValues>).group_time_slots_text;
 
       return (
       editing
@@ -87,19 +126,37 @@ export default function AdminServicesPage() {
       color: svc.color,
       is_public: svc.is_public,
       showPrice: svc.price != null,
+      booking_mode: svc.booking_mode || (isGroupTrainingBusiness ? 'group' : 'standard'),
+      slot_capacity: svc.slot_capacity ?? 1,
+      group_days: svc.group_days ?? [],
+      group_time_slots_text: (svc.group_time_slots ?? []).join(', '),
     });
     setShowForm(true);
   };
 
   const selectedColor = watch('color');
   const showPrice = watch('showPrice');
+  const selectedGroupDays = watch('group_days') || [];
 
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
         <p className="text-sm text-gray-500">{services?.length ?? 0} услуги</p>
         <button
-          onClick={() => { setEditing(null); reset({ color: '#7c3aed', is_public: true, duration_minutes: 60, showPrice: true }); setShowForm(true); }}
+          onClick={() => {
+            setEditing(null);
+            reset({
+              color: '#7c3aed',
+              is_public: true,
+              duration_minutes: 60,
+              showPrice: true,
+              booking_mode: isGroupTrainingBusiness ? 'group' : 'standard',
+              slot_capacity: 1,
+              group_days: [],
+              group_time_slots_text: '',
+            });
+            setShowForm(true);
+          }}
           className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white bg-[var(--color-primary)] hover:opacity-90 transition-all"
         >
           <Plus className="w-4 h-4" />Нова услуга
@@ -121,10 +178,18 @@ export default function AdminServicesPage() {
                 <div className="flex items-center gap-4 text-sm text-gray-400 mt-0.5">
                   {svc.category && <span className="flex items-center gap-1"><Tag className="w-3 h-3" />{svc.category}</span>}
                   <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{svc.duration_minutes} мин.</span>
+                  {svc.booking_mode === 'group' && (
+                    <span className="flex items-center gap-1"><Users className="w-3 h-3" />до {svc.slot_capacity ?? 1} души</span>
+                  )}
                   <span className="font-semibold text-gray-600">
                     {svc.price != null ? `${svc.price} €` : 'Цена по запитване'}
                   </span>
                 </div>
+                {svc.booking_mode === 'group' && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    {(svc.group_days ?? []).map((day) => GROUP_DAY_LABELS[day as keyof typeof GROUP_DAY_LABELS] || day).join(', ') || 'Без дни'} · {(svc.group_time_slots ?? []).join(', ') || 'Без часове'}
+                  </p>
+                )}
               </div>
               <button onClick={() => openEdit(svc)} className="p-2 rounded-lg hover:bg-gray-50 transition-colors">
                 <Pencil className="w-4 h-4 text-gray-400" />
@@ -185,6 +250,56 @@ export default function AdminServicesPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Описание</label>
                 <textarea {...register('description')} rows={2} className="w-full px-3 py-2.5 rounded-xl border-2 border-gray-200 focus:border-[var(--color-primary)] outline-none text-sm resize-none" />
               </div>
+              {isGroupTrainingBusiness && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Капацитет *</label>
+                      <input {...register('slot_capacity')} type="number" min={1} max={100} className="w-full px-3 py-2.5 rounded-xl border-2 border-gray-200 focus:border-[var(--color-primary)] outline-none text-sm" />
+                      {errors.slot_capacity && <p className="text-red-500 text-xs mt-1">{errors.slot_capacity.message}</p>}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Часове за класа</label>
+                      <input
+                        {...register('group_time_slots_text')}
+                        placeholder="09:00, 18:30"
+                        className="w-full px-3 py-2.5 rounded-xl border-2 border-gray-200 focus:border-[var(--color-primary)] outline-none text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Дни за провеждане</label>
+                    <div className="flex flex-wrap gap-2">
+                      {GROUP_DAY_OPTIONS.map((day) => {
+                        const active = selectedGroupDays.includes(day.value);
+                        return (
+                          <button
+                            key={day.value}
+                            type="button"
+                            onClick={() => setValue(
+                              'group_days',
+                              active
+                                ? selectedGroupDays.filter((value) => value !== day.value)
+                                : [...selectedGroupDays, day.value],
+                              { shouldDirty: true, shouldValidate: true },
+                            )}
+                            className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
+                              active
+                                ? 'bg-[var(--color-primary)] text-white'
+                                : 'border border-gray-200 bg-white text-gray-600'
+                            }`}
+                          >
+                            {day.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-2 text-xs text-gray-500">
+                      За групови тренировки клиентите ще виждат само тези дни и точните часове от полето по-горе.
+                    </p>
+                  </div>
+                </>
+              )}
               <label className="flex items-center gap-2 cursor-pointer">
                 <input {...register('is_public')} type="checkbox" className="accent-[var(--color-primary)] w-4 h-4" />
                 <span className="text-sm text-gray-700">Видима за клиенти (онлайн резервации)</span>

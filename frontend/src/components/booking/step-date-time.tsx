@@ -14,6 +14,8 @@ import 'react-day-picker/dist/style.css';
 interface TimeSlot {
   start: string;
   end: string;
+  remainingSpots?: number;
+  capacity?: number;
 }
 
 interface StepDateTimeProps {
@@ -141,6 +143,11 @@ export function StepDateTime({ serviceId, staffId, onNext, onBack }: StepDateTim
                     <Clock className="w-3 h-3" />
                     {slot.start}
                   </span>
+                  {typeof slot.remainingSpots === 'number' && typeof slot.capacity === 'number' && (
+                    <span className="mt-1 block text-[11px] opacity-80">
+                      {slot.remainingSpots} / {slot.capacity} места
+                    </span>
+                  )}
                 </button>
               ))}
             </div>

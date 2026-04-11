@@ -9,6 +9,7 @@ export const BUSINESS_TYPES = [
   'DENTAL',
   'MASSAGE',
   'BEAUTY',
+  'GROUP_TRAINING',
   'OTHER',
 ] as const;
 
@@ -270,6 +271,35 @@ export const BUSINESS_TYPE_CONFIG: Record<BusinessTypeKey, BusinessProfile> = {
       staffSelectionLabel: 'Избор или автоматично разпределяне',
       onlineFlowLabel: 'Директен booking flow',
       adminFocusLabel: 'Гъвкав каталог и различни типове процедури',
+    },
+  },
+  GROUP_TRAINING: {
+    label: 'Групови тренировки',
+    description: 'Фиксиран седмичен график с определени часове и ограничен брой места за всяка тренировка.',
+    copy: {
+      businessTypeLabel: 'групови тренировки',
+      serviceLabel: 'тренировка',
+      serviceLabelPlural: 'тренировки',
+      providerLabel: 'треньор',
+      providerLabelPlural: 'треньори',
+      providerAutoAssignLabel: 'свободен треньор',
+      bookingLabel: 'място',
+      bookingAction: 'Запази място',
+      detailsHint: 'Необходими за потвърждение и напомняне за Вашата тренировка',
+    },
+    themePreset: {
+      primaryColor: '#1d4ed8',
+      secondaryColor: '#22c55e',
+      accentColor: '#f59e0b',
+      fontFamily: 'Manrope',
+      borderRadius: 'rounded',
+      surfaceStyle: 'dark',
+    },
+    operations: {
+      staffSelection: 'optional',
+      staffSelectionLabel: 'Избор на треньор или автоматично разпределяне',
+      onlineFlowLabel: 'Фиксирани групови слотове',
+      adminFocusLabel: 'График по класове, капацитет и заети места',
     },
   },
   OTHER: {

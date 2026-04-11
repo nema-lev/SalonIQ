@@ -1,7 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { Clock, ChevronRight, Loader2 } from 'lucide-react';
+import { Clock, ChevronRight, Loader2, Users, CalendarDays } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
 import { useTenant } from '@/lib/tenant-context';
 import { getBusinessCopy } from '@/lib/business-copy';
@@ -15,6 +15,10 @@ interface Service {
   duration_minutes: number;
   price: number | null;
   color: string;
+  booking_mode?: 'standard' | 'group';
+  slot_capacity?: number;
+  group_days?: string[];
+  group_time_slots?: string[];
 }
 
 interface ServicesByCategory {
@@ -24,6 +28,16 @@ interface ServicesByCategory {
 interface StepServiceProps {
   onNext: (data: Partial<BookingFormData>) => void;
 }
+
+const GROUP_DAY_LABELS: Record<string, string> = {
+  mon: 'Пон',
+  tue: 'Вт',
+  wed: 'Ср',
+  thu: 'Чет',
+  fri: 'Пет',
+  sat: 'Съб',
+  sun: 'Нед',
+};
 
 export function StepService({ onNext }: StepServiceProps) {
   const tenant = useTenant();
@@ -147,7 +161,24 @@ export function StepService({ onNext }: StepServiceProps) {
                         <Clock className="w-3.5 h-3.5" />
                         {service.duration_minutes} мин.
                       </span>
+                      {service.booking_mode === 'group' && (
+                        <span className="flex items-center gap-1 text-xs text-gray-400" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#7b7296', padding: '8px 10px', borderRadius: 999, background: 'rgba(34,197,94,0.1)' }}>
+                          <Users className="w-3.5 h-3.5" />
+                          {service.slot_capacity ?? 1} места
+                        </span>
+                      )}
                     </div>
+                    {service.booking_mode === 'group' && (
+                      <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
+                        <span className="flex items-center gap-2 text-xs text-gray-500">
+                          <CalendarDays className="w-3.5 h-3.5" />
+                          {(service.group_days ?? []).map((day) => GROUP_DAY_LABELS[day] || day).join(', ') || 'Без зададени дни'}
+                        </span>
+                        <span className="text-xs text-gray-500">
+                          {(service.group_time_slots ?? []).join(', ') || 'Без зададени часове'}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="text-right flex-shrink-0" style={{ textAlign: 'right', flexShrink: 0, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', position: 'relative' }}>

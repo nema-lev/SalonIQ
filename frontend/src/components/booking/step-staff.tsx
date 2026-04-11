@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, User, Loader2, Shuffle } from 'lucide-react';
 import Image from 'next/image';
@@ -18,6 +19,7 @@ export function StepStaff({ serviceId, onNext, onBack }: StepStaffProps) {
   const tenant = useTenant();
   const copy = getBusinessCopy(tenant.businessType);
   const profile = getBusinessProfile(tenant.businessType);
+  const autoSkippedRef = useRef(false);
   const allowsAutoAssign =
     tenant.allowRandomStaffSelection && profile.operations.staffSelection === 'optional';
   const { data: staffList, isLoading, error } = useQuery({
@@ -26,6 +28,17 @@ export function StepStaff({ serviceId, onNext, onBack }: StepStaffProps) {
     staleTime: 5 * 60 * 1000,
   });
   const resolvedStaff = error || !staffList || staffList.length === 0 ? [] : staffList;
+
+  useEffect(() => {
+    if (
+      tenant.businessType === 'GROUP_TRAINING' &&
+      resolvedStaff.length === 1 &&
+      !autoSkippedRef.current
+    ) {
+      autoSkippedRef.current = true;
+      onNext({ staffId: resolvedStaff[0].id, staffName: resolvedStaff[0].name });
+    }
+  }, [onNext, resolvedStaff, tenant.businessType]);
 
   const handleSelect = (member: StaffMember | null) => {
     if (!member && resolvedStaff?.length) {

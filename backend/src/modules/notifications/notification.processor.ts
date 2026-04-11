@@ -8,6 +8,7 @@ import { TelegramService, AppointmentDetails } from './telegram.service';
 import { SmsApiService } from './smsapi.service';
 import { TenantPrismaService } from '../../common/prisma/tenant-prisma.service';
 import { NotificationJobType, NotificationChannel, NotificationStatus } from '../../common/types/enums';
+import { getNotificationTemplates } from './template.utils';
 
 const TIMEZONE = 'Europe/Sofia';
 
@@ -24,10 +25,13 @@ interface NotificationJobData {
 interface TenantConfig {
   telegram_bot_token: string;
   telegram_chat_id: string;
+  sms_api_key: string | null;
+  sms_sender_id: string | null;
   business_name: string;
   address: string;
   slug: string;
   reminder_hours: number[];
+  theme_config: unknown;
 }
 
 interface AppointmentRow {
@@ -36,10 +40,12 @@ interface AppointmentRow {
   end_at: Date;
   price: number;
   client_name: string;
+  client_salutation: string;
   client_phone: string;
   telegram_chat_id: string;
   preferred_channel: string;
   notifications_consent: boolean;
+  intake_data: unknown;
   service_name: string;
   staff_name: string;
 }
@@ -75,8 +81,9 @@ export class NotificationProcessor extends WorkerHost {
       'public',
       `SELECT
         telegram_bot_token, telegram_chat_id,
+        sms_api_key, sms_sender_id,
         business_name, address, slug,
-        reminder_hours
+        reminder_hours, theme_config
        FROM tenants WHERE id = $1`,
       [tenantId],
     );
@@ -86,9 +93,18 @@ export class NotificationProcessor extends WorkerHost {
       return;
     }
     const tenant = tenants[0];
+    const themeConfig =
+      typeof tenant.theme_config === 'string'
+        ? JSON.parse(tenant.theme_config || '{}')
+        : (tenant.theme_config || {});
+    const allowClientCancellation = themeConfig.allowClientCancellation ?? true;
+    const notificationTemplates = getNotificationTemplates(themeConfig);
 
-    if (!tenant.telegram_bot_token) {
-      this.logger.warn(`Tenant ${tenantId} has no Telegram bot token — skipping`);
+    const hasTelegram = Boolean(tenant.telegram_bot_token);
+    const hasSms = Boolean(tenant.sms_api_key && tenant.sms_sender_id);
+
+    if (!hasTelegram && !hasSms) {
+      this.logger.warn(`Tenant ${tenantId} has no Telegram or SMS configuration — skipping`);
       return;
     }
 
@@ -96,8 +112,10 @@ export class NotificationProcessor extends WorkerHost {
     const appointments = await this.prisma.queryInSchema<AppointmentRow[]>(
       tenantSchemaName,
       `SELECT
-        a.id, a.start_at, a.end_at, a.price,
-        c.name as client_name, c.phone as client_phone,
+        a.id, a.start_at, a.end_at, a.price, a.intake_data,
+        c.name as client_name,
+        COALESCE(NULLIF(c.profile_data->>'salutation', ''), split_part(c.name, ' ', 1)) as client_salutation,
+        c.phone as client_phone,
         c.telegram_chat_id, c.preferred_channel, c.notifications_consent,
         sv.name as service_name,
         s.name as staff_name
@@ -123,7 +141,7 @@ export class NotificationProcessor extends WorkerHost {
 
     const appointmentDetails: AppointmentDetails = {
       id: appt.id,
-      clientName: appt.client_name,
+      clientName: appt.client_salutation || appt.client_name,
       clientPhone: appt.client_phone,
       serviceName: appt.service_name,
       staffName: appt.staff_name,
@@ -134,43 +152,135 @@ export class NotificationProcessor extends WorkerHost {
     };
 
     const bookingUrl = `https://${tenant.slug}.saloniq.bg`;
+    let intakeData: Record<string, any> = {};
+    if (typeof appt.intake_data === 'string') {
+      try {
+        intakeData = JSON.parse(appt.intake_data || '{}');
+      } catch {
+        intakeData = {};
+      }
+    } else if (appt.intake_data && typeof appt.intake_data === 'object') {
+      intakeData = appt.intake_data as Record<string, any>;
+    }
+    const proposal = intakeData?.proposal as
+      | { publicBaseUrl?: string | null; acceptToken?: string; rejectToken?: string }
+      | undefined;
+    const acceptUrl =
+      proposal?.publicBaseUrl && proposal?.acceptToken
+        ? `${proposal.publicBaseUrl}/api/v1/appointments/proposal/${tenant.slug}/respond?decision=accept&token=${proposal.acceptToken}`
+        : null;
+    const rejectUrl =
+      proposal?.publicBaseUrl && proposal?.rejectToken
+        ? `${proposal.publicBaseUrl}/api/v1/appointments/proposal/${tenant.slug}/respond?decision=reject&token=${proposal.rejectToken}`
+        : null;
 
     // 4. Изпрати правилното известяване
     let result: { success: boolean; messageId?: number; error?: string } | null = null;
     let notifType = job.name;
 
     switch (job.name as NotificationJobType) {
+      case NotificationJobType.BOOKING_PROPOSAL:
+        if (hasTelegram && appt.telegram_chat_id) {
+          result = await this.telegramService.sendProposalRequest(
+            tenant.telegram_bot_token,
+            appt.telegram_chat_id,
+            appointmentDetails,
+            tenant.business_name,
+          );
+        } else if (hasSms && acceptUrl && rejectUrl) {
+          const zonedStart = toZonedTime(appointmentDetails.startAt, TIMEZONE);
+          const dateStr = format(zonedStart, "d MMMM yyyy 'г.'", { locale: bg });
+          const timeStr = format(zonedStart, 'HH:mm');
+          const smsResult = await this.smsService.sendProposalSms({
+            phone: appointmentDetails.clientPhone,
+            clientName: appointmentDetails.clientName,
+            businessName: tenant.business_name,
+            serviceName: appointmentDetails.serviceName,
+            dateStr,
+            timeStr,
+            acceptUrl,
+            rejectUrl,
+            apiToken: tenant.sms_api_key!,
+            senderId: tenant.sms_sender_id!,
+          });
+          result = {
+            success: smsResult.success,
+            error: smsResult.error,
+          };
+        }
+        break;
+
       case NotificationJobType.BOOKING_CONFIRMED:
-        if (appt.telegram_chat_id) {
+        if (hasTelegram && appt.telegram_chat_id) {
           result = await this.telegramService.sendBookingConfirmation(
             tenant.telegram_bot_token,
             appt.telegram_chat_id,
             appointmentDetails,
             tenant.business_name,
             (job.data.status as 'confirmed' | 'pending') || 'confirmed',
+            allowClientCancellation,
+            (job.data.status as 'confirmed' | 'pending') === 'pending'
+              ? notificationTemplates.bookingPending
+              : notificationTemplates.bookingConfirmed,
           );
+        } else if (hasSms) {
+          const zonedStart = toZonedTime(appointmentDetails.startAt, TIMEZONE);
+          const dateStr = format(zonedStart, "d MMMM yyyy 'г.'", { locale: bg });
+          const timeStr = format(zonedStart, 'HH:mm');
+          const smsResult = await this.smsService.sendBookingConfirmationSms({
+            phone: appointmentDetails.clientPhone,
+            clientName: appointmentDetails.clientName,
+            businessName: tenant.business_name,
+            serviceName: appointmentDetails.serviceName,
+            staffName: appointmentDetails.staffName,
+            dateStr,
+            timeStr,
+            address: appointmentDetails.address,
+            apiToken: tenant.sms_api_key!,
+            senderId: tenant.sms_sender_id!,
+          });
+          result = { success: smsResult.success, error: smsResult.error };
         }
         // Извести и собственика
-        if (tenant.telegram_chat_id) {
+        if (hasTelegram && tenant.telegram_chat_id) {
           await this.telegramService.sendOwnerNewBooking(
             tenant.telegram_bot_token,
             tenant.telegram_chat_id,
-            appointmentDetails,
+            { ...appointmentDetails, clientName: appt.client_name },
             tenant.business_name,
             (job.data.status as 'confirmed' | 'pending') || 'confirmed',
+            notificationTemplates.ownerNewBooking,
           );
         }
         break;
 
       case NotificationJobType.REMINDER_24H:
-        if (appt.telegram_chat_id) {
+        if (hasTelegram && appt.telegram_chat_id) {
           result = await this.telegramService.sendReminder(
             tenant.telegram_bot_token,
             appt.telegram_chat_id,
             appointmentDetails,
             tenant.business_name,
             24,
+            allowClientCancellation,
+            notificationTemplates.reminder24h,
           );
+        } else if (hasSms) {
+          const zonedStart = toZonedTime(appointmentDetails.startAt, TIMEZONE);
+          const dateStr = format(zonedStart, "d MMMM yyyy 'г.'", { locale: bg });
+          const timeStr = format(zonedStart, 'HH:mm');
+          const smsResult = await this.smsService.sendReminderSms({
+            phone: appointmentDetails.clientPhone,
+            clientName: appointmentDetails.clientName,
+            businessName: tenant.business_name,
+            serviceName: appointmentDetails.serviceName,
+            dateStr,
+            timeStr,
+            hoursUntil: 24,
+            apiToken: tenant.sms_api_key!,
+            senderId: tenant.sms_sender_id!,
+          });
+          result = { success: smsResult.success, error: smsResult.error };
         }
         // Маркирай че е изпратен reminder
         await this.prisma.queryInSchema(
@@ -181,14 +291,32 @@ export class NotificationProcessor extends WorkerHost {
         break;
 
       case NotificationJobType.REMINDER_2H:
-        if (appt.telegram_chat_id) {
+        if (hasTelegram && appt.telegram_chat_id) {
           result = await this.telegramService.sendReminder(
             tenant.telegram_bot_token,
             appt.telegram_chat_id,
             appointmentDetails,
             tenant.business_name,
             2,
+            allowClientCancellation,
+            notificationTemplates.reminder2h,
           );
+        } else if (hasSms) {
+          const zonedStart = toZonedTime(appointmentDetails.startAt, TIMEZONE);
+          const dateStr = format(zonedStart, "d MMMM yyyy 'г.'", { locale: bg });
+          const timeStr = format(zonedStart, 'HH:mm');
+          const smsResult = await this.smsService.sendReminderSms({
+            phone: appointmentDetails.clientPhone,
+            clientName: appointmentDetails.clientName,
+            businessName: tenant.business_name,
+            serviceName: appointmentDetails.serviceName,
+            dateStr,
+            timeStr,
+            hoursUntil: 2,
+            apiToken: tenant.sms_api_key!,
+            senderId: tenant.sms_sender_id!,
+          });
+          result = { success: smsResult.success, error: smsResult.error };
         }
         await this.prisma.queryInSchema(
           tenantSchemaName,
@@ -201,7 +329,7 @@ export class NotificationProcessor extends WorkerHost {
       case NotificationJobType.BOOKING_CANCELLED_CLIENT:
       case NotificationJobType.BOOKING_CANCELLED_BUSINESS: {
         const cancelledBy = job.data.newStatus === 'cancelled' ? 'owner' : 'client';
-        if (appt.telegram_chat_id) {
+        if (hasTelegram && appt.telegram_chat_id) {
           result = await this.telegramService.sendCancellation(
             tenant.telegram_bot_token,
             appt.telegram_chat_id,
@@ -210,7 +338,23 @@ export class NotificationProcessor extends WorkerHost {
             cancelledBy as 'client' | 'owner',
             job.data.reason,
             bookingUrl,
+            notificationTemplates.cancellation,
           );
+        } else if (hasSms) {
+          const zonedStart = toZonedTime(appointmentDetails.startAt, TIMEZONE);
+          const dateStr = format(zonedStart, "d MMMM yyyy 'г.'", { locale: bg });
+          const timeStr = format(zonedStart, 'HH:mm');
+          const smsResult = await this.smsService.sendCancellationSms({
+            phone: appointmentDetails.clientPhone,
+            clientName: appointmentDetails.clientName,
+            businessName: tenant.business_name,
+            dateStr,
+            timeStr,
+            reason: job.data.reason,
+            apiToken: tenant.sms_api_key!,
+            senderId: tenant.sms_sender_id!,
+          });
+          result = { success: smsResult.success, error: smsResult.error };
         }
         break;
       }

@@ -22,6 +22,17 @@ interface TelegramUpdate {
   };
 }
 
+interface TenantWebhookRow {
+  id: string;
+  slug: string;
+  schema_name: string;
+  telegram_bot_token: string;
+  business_name: string;
+  telegram_chat_id?: string | null;
+  address?: string | null;
+  theme_config?: unknown;
+}
+
 /**
  * TelegramWebhookController — приема webhook updates от Telegram.
  *
@@ -50,9 +61,10 @@ export class TelegramWebhookController {
     @Body() update: TelegramUpdate,
   ) {
     // Намери tenant-а
-    const tenants = await this.prisma.$queryRaw<(Tenant & { schema_name: string; telegram_bot_token: string; business_name: string })[]>`
+    const tenants = await this.prisma.$queryRaw<TenantWebhookRow[]>`
       SELECT id, slug, schema_name, telegram_bot_token, business_name,
-             cancellation_hours, address
+             theme_config,
+             telegram_chat_id, cancellation_hours, address
       FROM public.tenants
       WHERE slug = ${slug} AND is_active = true
       LIMIT 1
@@ -106,6 +118,12 @@ export class TelegramWebhookController {
       } else if (data.startsWith('owner_cancel_')) {
         const appointmentId = data.replace('owner_cancel_', '');
         await this.handleOwnerCancel(tenant, appointmentId, chatId, queryId);
+      } else if (data.startsWith('proposal_accept_')) {
+        const appointmentId = data.replace('proposal_accept_', '');
+        await this.handleProposalAccept(tenant, appointmentId, chatId, queryId);
+      } else if (data.startsWith('proposal_reject_')) {
+        const appointmentId = data.replace('proposal_reject_', '');
+        await this.handleProposalReject(tenant, appointmentId, chatId, queryId);
       }
     } catch (error) {
       this.logger.error(`Callback error: ${error}`);
@@ -227,12 +245,84 @@ export class TelegramWebhookController {
     );
   }
 
+  private async handleProposalAccept(
+    tenant: TenantWebhookRow,
+    appointmentId: string,
+    chatId: string,
+    queryId: string,
+  ) {
+    const details = await this.loadAppointmentDetailsForTelegram(tenant, appointmentId);
+    await this.appointmentsService.respondToProposal(tenant as unknown as Tenant, appointmentId, 'accept');
+
+    await this.telegramService.answerCallbackQuery(
+      tenant.telegram_bot_token,
+      queryId,
+      '✅ Предложението е прието.',
+    );
+
+    await this.telegramService.sendMessage(
+      tenant.telegram_bot_token,
+      chatId,
+      `✅ *Часът е потвърден.*\n\nЩе получите напомняне преди посещението.`,
+    );
+
+    if (tenant.telegram_chat_id && details) {
+      await this.telegramService.sendOwnerProposalResponse(
+        tenant.telegram_bot_token,
+        tenant.telegram_chat_id,
+        details,
+        tenant.business_name,
+        'accept',
+      );
+    }
+  }
+
+  private async handleProposalReject(
+    tenant: TenantWebhookRow,
+    appointmentId: string,
+    chatId: string,
+    queryId: string,
+  ) {
+    const details = await this.loadAppointmentDetailsForTelegram(tenant, appointmentId);
+    await this.appointmentsService.respondToProposal(tenant as unknown as Tenant, appointmentId, 'reject');
+
+    await this.telegramService.answerCallbackQuery(
+      tenant.telegram_bot_token,
+      queryId,
+      '❌ Предложението е отказано.',
+    );
+
+    await this.telegramService.sendMessage(
+      tenant.telegram_bot_token,
+      chatId,
+      `❌ *Предложението е отказано.*\n\nАко е нужно, ще получите ново предложение от салона.`,
+    );
+
+    if (tenant.telegram_chat_id && details) {
+      await this.telegramService.sendOwnerProposalResponse(
+        tenant.telegram_bot_token,
+        tenant.telegram_chat_id,
+        details,
+        tenant.business_name,
+        'reject',
+      );
+    }
+  }
+
   private async handleMessage(tenant: any, message: NonNullable<TelegramUpdate['message']>) {
     const chatId = message.chat.id.toString();
-    const text = message.text?.toLowerCase().trim();
+    const rawText = message.text?.trim() || '';
+    const text = rawText.toLowerCase();
 
     // /start command — регистрира chat_id на клиент
     if (text === '/start' || text?.startsWith('/start ')) {
+      const payload = rawText.split(/\s+/, 2)[1]?.trim() || '';
+
+      if (payload.startsWith('owner_setup_')) {
+        await this.handleOwnerSetupStart(tenant, chatId, payload.replace('owner_setup_', ''));
+        return;
+      }
+
       await this.telegramService.sendMessage(
         tenant.telegram_bot_token,
         chatId,
@@ -242,7 +332,7 @@ export class TelegramWebhookController {
       );
 
       // Запази chat_id ако има phone в payload
-      const parts = message.text.split(' ');
+      const parts = rawText.split(' ');
       if (parts.length > 1) {
         const phone = parts[1]; // /start +359888123456
         await this.prisma.queryInSchema(
@@ -252,5 +342,96 @@ export class TelegramWebhookController {
         );
       }
     }
+  }
+
+  private async handleOwnerSetupStart(
+    tenant: TenantWebhookRow,
+    chatId: string,
+    setupToken: string,
+  ) {
+    const theme =
+      typeof tenant.theme_config === 'string'
+        ? JSON.parse(tenant.theme_config || '{}')
+        : (tenant.theme_config || {});
+
+    const storedToken = typeof theme.telegramOwnerSetupToken === 'string' ? theme.telegramOwnerSetupToken : '';
+    const expiresAt =
+      typeof theme.telegramOwnerSetupExpiresAt === 'string'
+        ? new Date(theme.telegramOwnerSetupExpiresAt)
+        : null;
+
+    const isExpired = Boolean(expiresAt && Number.isFinite(expiresAt.getTime()) && expiresAt.getTime() < Date.now());
+
+    if (!storedToken || storedToken !== setupToken || isExpired) {
+      await this.telegramService.sendMessage(
+        tenant.telegram_bot_token,
+        chatId,
+        `⚠️ Тази връзка за свързване е невалидна или е изтекла.\n\nВърнете се в админ панела и натиснете отново "Отвори моя бот".`,
+      );
+      return;
+    }
+
+    const nextTheme = {
+      ...theme,
+      telegramOwnerSetupToken: null,
+      telegramOwnerSetupExpiresAt: null,
+    };
+
+    await this.prisma.$executeRawUnsafe(
+      `
+      UPDATE public.tenants
+      SET telegram_chat_id = $1,
+          theme_config = $2::jsonb,
+          updated_at = NOW()
+      WHERE id = $3::uuid
+      `,
+      chatId,
+      JSON.stringify(nextTheme),
+      tenant.id,
+    );
+
+    await this.telegramService.sendMessage(
+      tenant.telegram_bot_token,
+      chatId,
+      `✅ *Telegram е свързан успешно.*\n\nОттук нататък ще получавате owner известията за *${tenant.business_name}* в този чат.`,
+    );
+  }
+
+  private async loadAppointmentDetailsForTelegram(tenant: TenantWebhookRow, appointmentId: string) {
+    const [row] = await this.prisma.queryInSchema<any[]>(
+      tenant.schema_name,
+      `
+      SELECT
+        a.id,
+        a.start_at,
+        a.end_at,
+        a.price,
+        COALESCE(NULLIF(c.profile_data->>'salutation', ''), split_part(c.name, ' ', 1)) as client_name,
+        c.phone as client_phone,
+        sv.name as service_name,
+        s.name as staff_name
+      FROM appointments a
+      JOIN clients c ON c.id = a.client_id
+      JOIN services sv ON sv.id = a.service_id
+      JOIN staff s ON s.id = a.staff_id
+      WHERE a.id = $1::uuid
+      LIMIT 1
+      `,
+      [appointmentId],
+    );
+
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      clientName: row.client_name,
+      clientPhone: row.client_phone,
+      serviceName: row.service_name,
+      staffName: row.staff_name,
+      startAt: new Date(row.start_at),
+      endAt: new Date(row.end_at),
+      price: row.price,
+      address: tenant.address || undefined,
+    };
   }
 }

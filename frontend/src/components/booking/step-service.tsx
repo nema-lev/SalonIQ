@@ -42,7 +42,9 @@ export function StepService({ onNext }: StepServiceProps) {
     );
   }
 
-  if (error || !services) {
+  const resolvedServices = error || !services ? null : services;
+
+  if (!resolvedServices) {
     return (
       <div className="text-center py-12 text-gray-500">
         <p>Неуспешно зареждане на услугите. Моля, опитайте отново.</p>
@@ -51,7 +53,7 @@ export function StepService({ onNext }: StepServiceProps) {
   }
 
   // Групирай по категория
-  const byCategory = services.reduce<ServicesByCategory>((acc, svc) => {
+  const byCategory = resolvedServices.reduce<ServicesByCategory>((acc, svc) => {
     const cat = svc.category || copy.serviceLabelPlural;
     if (!acc[cat]) acc[cat] = [];
     acc[cat].push(svc);
@@ -69,20 +71,20 @@ export function StepService({ onNext }: StepServiceProps) {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold text-gray-900 mb-2">
+      <h2 className="text-2xl font-bold text-gray-900 mb-2" style={{ margin: '0 0 8px', fontSize: 'clamp(2rem, 4vw, 2.8rem)', fontWeight: 900, color: '#1c1535', letterSpacing: '-0.05em' }}>
         Изберете {copy.serviceLabel}
       </h2>
-      <p className="text-gray-500 mb-6">
-        Изберете {copy.serviceLabel}та, за която искате да {copy.bookingAction.toLowerCase()}
+      <p className="text-gray-500 mb-6" style={{ margin: '0 0 28px', fontSize: 16, lineHeight: 1.5, color: 'var(--text-soft)', maxWidth: 580 }}>
+        Изберете {copy.serviceLabel}, за да продължите към свободните часове и наличните {copy.providerLabelPlural}
       </p>
 
-      <div className="space-y-6">
+      <div className="space-y-6" style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
         {Object.entries(byCategory).map(([category, svcs]) => (
           <div key={category}>
-            <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3 px-1">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3 px-1" style={{ margin: '0 0 12px', padding: '0 4px', fontSize: 12, fontWeight: 800, letterSpacing: '0.14em', color: '#8b84a6' }}>
               {category}
             </h3>
-            <div className="space-y-2">
+            <div className="space-y-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 18 }}>
               {svcs.map((service) => (
                 <button
                   key={service.id}
@@ -92,39 +94,85 @@ export function StepService({ onNext }: StepServiceProps) {
                     hover:border-[var(--color-primary)] hover:bg-[var(--color-primary)]/5
                     active:scale-[0.99] transition-all duration-150 text-left group
                   "
+                  style={{
+                    display: 'flex',
+                    alignItems: 'stretch',
+                    gap: 14,
+                    padding: 18,
+                    borderRadius: 24,
+                    border: '1px solid rgba(124,58,237,0.1)',
+                    background:
+                      'var(--bg-card)',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    boxShadow: 'var(--shadow-soft)',
+                    minHeight: 152,
+                    position: 'relative',
+                    overflow: 'hidden',
+                    backdropFilter: 'blur(24px) saturate(140%)',
+                    WebkitBackdropFilter: 'blur(24px) saturate(140%)',
+                  }}
                 >
+                  <div
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      background:
+                        'radial-gradient(circle at top right, rgba(255,255,255,0.65), transparent 30%)',
+                      pointerEvents: 'none',
+                    }}
+                  />
                   {/* Цветен индикатор */}
                   <div
                     className="w-3 h-10 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: service.color }}
+                    style={{
+                      width: 8,
+                      minHeight: '100%',
+                      borderRadius: 999,
+                      flexShrink: 0,
+                      background: `linear-gradient(180deg, ${service.color}, color-mix(in srgb, ${service.color} 72%, white))`,
+                      boxShadow: `0 10px 18px color-mix(in srgb, ${service.color} 34%, transparent)`,
+                    }}
                   />
 
-                  {/* Съдържание */}
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-gray-900 group-hover:text-[var(--color-primary)] transition-colors">
+                  <div className="flex-1 min-w-0" style={{ flex: 1, minWidth: 0, position: 'relative' }}>
+                    <p className="font-semibold text-gray-900 group-hover:text-[var(--color-primary)] transition-colors" style={{ margin: 0, fontSize: 21, fontWeight: 800, color: 'var(--text-strong)', letterSpacing: '-0.03em' }}>
                       {service.name}
                     </p>
                     {service.description && (
-                      <p className="text-sm text-gray-500 mt-0.5 truncate">{service.description}</p>
+                      <p className="text-sm text-gray-500 mt-0.5 truncate" style={{ margin: '10px 0 0', fontSize: 14, lineHeight: 1.55, color: 'var(--text-soft)' }}>{service.description}</p>
                     )}
-                    <div className="flex items-center gap-3 mt-1.5">
-                      <span className="flex items-center gap-1 text-xs text-gray-400">
+                    <div className="flex items-center gap-3 mt-1.5" style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
+                      <span className="flex items-center gap-1 text-xs text-gray-400" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#7b7296', padding: '8px 10px', borderRadius: 999, background: 'rgba(124,58,237,0.08)' }}>
                         <Clock className="w-3.5 h-3.5" />
                         {service.duration_minutes} мин.
                       </span>
                     </div>
                   </div>
 
-                  {/* Цена */}
-                  <div className="text-right flex-shrink-0">
+                  <div className="text-right flex-shrink-0" style={{ textAlign: 'right', flexShrink: 0, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', position: 'relative' }}>
                     {service.price != null ? (
-                      <p className="font-bold text-gray-900">
-                        {service.price} <span className="text-sm font-normal text-gray-500">лв.</span>
+                      <p className="font-bold text-gray-900" style={{ margin: 0, fontSize: 26, fontWeight: 900, color: 'var(--text-strong)', letterSpacing: '-0.04em' }}>
+                        {service.price} <span className="text-sm font-semibold text-gray-500" style={{ color: 'var(--text-soft)' }}>€</span>
                       </p>
                     ) : (
                       <p className="text-sm text-gray-400">По договаряне</p>
                     )}
-                    <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-[var(--color-primary)] ml-auto mt-1 transition-colors" />
+                    <div
+                      style={{
+                        width: 34,
+                        height: 34,
+                        borderRadius: 999,
+                        background: 'rgba(124,58,237,0.09)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        marginLeft: 'auto',
+                        marginTop: 8,
+                      }}
+                    >
+                      <ChevronRight className="w-4 h-4 text-gray-300 group-hover:text-[var(--color-primary)] ml-auto mt-1 transition-colors" style={{ margin: 0, color: '#7c3aed' }} />
+                    </div>
                   </div>
                 </button>
               ))}

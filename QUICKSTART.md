@@ -49,12 +49,12 @@ node scripts/seed.js
 
 ## 3. Тест
 
-Добавяй header `X-Tenant-Slug: salon-aurora` към заявките.
+Добавяй header `X-Tenant-Slug: demo-business` към заявките.
 
 С браузър директно:
-- **Booking**: http://localhost:3000 (добави `?tenant=salon-aurora` в URL)
+- **Booking**: http://localhost:3000 (добави `?tenant=demo-business` в URL)
 - **Admin**: http://localhost:3000/admin
-  - Email: `admin@salon-aurora.bg`
+  - Email: `admin@demo-business.local`
   - Парола: `admin123`
 - **API Docs**: http://localhost:3001/docs
 
@@ -70,7 +70,7 @@ ngrok http 3001
 
 # Задай webhook с ngrok URL
 curl -X POST "https://api.telegram.org/botТВОЯ_TOKEN/setWebhook" \
-  -d "url=https://ТВОЯ_NGROK.ngrok.io/api/v1/webhooks/telegram/salon-aurora"
+  -d "url=https://ТВОЯ_NGROK.ngrok.io/api/v1/webhooks/telegram/demo-business"
 ```
 
 После добави в `backend/.env`:

@@ -4,14 +4,17 @@ import {
   ExecutionContext,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
+  HttpException,
 } from '@nestjs/common';
 import { Request } from 'express';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
+import { getNotificationTemplates } from '../../modules/notifications/template.utils';
 
 /**
  * TenantGuard — резолвира tenant от:
- * 1. Поддомейн: salon-aurora.saloniq.bg → slug = 'salon-aurora'
- * 2. Custom domain: rezervacii.salon-aurora.com
+ * 1. Поддомейн: demo-business.saloniq.bg → slug = 'demo-business'
+ * 2. Custom domain: booking.example.com
  * 3. Header X-Tenant-Slug (за локална разработка)
  * 4. Query param ?tenant=slug (за тестове)
  *
@@ -20,7 +23,7 @@ import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 @Injectable()
 export class TenantGuard implements CanActivate {
   private readonly tenantCache = new Map<string, { data: any; expiresAt: number }>();
-  private readonly CACHE_TTL = 5 * 60 * 1000; // 5 минути
+  private readonly CACHE_TTL = 0;
 
   constructor(private readonly prisma: TenantPrismaService) {}
 
@@ -35,6 +38,11 @@ export class TenantGuard implements CanActivate {
     const tenant = await this.resolveTenant(slug);
     if (!tenant) {
       throw new NotFoundException(`Бизнесът '${slug}' не е намерен.`);
+    }
+
+    const hasAuthenticatedAdminRequest = Boolean(request.headers.authorization);
+    if (hasAuthenticatedAdminRequest) {
+      this.assertAdminAccessAllowed(tenant);
     }
 
     // Прикачи tenant към request-а
@@ -59,7 +67,7 @@ export class TenantGuard implements CanActivate {
 
     const appDomain = process.env.APP_DOMAIN || 'saloniq.bg';
 
-    // Поддомейн: salon-aurora.saloniq.bg
+    // Поддомейн: demo-business.saloniq.bg
     if (hostname.endsWith(`.${appDomain}`)) {
       return hostname.replace(`.${appDomain}`, '');
     }
@@ -72,7 +80,7 @@ export class TenantGuard implements CanActivate {
     const cacheKey = slugOrDomain;
     const cached = this.tenantCache.get(cacheKey);
 
-    if (cached && Date.now() < cached.expiresAt) {
+    if (cached && this.CACHE_TTL > 0 && Date.now() < cached.expiresAt) {
       return cached.data;
     }
 
@@ -97,6 +105,10 @@ export class TenantGuard implements CanActivate {
     if (!rows.length) return null;
 
     const tenant = rows[0];
+    const themeConfig =
+      typeof tenant.theme_config === 'string'
+        ? JSON.parse(tenant.theme_config || '{}')
+        : (tenant.theme_config || {});
 
     // Преобразувай snake_case → camelCase за полетата
     const normalized = {
@@ -109,20 +121,42 @@ export class TenantGuard implements CanActivate {
       phone: tenant.phone,
       telegramBotToken: tenant.telegram_bot_token,
       telegramChatId: tenant.telegram_chat_id,
-      themeConfig: tenant.theme_config,
+      themeConfig,
       requiresConfirmation: tenant.requires_confirmation,
       cancellationHours: tenant.cancellation_hours,
       reminderHours: tenant.reminder_hours,
       minAdvanceBookingHours: tenant.min_advance_booking_hours,
       maxAdvanceBookingDays: tenant.max_advance_booking_days,
+      planStatus: tenant.plan_status,
+      planRenewsAt: tenant.plan_renews_at,
+      isActive: tenant.is_active,
       workingHours: tenant.working_hours,
+      allowRandomStaffSelection: themeConfig.allowRandomStaffSelection ?? true,
+      allowClientCancellation: themeConfig.allowClientCancellation ?? true,
+      collectClientEmail: themeConfig.collectClientEmail ?? true,
+      notificationTemplates: getNotificationTemplates(themeConfig),
     };
 
-    this.tenantCache.set(cacheKey, {
-      data: normalized,
-      expiresAt: Date.now() + this.CACHE_TTL,
-    });
+    if (this.CACHE_TTL > 0) {
+      this.tenantCache.set(cacheKey, {
+        data: normalized,
+        expiresAt: Date.now() + this.CACHE_TTL,
+      });
+    }
 
     return normalized;
+  }
+
+  private assertAdminAccessAllowed(tenant: { isActive: boolean; planStatus: string; planRenewsAt: Date | string | null }) {
+    if (!tenant.isActive) {
+      throw new ForbiddenException('Достъпът е спрян от платформата.');
+    }
+
+    const renewsAt = tenant.planRenewsAt ? new Date(tenant.planRenewsAt) : null;
+    const isExpired = Boolean(renewsAt && renewsAt.getTime() < Date.now());
+
+    if (tenant.planStatus === 'PAST_DUE' || tenant.planStatus === 'CANCELLED' || isExpired) {
+      throw new HttpException('Услугата не е платена.', 402);
+    }
   }
 }

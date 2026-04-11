@@ -1,35 +1,34 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { ChevronLeft, User, Phone, Mail, MessageSquare, Shield } from 'lucide-react';
+import { ChevronLeft, User, Phone, Mail, MessageSquare } from 'lucide-react';
 import { useTenant } from '@/lib/tenant-context';
 import { getBusinessCopy } from '@/lib/business-copy';
+import { normalizeBulgarianPhone } from '@/lib/phone';
 import type { BookingFormData } from '@/types/booking';
 
-const schema = z.object({
-  clientName: z
-    .string()
-    .min(2, 'Моля, въведете поне 2 символа')
-    .max(100, 'Твърде дълго')
-    .regex(/^[\p{L}\s'-]+$/u, 'Само букви'),
-  clientPhone: z
-    .string()
-    .min(7, 'Невалиден телефон')
-    .regex(/^\+?[0-9\s\-()]{7,20}$/, 'Невалиден телефон'),
-  clientEmail: z
-    .string()
-    .email('Невалиден email')
-    .optional()
-    .or(z.literal('')),
-  notes: z.string().max(500, 'Максимум 500 символа').optional(),
-  consentGiven: z.literal(true, {
-    errorMap: () => ({ message: 'Необходимо е съгласие за получаване на известявания' }),
-  }),
-});
+const buildSchema = (collectClientEmail: boolean) =>
+  z.object({
+    clientName: z
+      .string()
+      .min(2, 'Моля, въведете поне 2 символа')
+      .max(100, 'Твърде дълго')
+      .regex(/^[\p{L}\s'-]+$/u, 'Само букви'),
+    clientPhone: z
+      .string()
+      .min(7, 'Невалиден телефон')
+      .transform((value) => normalizeBulgarianPhone(value))
+      .refine((value) => /^\+359\d{9}$/.test(value), 'Невалиден телефон'),
+    clientEmail: collectClientEmail
+      ? z.string().email('Невалиден email').optional().or(z.literal(''))
+      : z.string().optional().or(z.literal('')),
+    notes: z.string().max(500, 'Максимум 500 символа').optional(),
+  });
 
-type FormValues = z.infer<typeof schema>;
+type FormValues = z.infer<ReturnType<typeof buildSchema>>;
 
 interface StepDetailsProps {
   formData: Partial<BookingFormData>;
@@ -40,6 +39,7 @@ interface StepDetailsProps {
 export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
   const tenant = useTenant();
   const copy = getBusinessCopy(tenant.businessType);
+  const schema = useMemo(() => buildSchema(tenant.collectClientEmail), [tenant.collectClientEmail]);
   const {
     register,
     handleSubmit,
@@ -51,7 +51,6 @@ export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
       clientPhone: formData.clientPhone || '',
       clientEmail: formData.clientEmail || '',
       notes: formData.notes || '',
-      consentGiven: (formData.consentGiven as true) || undefined,
     },
     mode: 'onChange',
   });
@@ -59,8 +58,8 @@ export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
   const onSubmit = (values: FormValues) => {
     onNext({
       clientName: values.clientName.trim(),
-      clientPhone: values.clientPhone.replace(/\s/g, ''),
-      clientEmail: values.clientEmail || undefined,
+      clientPhone: values.clientPhone,
+      clientEmail: tenant.collectClientEmail ? values.clientEmail || undefined : undefined,
       notes: values.notes || undefined,
       consentGiven: true,
     });
@@ -76,7 +75,7 @@ export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
         Назад
       </button>
 
-      <h2 className="text-2xl font-bold text-gray-900 mb-2">Вашите данни</h2>
+      <h2 className="text-2xl font-bold text-gray-900 mb-2">Данни за контакт</h2>
       <p className="text-gray-500 mb-6">{copy.detailsHint}</p>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -90,7 +89,7 @@ export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
             <input
               {...register('clientName')}
               type="text"
-              placeholder="Иван Иванов"
+              placeholder="Мария Иванова"
               autoComplete="name"
               className={`
                 w-full pl-10 pr-4 py-3 rounded-xl border-2 outline-none transition-colors
@@ -116,7 +115,7 @@ export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
             <input
               {...register('clientPhone')}
               type="tel"
-              placeholder="+359 888 123 456"
+              placeholder="0899 123 456 или +359 899 123 456"
               autoComplete="tel"
               className={`
                 w-full pl-10 pr-4 py-3 rounded-xl border-2 outline-none transition-colors
@@ -131,36 +130,37 @@ export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
             <p className="text-red-500 text-xs mt-1">{errors.clientPhone.message}</p>
           )}
           <p className="text-xs text-gray-400 mt-1">
-            На този номер ще получите потвърждение за запазения {copy.bookingLabel}
+            Приемаме и `08...`, и `+359...`. Интервали, скоби и тирета се изчистват автоматично.
           </p>
         </div>
 
-        {/* Email — по избор */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">
-            Email{' '}
-            <span className="text-gray-400 font-normal">(по избор)</span>
-          </label>
-          <div className="relative">
-            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              {...register('clientEmail')}
-              type="email"
-              placeholder="ivan@example.com"
-              autoComplete="email"
-              className={`
-                w-full pl-10 pr-4 py-3 rounded-xl border-2 outline-none transition-colors
-                ${errors.clientEmail
-                  ? 'border-red-300 focus:border-red-400 bg-red-50'
-                  : 'border-gray-200 focus:border-[var(--color-primary)] bg-white'
-                }
-              `}
-            />
+        {tenant.collectClientEmail && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              Email{' '}
+              <span className="text-gray-400 font-normal">(по избор)</span>
+            </label>
+            <div className="relative">
+              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                {...register('clientEmail')}
+                type="email"
+                placeholder="maria@example.com"
+                autoComplete="email"
+                className={`
+                  w-full pl-10 pr-4 py-3 rounded-xl border-2 outline-none transition-colors
+                  ${errors.clientEmail
+                    ? 'border-red-300 focus:border-red-400 bg-red-50'
+                    : 'border-gray-200 focus:border-[var(--color-primary)] bg-white'
+                  }
+                `}
+              />
+            </div>
+            {errors.clientEmail && (
+              <p className="text-red-500 text-xs mt-1">{errors.clientEmail.message}</p>
+            )}
           </div>
-          {errors.clientEmail && (
-            <p className="text-red-500 text-xs mt-1">{errors.clientEmail.message}</p>
-          )}
-        </div>
+        )}
 
         {/* Бележки */}
         <div>
@@ -185,35 +185,9 @@ export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
           )}
         </div>
 
-        {/* GDPR Consent */}
-        <label className="flex items-start gap-3 p-4 bg-blue-50 rounded-xl cursor-pointer group">
-          <input
-            {...register('consentGiven')}
-            type="checkbox"
-            className="
-              w-5 h-5 mt-0.5 rounded border-gray-300 flex-shrink-0
-              accent-[var(--color-primary)] cursor-pointer
-            "
-          />
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <Shield className="w-4 h-4 text-blue-500" />
-              <span className="text-sm font-semibold text-gray-800">
-                Съгласие за известявания
-              </span>
-            </div>
-            <p className="text-xs text-gray-600 leading-relaxed">
-              Съгласявам се да получавам потвърждения и напомняния за моите часове
-              чрез Telegram/SMS. Данните ми се обработват само за тази цел и не се
-              споделят с трети страни. (GDPR)
-            </p>
-            {errors.consentGiven && (
-              <p className="text-red-500 text-xs mt-1 font-medium">
-                {errors.consentGiven.message}
-              </p>
-            )}
-          </div>
-        </label>
+        <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+          С резервацията се изпращат задължителни потвърждение и напомняне за часа.
+        </div>
 
         <button
           type="submit"

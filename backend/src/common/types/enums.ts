@@ -1,5 +1,6 @@
 export enum AppointmentStatus {
   PENDING = 'pending',
+  PROPOSAL_PENDING = 'proposal_pending',
   CONFIRMED = 'confirmed',
   COMPLETED = 'completed',
   CANCELLED = 'cancelled',
@@ -9,6 +10,7 @@ export enum AppointmentStatus {
 export enum NotificationJobType {
   BOOKING_CONFIRMED = 'booking-confirmed',
   BOOKING_PENDING = 'booking-pending',
+  BOOKING_PROPOSAL = 'booking-proposal',
   BOOKING_APPROVED = 'booking-approved',
   BOOKING_CANCELLED_CLIENT = 'booking-cancelled-client',
   BOOKING_CANCELLED_BUSINESS = 'booking-cancelled-business',

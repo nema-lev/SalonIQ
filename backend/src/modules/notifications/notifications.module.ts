@@ -6,13 +6,20 @@ import { TelegramWebhookController } from './telegram-webhook.controller';
 import { NotificationProcessor } from './notification.processor';
 import { AppointmentsModule } from '../appointments/appointments.module';
 
+const redisHost = process.env.REDIS_HOST?.trim();
+const redisEnabled = Boolean(redisHost);
+
 @Module({
   imports: [
-    BullModule.registerQueue({ name: 'notifications' }),
+    ...(redisEnabled ? [BullModule.registerQueue({ name: 'notifications' })] : []),
     AppointmentsModule,
   ],
   controllers: [TelegramWebhookController],
-  providers: [TelegramService, SmsApiService, NotificationProcessor],
+  providers: [
+    TelegramService,
+    SmsApiService,
+    ...(redisEnabled ? [NotificationProcessor] : []),
+  ],
   exports: [TelegramService],
 })
 export class NotificationsModule {}

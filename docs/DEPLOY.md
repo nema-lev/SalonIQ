@@ -306,8 +306,8 @@ sudo systemctl enable nginx
 1. Отиди в Telegram → намери **@BotFather**
 2. Напиши `/newbot`
 3. Избери:
-   - Публично ime: `Салон Аврора`
-   - Username: `salon_aurora_bg_bot`
+   - Публично име: `<Име на бизнеса>`
+   - Username: `<tenant_bot_username>`
 4. Получаваш **Bot Token**: `7123456789:AAxxxxxx...`
 5. Запази го — ще го въведеш при създаване на tenant
 
@@ -351,9 +351,9 @@ INSERT INTO public.tenants (
   min_advance_booking_hours, max_advance_booking_days,
   plan, plan_status
 ) VALUES (
-  'salon-aurora',
-  'tenant_salon_aurora',
-  'Салон Аврора',
+  '<tenant-slug>',
+  'tenant_<tenant_slug>',
+  '<Име на бизнеса>',
   'SALON',
   'Вашият любим салон за красота в София',
   'ул. Витоша 42',
@@ -376,19 +376,19 @@ INSERT INTO public.tenants (
 );
 
 # Вземи tenant ID
-SELECT id FROM public.tenants WHERE slug = 'salon-aurora';
+SELECT id FROM public.tenants WHERE slug = '<tenant-slug>';
 ```
 
 ```bash
 # Създай schema за tenant-а
 psql -h localhost -U saloniq_user -d saloniq_db \
-  -c "SELECT create_tenant_schema('tenant_salon_aurora');"
+  -c "SELECT create_tenant_schema('tenant_<tenant_slug>');"
 ```
 
 ```bash
 # Добави услуги
 psql -h localhost -U saloniq_user -d saloniq_db <<EOF
-SET search_path TO tenant_salon_aurora, public;
+SET search_path TO tenant_<tenant_slug>, public;
 
 INSERT INTO services (name, category, duration_minutes, price, color) VALUES
   ('Подстригване', 'Коса', 30, 25, '#8b5cf6'),
@@ -429,7 +429,7 @@ sudo tail -f /var/log/nginx/error.log
 sudo tail -f /var/log/postgresql/postgresql-16-main.log
 
 # Провери дали сайтът работи
-curl -I https://salon-aurora.saloniq.bg
+curl -I https://<tenant-slug>.saloniq.bg
 
 # Провери Telegram webhook
 curl "https://api.telegram.org/botТВОЯ_BOT_TOKEN/getWebhookInfo"
@@ -448,8 +448,8 @@ pm2 logs saloniq-backend # Логове на backend
 ## 🎉 Резултат
 
 След успешен деплой:
-- `https://salon-aurora.saloniq.bg` — Публична booking страница
-- `https://salon-aurora.saloniq.bg/admin` — Admin панел
+- `https://<tenant-slug>.saloniq.bg` — Публична booking страница
+- `https://<tenant-slug>.saloniq.bg/admin` — Admin панел
 - Telegram Bot активен и приема callback-и
 - Клиентите могат да записват часове и получават потвърждения
 

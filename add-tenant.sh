@@ -9,7 +9,7 @@ echo "🏪 SalonIQ — Добавяне на нов бизнес"
 echo "────────────────────────────────────"
 echo ""
 
-read -p "Slug (напр. salon-aurora, само малки букви и тирета): " SLUG
+read -p "Slug (напр. demo-business, само малки букви и тирета): " SLUG
 read -p "Бизнес наименование: " BUSINESS_NAME
 read -p "Тип (SALON/BARBERSHOP/HAIR_SALON/NAIL_STUDIO/SPA/DENTAL/MASSAGE/OTHER): " BUSINESS_TYPE
 read -p "Адрес (напр. ул. Витоша 42): " ADDRESS

@@ -97,6 +97,28 @@ export class SmsApiService {
     return this.sendSms(opts.phone, lines.join('\n'), opts.senderId, opts.apiToken);
   }
 
+  async sendProposalSms(opts: {
+    phone: string;
+    clientName: string;
+    businessName: string;
+    serviceName: string;
+    dateStr: string;
+    timeStr: string;
+    acceptUrl: string;
+    rejectUrl: string;
+    apiToken: string;
+    senderId: string;
+  }) {
+    const message =
+      `${opts.businessName}: предложение за час\n` +
+      `${opts.clientName}, ${opts.serviceName}\n` +
+      `${opts.dateStr} в ${opts.timeStr}\n` +
+      `Приеми: ${opts.acceptUrl}\n` +
+      `Откажи: ${opts.rejectUrl}`;
+
+    return this.sendSms(opts.phone, message, opts.senderId, opts.apiToken);
+  }
+
   private normalizePhone(phone: string): string | null {
     let cleaned = phone.replace(/[\s\-()]/g, '');
     if (cleaned.startsWith('0')) cleaned = '+359' + cleaned.substring(1);

@@ -16,6 +16,14 @@ export function BookingSuccess({ appointment, formData, onNewBooking }: BookingS
   const tenant = useTenant();
   const copy = getBusinessCopy(tenant.businessType);
   const isPending = appointment.status === 'pending';
+  const reminderText =
+    tenant.reminderHours.length > 0
+      ? tenant.reminderHours
+          .slice()
+          .sort((a, b) => b - a)
+          .map((hours) => `${hours} ${hours === 1 ? 'час' : 'часа'}`)
+          .join(' и ')
+      : null;
 
   return (
     <motion.div
@@ -41,13 +49,13 @@ export function BookingSuccess({ appointment, formData, onNewBooking }: BookingS
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
       >
-        <h2 className="text-2xl font-bold text-gray-900 mb-2">
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">
           {isPending ? '⏳ Заявката е изпратена!' : '✅ Резервацията е потвърдена!'}
         </h2>
         <p className="text-gray-500 mb-8 leading-relaxed">
           {isPending
             ? `Заявката Ви за ${copy.bookingLabel} в ${tenant.businessName} е получена и очаква потвърждение от нашия екип. Ще получите известяване скоро.`
-            : `Резервацията Ви в ${tenant.businessName} е потвърдена. Ще получите потвърждение чрез Telegram.`
+            : `${copy.bookingLabel.charAt(0).toUpperCase() + copy.bookingLabel.slice(1)}ът Ви в ${tenant.businessName} е потвърден. Ще получите потвърждение чрез Telegram.`
           }
         </p>
 
@@ -55,7 +63,7 @@ export function BookingSuccess({ appointment, formData, onNewBooking }: BookingS
         <div className="bg-gradient-to-br from-[var(--color-primary)]/5 to-[var(--color-secondary)]/5 rounded-2xl p-5 mb-6 text-left">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <p className="text-xs text-gray-400 mb-0.5">Услуга</p>
+              <p className="text-xs text-gray-400 mb-0.5">{copy.serviceLabel.charAt(0).toUpperCase() + copy.serviceLabel.slice(1)}</p>
               <p className="font-semibold text-gray-800 text-sm">{formData.serviceName}</p>
             </div>
             <div>
@@ -83,7 +91,8 @@ export function BookingSuccess({ appointment, formData, onNewBooking }: BookingS
               Известявания чрез Telegram
             </p>
             <p className="text-xs text-blue-600 leading-relaxed">
-              Ще получите потвърждение и напомняне 24 часа преди часа.
+              Ще получите потвърждение
+              {reminderText ? ` и напомняне ${reminderText} преди часа.` : '.'}
               За да получавате съобщения, стартирайте бота в Telegram.
             </p>
             {tenant.slug && (

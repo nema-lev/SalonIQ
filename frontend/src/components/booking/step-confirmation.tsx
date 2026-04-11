@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -8,6 +7,7 @@ import {
   Scissors, MapPin, AlertCircle, Loader2, CheckCircle2,
 } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
+import { formatBulgarianPhoneForDisplay } from '@/lib/phone';
 import { useTenant } from '@/lib/tenant-context';
 import { getBusinessCopy } from '@/lib/business-copy';
 import type { BookingFormData } from '@/types/booking';
@@ -36,9 +36,9 @@ export function StepConfirmation({ formData, onBack, onSuccess }: StepConfirmati
         startAt: formData.startAt,
         clientName: formData.clientName,
         clientPhone: formData.clientPhone,
-        clientEmail: formData.clientEmail || undefined,
+        clientEmail: tenant.collectClientEmail ? formData.clientEmail || undefined : undefined,
         notes: formData.notes || undefined,
-        consentGiven: formData.consentGiven,
+        consentGiven: true,
       }),
     onSuccess: (data) => {
       onSuccess(data);
@@ -52,7 +52,7 @@ export function StepConfirmation({ formData, onBack, onSuccess }: StepConfirmati
   const rows: BookingRow[] = [
     {
       icon: <Scissors className="w-4 h-4 text-[var(--color-primary)]" />,
-      label: 'Услуга',
+      label: copy.serviceLabel.charAt(0).toUpperCase() + copy.serviceLabel.slice(1),
       value: `${formData.serviceName} (${formData.serviceDuration} мин.)`,
     },
     {
@@ -78,9 +78,9 @@ export function StepConfirmation({ formData, onBack, onSuccess }: StepConfirmati
     {
       icon: <Phone className="w-4 h-4 text-gray-400" />,
       label: 'Телефон',
-      value: formData.clientPhone,
+      value: formatBulgarianPhoneForDisplay(formData.clientPhone),
     },
-    ...(formData.clientEmail
+    ...(tenant.collectClientEmail && formData.clientEmail
       ? [{ icon: <Mail className="w-4 h-4 text-gray-400" />, label: 'Email', value: formData.clientEmail }]
       : []),
     ...(tenant.address
@@ -99,8 +99,8 @@ export function StepConfirmation({ formData, onBack, onSuccess }: StepConfirmati
         Назад
       </button>
 
-      <h2 className="text-2xl font-bold text-gray-900 mb-2">Потвърдете часа</h2>
-      <p className="text-gray-500 mb-6">Проверете данните преди да потвърдите резервацията</p>
+      <h2 className="text-2xl font-bold text-gray-900 mb-2">Потвърдете данните</h2>
+      <p className="text-gray-500 mb-6">Проверете детайлите преди да потвърдите {copy.bookingLabel}а</p>
 
       {/* Summary card */}
       <div className="bg-gray-50 rounded-2xl p-5 mb-5 space-y-3.5">
@@ -123,7 +123,7 @@ export function StepConfirmation({ formData, onBack, onSuccess }: StepConfirmati
             <div className="flex items-center justify-between">
               <span className="font-semibold text-gray-700">Приблизителна цена</span>
               <span className="text-xl font-bold text-[var(--color-primary)]">
-                {formData.servicePrice} лв.
+                {formData.servicePrice} €
               </span>
             </div>
           </div>
@@ -139,13 +139,13 @@ export function StepConfirmation({ formData, onBack, onSuccess }: StepConfirmati
       )}
 
       {/* Cancellation policy */}
-      {tenant.cancellationHours > 0 && (
+      {tenant.allowClientCancellation && tenant.cancellationHours > 0 && (
         <div className="flex items-start gap-3 bg-blue-50 rounded-xl p-4 mb-6">
           <AlertCircle className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
           <p className="text-xs text-blue-700 leading-relaxed">
             <span className="font-semibold">Политика за отмяна:</span> Можете да отмените
-            безплатно до {tenant.cancellationHours} часа преди {copy.bookingLabel}а. Потвърждение и напомняне
-            ще получите чрез Telegram.
+            безплатно до {tenant.cancellationHours} часа преди {copy.bookingLabel}а.
+            {' '}Потвърждение и напомняне се изпращат автоматично.
           </p>
         </div>
       )}

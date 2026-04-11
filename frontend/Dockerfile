@@ -3,7 +3,7 @@ FROM node:20-alpine AS development
 WORKDIR /app
 RUN apk add --no-cache curl
 COPY package*.json ./
-RUN npm ci
+RUN npm install --legacy-peer-deps
 COPY . .
 EXPOSE 3000
 CMD ["npm", "run", "dev"]
@@ -12,7 +12,7 @@ CMD ["npm", "run", "dev"]
 FROM node:20-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+RUN npm install --legacy-peer-deps
 COPY . .
 RUN mkdir -p public
 
@@ -38,9 +38,6 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
 USER nextjs
 EXPOSE 3000
-
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-  CMD curl -f http://localhost:3000 || exit 1
 
 ENTRYPOINT ["dumb-init", "--"]
 CMD ["node", "server.js"]

@@ -5,6 +5,7 @@
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["multiSchema", "postgresqlExtensions"]
+  binaryTargets   = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
@@ -20,9 +21,9 @@ datasource db {
 
 model Tenant {
   id               String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  slug             String           @unique // salon-aurora → salon-aurora.saloniq.bg
-  customDomain     String?          @unique // rezervacii.salon-aurora.com
-  schemaName       String           @unique // tenant_salon_aurora
+  slug             String           @unique // demo-business → demo-business.saloniq.bg
+  customDomain     String?          @unique // booking.example.com
+  schemaName       String           @unique // tenant_demo_business
 
   // Бизнес информация
   businessName     String
@@ -50,7 +51,7 @@ model Tenant {
   smsApiKey        String?          // smsapi.bg
   smsSenderId      String?          // Изпращач на SMS
   viberBotToken    String?          // Бъдеще
-  emailFrom        String?          // noreply@salon-aurora.saloniq.bg
+  emailFrom        String?          // noreply@business.example
 
   // White-label тема
   themeConfig      Json             @default("{}") // primaryColor, secondaryColor, logo, favicon, font

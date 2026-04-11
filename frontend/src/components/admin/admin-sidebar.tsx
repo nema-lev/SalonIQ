@@ -3,85 +3,216 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  CalendarDays, Users, Scissors, BarChart3,
-  Settings, LogOut, ChevronRight,
+  CalendarDays,
+  Users,
+  User,
+  Scissors,
+  BarChart3,
+  Settings,
+  LogOut,
+  ChevronRight,
+  X,
 } from 'lucide-react';
 import { useTenant } from '@/lib/tenant-context';
 
 const NAV_ITEMS = [
   { href: '/admin', label: 'Календар', icon: CalendarDays, exact: true },
   { href: '/admin/clients', label: 'Клиенти', icon: Users },
+  { href: '/admin/staff', label: 'Персонал', icon: User },
   { href: '/admin/services', label: 'Услуги', icon: Scissors },
   { href: '/admin/stats', label: 'Статистики', icon: BarChart3 },
   { href: '/admin/settings', label: 'Настройки', icon: Settings },
 ];
 
-export function AdminSidebar() {
+interface AdminSidebarProps {
+  mobileOpen?: boolean;
+  onClose?: () => void;
+}
+
+function SidebarBody({ onClose }: { onClose?: () => void }) {
   const pathname = usePathname();
   const tenant = useTenant();
 
   const handleLogout = () => {
     localStorage.removeItem('saloniq_token');
+    localStorage.removeItem('saloniq_tenant_slug');
     window.location.href = '/admin/login';
   };
 
   return (
-    <aside className="w-64 bg-white border-r border-gray-100 flex flex-col min-h-screen">
-      {/* Logo area */}
-      <div className="p-5 border-b border-gray-100">
-        <div className="flex items-center gap-3">
-          <div
-            className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-black text-sm"
-            style={{ backgroundColor: tenant.theme.primaryColor }}
-          >
-            {tenant.businessName.charAt(0)}
+    <>
+      <div
+        className="border-b border-gray-100"
+        style={{ padding: 20, borderBottom: '1px solid #e5e7eb' }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+            <div
+              style={{
+                width: 42,
+                height: 42,
+                borderRadius: 14,
+                backgroundColor: tenant.theme.primaryColor,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#fff',
+                fontWeight: 800,
+                fontSize: 16,
+                flexShrink: 0,
+              }}
+            >
+              {tenant.businessName.charAt(0)}
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <p style={{ margin: 0, fontSize: 15, fontWeight: 800, color: '#111827' }}>
+                {tenant.businessName}
+              </p>
+              <p style={{ margin: '4px 0 0', fontSize: 12, color: '#6b7280' }}>Admin панел</p>
+            </div>
           </div>
-          <div className="min-w-0">
-            <p className="font-bold text-gray-900 text-sm truncate">{tenant.businessName}</p>
-            <p className="text-xs text-gray-400">Admin панел</p>
-          </div>
+
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="lg:hidden"
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 12,
+                border: '1px solid #e5e7eb',
+                background: '#fff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                flexShrink: 0,
+              }}
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 p-4 space-y-1">
+      <nav style={{ flex: 1, padding: 16, overflowY: 'auto' }}>
         {NAV_ITEMS.map(({ href, label, icon: Icon, exact }) => {
           const isActive = exact ? pathname === href : pathname.startsWith(href);
           return (
             <Link
               key={href}
               href={href}
-              className={`
-                flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium
-                transition-all duration-150 group
-                ${isActive
-                  ? 'bg-[var(--color-primary)] text-white shadow-md shadow-[var(--color-primary)]/25'
-                  : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                }
-              `}
-              style={isActive ? { backgroundColor: tenant.theme.primaryColor } : {}}
+              onClick={onClose}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                padding: '12px 14px',
+                borderRadius: 14,
+                fontSize: 14,
+                fontWeight: 600,
+                color: isActive ? '#fff' : '#374151',
+                backgroundColor: isActive ? tenant.theme.primaryColor : 'transparent',
+                textDecoration: 'none',
+                marginBottom: 6,
+              }}
             >
-              <Icon className="w-4.5 h-4.5 flex-shrink-0" />
-              <span className="flex-1">{label}</span>
+              <Icon className="w-4 h-4" />
+              <span style={{ flex: 1 }}>{label}</span>
               {isActive && <ChevronRight className="w-3.5 h-3.5 opacity-70" />}
             </Link>
           );
         })}
       </nav>
 
-      {/* Logout */}
-      <div className="p-4 border-t border-gray-100">
+      <div style={{ padding: 16, borderTop: '1px solid #e5e7eb' }}>
         <button
           onClick={handleLogout}
-          className="
-            w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium
-            text-gray-500 hover:bg-red-50 hover:text-red-600 transition-all duration-150
-          "
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            padding: '12px 14px',
+            borderRadius: 14,
+            border: '1px solid #e5e7eb',
+            background: '#fff',
+            color: '#4b5563',
+            fontSize: 14,
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
         >
           <LogOut className="w-4 h-4" />
           Изход
         </button>
       </div>
-    </aside>
+    </>
+  );
+}
+
+export function AdminSidebar({ mobileOpen = false, onClose }: AdminSidebarProps) {
+  return (
+    <>
+      <aside
+        className="hidden lg:flex"
+        style={{
+          width: 280,
+          background: '#fff',
+          borderRight: '1px solid #e5e7eb',
+          flexDirection: 'column',
+          height: '100dvh',
+          position: 'sticky',
+          top: 0,
+        }}
+      >
+        <SidebarBody />
+      </aside>
+
+      {mobileOpen && (
+        <div
+          className="lg:hidden"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 60,
+            display: 'flex',
+          }}
+        >
+          <aside
+            style={{
+              width: 'min(86vw, 320px)',
+              background: '#fff',
+              borderRight: '1px solid #e5e7eb',
+              display: 'flex',
+              flexDirection: 'column',
+              height: '100dvh',
+              boxShadow: '12px 0 42px rgba(15, 23, 42, 0.18)',
+            }}
+          >
+            <SidebarBody onClose={onClose} />
+          </aside>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Затвори менюто"
+            style={{
+              flex: 1,
+              border: 'none',
+              background: 'rgba(15, 23, 42, 0.45)',
+              cursor: 'pointer',
+            }}
+          />
+        </div>
+      )}
+    </>
   );
 }

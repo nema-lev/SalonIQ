@@ -11,12 +11,14 @@ import './globals.css';
 async function getTenantConfig(host: string): Promise<TenantConfig | null> {
   try {
     const backendUrl = process.env.BACKEND_URL || 'http://localhost:3001';
+    const defaultTenantSlug = process.env.DEFAULT_TENANT_SLUG || '';
     const res = await fetch(`${backendUrl}/api/v1/tenants/config`, {
       headers: {
         'X-Forwarded-Host': host,
         'X-Internal-Key': process.env.INTERNAL_API_KEY || '',
+        'X-Tenant-Slug': defaultTenantSlug,
       },
-      next: { revalidate: 300 }, // Cache 5 минути
+      cache: 'no-store',
     });
 
     if (!res.ok) return null;

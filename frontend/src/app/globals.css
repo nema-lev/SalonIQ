@@ -8,19 +8,63 @@
   --color-primary: #7c3aed;
   --color-secondary: #a855f7;
   --color-accent: #f59e0b;
-  --radius: 8px;
-  --font-sans: 'Inter', system-ui, sans-serif;
+  --radius: 18px;
+  --font-sans: 'Inter', 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
 
   /* Backgrounds */
-  --bg-surface: #f8f7ff;
-  --bg-card: #ffffff;
+  --bg-surface: #f6f4ff;
+  --bg-card: rgba(255, 255, 255, 0.78);
+  --text-strong: #1c1535;
+  --text-soft: #675f84;
+  --line-soft: rgba(124, 58, 237, 0.12);
+  --shadow-soft: 0 18px 48px rgba(73, 39, 142, 0.08);
+  --shadow-strong: 0 28px 80px rgba(73, 39, 142, 0.18);
+  --bg-orb-1: rgba(168, 85, 247, 0.18);
+  --bg-orb-2: rgba(124, 58, 237, 0.14);
+  --bg-gradient-start: #faf8ff;
+  --bg-gradient-mid: #f6f4ff;
+  --bg-gradient-end: #f4f2fb;
 }
 
 /* ─── Base styles ────────────────────────────────────────────────────── */
+html {
+  background:
+    radial-gradient(circle at top left, var(--bg-orb-1), transparent 30%),
+    radial-gradient(circle at top right, var(--bg-orb-2), transparent 28%),
+    linear-gradient(180deg, var(--bg-gradient-start) 0%, var(--bg-gradient-mid) 34%, var(--bg-gradient-end) 100%);
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+  width: 100%;
+}
+
 body {
   font-family: var(--font-sans);
-  background-color: var(--bg-surface);
-  color: #1a1a2e;
+  background:
+    radial-gradient(circle at top left, var(--bg-orb-1), transparent 30%),
+    radial-gradient(circle at top right, var(--bg-orb-2), transparent 28%),
+    linear-gradient(180deg, var(--bg-gradient-start) 0%, var(--bg-gradient-mid) 34%, var(--bg-gradient-end) 100%);
+  color: var(--text-strong);
+  min-height: 100vh;
+  margin: 0;
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+  width: 100%;
+  position: relative;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+a {
+  color: inherit;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
 }
 
 /* ─── Scrollbar ──────────────────────────────────────────────────────── */
@@ -35,6 +79,38 @@ body {
   --rdp-background-color: color-mix(in srgb, var(--color-primary) 10%, transparent) !important;
   --rdp-outline: 2px solid var(--color-primary) !important;
   margin: 0 !important;
+}
+
+.booking-day-picker {
+  width: 100%;
+}
+
+.booking-day-picker .rdp-months,
+.booking-day-picker .rdp-month,
+.booking-day-picker .rdp-table {
+  width: 100%;
+}
+
+.booking-day-picker .rdp-month {
+  margin: 0;
+}
+
+.booking-day-picker .rdp-table {
+  max-width: none;
+  table-layout: fixed;
+}
+
+.booking-day-picker .rdp-head_cell,
+.booking-day-picker .rdp-cell,
+.booking-day-picker .rdp-day,
+.booking-day-picker .rdp-day_button,
+.booking-day-picker .rdp-weeknumber {
+  width: var(--rdp-cell-size);
+  max-width: var(--rdp-cell-size);
+}
+
+.booking-day-picker .rdp-caption {
+  padding: 0 4px 10px;
 }
 
 .rdp-button:hover:not([disabled]):not(.rdp-day_selected) {
@@ -81,4 +157,12 @@ body {
 
 .card {
   @apply bg-white rounded-2xl shadow-sm border border-gray-100 p-5;
+}
+
+.glass-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--line-soft);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
 }

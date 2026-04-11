@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { format } from 'date-fns';
 import { bg } from 'date-fns/locale';
 import { toZonedTime } from 'date-fns-tz';
+import { renderNotificationTemplate } from './template.utils';
 
 const TIMEZONE = 'Europe/Sofia';
 
@@ -22,6 +23,20 @@ export interface SendMessageResult {
   success: boolean;
   messageId?: number;
   error?: string;
+}
+
+export interface TelegramWebhookResult {
+  ok: boolean;
+  description?: string;
+  errorCode?: number;
+}
+
+export interface TelegramBotProfileResult {
+  ok: boolean;
+  username?: string;
+  firstName?: string;
+  description?: string;
+  errorCode?: number;
 }
 
 /**
@@ -47,29 +62,38 @@ export class TelegramService {
     appointment: AppointmentDetails,
     businessName: string,
     status: 'confirmed' | 'pending',
+    allowClientCancellation = true,
+    template?: string,
   ): Promise<SendMessageResult> {
     const zonedStart = toZonedTime(appointment.startAt, TIMEZONE);
     const dateStr = format(zonedStart, "EEEE, d MMMM yyyy 'г.'", { locale: bg });
     const timeStr = format(zonedStart, 'HH:mm');
 
     const isPending = status === 'pending';
-    const statusEmoji = isPending ? '⏳' : '✅';
-    const statusText = isPending
-      ? 'Заявката е получена и очаква потвърждение.'
-      : 'Часът е потвърден. Очакваме Ви!';
-
-    const text =
-      `${statusEmoji} *${businessName}*\n` +
-      `─────────────────\n` +
-      `${isPending ? '📋 Заявка за час' : '✅ Потвърждение за час'}\n\n` +
-      `*Здравейте, ${appointment.clientName}!*\n\n` +
-      `🔧 *Услуга:* ${appointment.serviceName}\n` +
-      `👤 *Специалист:* ${appointment.staffName}\n` +
-      `📅 *Дата:* ${dateStr}\n` +
-      `🕐 *Час:* ${timeStr}\n` +
-      (appointment.price ? `💰 *Цена:* ${appointment.price} лв.\n` : '') +
-      (appointment.address ? `📍 *Адрес:* ${appointment.address}\n` : '') +
-      `\n${statusText}`;
+    const text = template
+      ? renderNotificationTemplate(template, {
+          Бизнес: businessName,
+          Име: appointment.clientName,
+          ПълноИме: appointment.clientName,
+          Телефон: appointment.clientPhone,
+          Услуга: appointment.serviceName,
+          Специалист: appointment.staffName,
+          Дата: dateStr,
+          Час: timeStr,
+          Адрес: appointment.address || '',
+          Цена: appointment.price ? `${appointment.price} €` : '',
+        })
+      : `${isPending ? '⏳' : '✅'} *${businessName}*\n` +
+        `─────────────────\n` +
+        `${isPending ? '📋 Заявка за час' : '✅ Потвърждение за час'}\n\n` +
+        `*Здравейте, ${appointment.clientName}!*\n\n` +
+        `🔧 *Услуга:* ${appointment.serviceName}\n` +
+        `👤 *Специалист:* ${appointment.staffName}\n` +
+        `📅 *Дата:* ${dateStr}\n` +
+        `🕐 *Час:* ${timeStr}\n` +
+        (appointment.price ? `💰 *Цена:* ${appointment.price} €\n` : '') +
+        (appointment.address ? `📍 *Адрес:* ${appointment.address}\n` : '') +
+        `\n${isPending ? 'Заявката е получена и очаква потвърждение.' : 'Часът е потвърден. Очакваме Ви!'}`;
 
     const keyboard = isPending
       ? undefined
@@ -78,13 +102,13 @@ export class TelegramService {
             [
               { text: '✅ Потвърждавам присъствие', callback_data: `confirm_${appointment.id}` },
             ],
-            [
-              { text: '❌ Отменям', callback_data: `cancel_client_${appointment.id}` },
-            ],
+            ...(allowClientCancellation
+              ? [[{ text: '❌ Отменям', callback_data: `cancel_client_${appointment.id}` }]]
+              : []),
           ],
         };
 
-    return this.sendMessage(botToken, chatId, text, keyboard);
+    return this.sendMessage(botToken, chatId, text, keyboard, template ? undefined : 'Markdown');
   }
 
   /**
@@ -96,21 +120,33 @@ export class TelegramService {
     appointment: AppointmentDetails,
     businessName: string,
     hoursUntil: 24 | 2,
+    allowClientCancellation = true,
+    template?: string,
   ): Promise<SendMessageResult> {
     const zonedStart = toZonedTime(appointment.startAt, TIMEZONE);
     const timeStr = format(zonedStart, 'HH:mm');
     const dateStr = format(zonedStart, "d MMMM", { locale: bg });
-    const timeLabel = hoursUntil === 24 ? 'утре' : 'след 2 часа';
-
-    const text =
-      `🔔 *Напомняне — ${businessName}*\n` +
-      `─────────────────\n\n` +
-      `*${appointment.clientName}*, имате час *${timeLabel}*!\n\n` +
-      `🔧 *${appointment.serviceName}*\n` +
-      `👤 ${appointment.staffName}\n` +
-      `🕐 ${dateStr} в ${timeStr}\n` +
-      (appointment.address ? `📍 ${appointment.address}\n` : '') +
-      `\nМоля потвърдете присъствието си:`;
+    const text = template
+      ? renderNotificationTemplate(template, {
+          Бизнес: businessName,
+          Име: appointment.clientName,
+          ПълноИме: appointment.clientName,
+          Телефон: appointment.clientPhone,
+          Услуга: appointment.serviceName,
+          Специалист: appointment.staffName,
+          Дата: dateStr,
+          Час: timeStr,
+          Адрес: appointment.address || '',
+          Цена: appointment.price ? `${appointment.price} €` : '',
+        })
+      : `🔔 *Напомняне — ${businessName}*\n` +
+        `─────────────────\n\n` +
+        `*${appointment.clientName}*, имате час *${hoursUntil === 24 ? 'утре' : 'след 2 часа'}*!\n\n` +
+        `🔧 *${appointment.serviceName}*\n` +
+        `👤 ${appointment.staffName}\n` +
+        `🕐 ${dateStr} в ${timeStr}\n` +
+        (appointment.address ? `📍 ${appointment.address}\n` : '') +
+        `\nМоля потвърдете присъствието си:`;
 
     const keyboard =
       hoursUntil === 24
@@ -118,11 +154,46 @@ export class TelegramService {
             inline_keyboard: [
               [
                 { text: '✅ Потвърждавам', callback_data: `confirm_${appointment.id}` },
-                { text: '❌ Отменям', callback_data: `cancel_client_${appointment.id}` },
+                ...(allowClientCancellation
+                  ? [{ text: '❌ Отменям', callback_data: `cancel_client_${appointment.id}` }]
+                  : []),
               ],
             ],
           }
         : undefined;
+
+    return this.sendMessage(botToken, chatId, text, keyboard, template ? undefined : 'Markdown');
+  }
+
+  async sendProposalRequest(
+    botToken: string,
+    chatId: string,
+    appointment: AppointmentDetails,
+    businessName: string,
+  ): Promise<SendMessageResult> {
+    const zonedStart = toZonedTime(appointment.startAt, TIMEZONE);
+    const dateStr = format(zonedStart, "EEEE, d MMMM yyyy 'г.'", { locale: bg });
+    const timeStr = format(zonedStart, 'HH:mm');
+
+    const text =
+      `🕓 *${businessName} — предложение за час*\n` +
+      `─────────────────\n\n` +
+      `*${appointment.clientName}*, предлагаме Ви:\n\n` +
+      `🔧 *${appointment.serviceName}*\n` +
+      `👤 *${appointment.staffName}*\n` +
+      `📅 *${dateStr}*\n` +
+      `🕐 *${timeStr}*\n` +
+      (appointment.address ? `📍 *${appointment.address}*\n` : '') +
+      `\nМоля, потвърдете дали този час Ви устройва.`;
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          { text: '✅ Приемам', callback_data: `proposal_accept_${appointment.id}` },
+          { text: '❌ Отказвам', callback_data: `proposal_reject_${appointment.id}` },
+        ],
+      ],
+    };
 
     return this.sendMessage(botToken, chatId, text, keyboard);
   }
@@ -138,23 +209,35 @@ export class TelegramService {
     cancelledBy: 'client' | 'owner',
     reason?: string,
     bookingUrl?: string,
+    template?: string,
   ): Promise<SendMessageResult> {
     const zonedStart = toZonedTime(appointment.startAt, TIMEZONE);
     const dateStr = format(zonedStart, "d MMMM", { locale: bg });
     const timeStr = format(zonedStart, 'HH:mm');
 
-    const isByBusiness = cancelledBy === 'owner';
-
-    const text =
-      `❌ *${businessName} — Отменен час*\n` +
-      `─────────────────\n\n` +
-      `*${appointment.clientName}*, часът Ви на *${dateStr} в ${timeStr}* беше отменен` +
-      (isByBusiness ? ' от нашия екип' : '') +
-      '.\n' +
-      (reason ? `\n📝 *Причина:* ${reason}\n` : '') +
-      (isByBusiness && bookingUrl
-        ? `\nМожете да запишете нов час тук:\n${bookingUrl}`
-        : '\nАко желаете, можете да запишете нов час.');
+    const text = template
+      ? renderNotificationTemplate(template, {
+          Бизнес: businessName,
+          Име: appointment.clientName,
+          ПълноИме: appointment.clientName,
+          Телефон: appointment.clientPhone,
+          Услуга: appointment.serviceName,
+          Специалист: appointment.staffName,
+          Дата: dateStr,
+          Час: timeStr,
+          Адрес: appointment.address || '',
+          Цена: appointment.price ? `${appointment.price} €` : '',
+          Причина: reason || '',
+        })
+      : `❌ *${businessName} — Отменен час*\n` +
+        `─────────────────\n\n` +
+        `*${appointment.clientName}*, часът Ви на *${dateStr} в ${timeStr}* беше отменен` +
+        (cancelledBy === 'owner' ? ' от нашия екип' : '') +
+        '.\n' +
+        (reason ? `\n📝 *Причина:* ${reason}\n` : '') +
+        (cancelledBy === 'owner' && bookingUrl
+          ? `\nМожете да запишете нов час тук:\n${bookingUrl}`
+          : '\nАко желаете, можете да запишете нов час.');
 
     const keyboard =
       bookingUrl
@@ -165,7 +248,7 @@ export class TelegramService {
           }
         : undefined;
 
-    return this.sendMessage(botToken, chatId, text, keyboard);
+    return this.sendMessage(botToken, chatId, text, keyboard, template ? undefined : 'Markdown');
   }
 
   /**
@@ -177,20 +260,33 @@ export class TelegramService {
     appointment: AppointmentDetails,
     businessName: string,
     status: 'confirmed' | 'pending',
+    template?: string,
   ): Promise<SendMessageResult> {
     const zonedStart = toZonedTime(appointment.startAt, TIMEZONE);
     const dateStr = format(zonedStart, "d.MM.yyyy", { locale: bg });
     const timeStr = format(zonedStart, 'HH:mm');
 
-    const text =
-      `🆕 *Нова резервация — ${businessName}*\n` +
-      `─────────────────\n\n` +
-      `👤 *Клиент:* ${appointment.clientName}\n` +
-      `📞 *Телефон:* ${appointment.clientPhone}\n` +
-      `🔧 *Услуга:* ${appointment.serviceName}\n` +
-      `👤 *Специалист:* ${appointment.staffName}\n` +
-      `📅 *Дата:* ${dateStr} в ${timeStr}\n` +
-      (appointment.price ? `💰 *Цена:* ${appointment.price} лв.\n` : '');
+    const text = template
+      ? renderNotificationTemplate(template, {
+          Бизнес: businessName,
+          Име: appointment.clientName,
+          ПълноИме: appointment.clientName,
+          Телефон: appointment.clientPhone,
+          Услуга: appointment.serviceName,
+          Специалист: appointment.staffName,
+          Дата: dateStr,
+          Час: timeStr,
+          Адрес: appointment.address || '',
+          Цена: appointment.price ? `${appointment.price} €` : '',
+        })
+      : `🆕 *Нова резервация — ${businessName}*\n` +
+        `─────────────────\n\n` +
+        `👤 *Клиент:* ${appointment.clientName}\n` +
+        `📞 *Телефон:* ${appointment.clientPhone}\n` +
+        `🔧 *Услуга:* ${appointment.serviceName}\n` +
+        `👤 *Специалист:* ${appointment.staffName}\n` +
+        `📅 *Дата:* ${dateStr} в ${timeStr}\n` +
+        (appointment.price ? `💰 *Цена:* ${appointment.price} €\n` : '');
 
     const keyboard =
       status === 'pending'
@@ -204,7 +300,32 @@ export class TelegramService {
           }
         : undefined;
 
-    return this.sendMessage(botToken, ownerChatId, text, keyboard);
+    return this.sendMessage(botToken, ownerChatId, text, keyboard, template ? undefined : 'Markdown');
+  }
+
+  async sendOwnerProposalResponse(
+    botToken: string,
+    ownerChatId: string,
+    appointment: AppointmentDetails,
+    businessName: string,
+    decision: 'accept' | 'reject',
+  ): Promise<SendMessageResult> {
+    const zonedStart = toZonedTime(appointment.startAt, TIMEZONE);
+    const dateStr = format(zonedStart, 'd.MM.yyyy', { locale: bg });
+    const timeStr = format(zonedStart, 'HH:mm');
+
+    const text =
+      `${decision === 'accept' ? '✅' : '❌'} *${businessName} — отговор по предложение*\n` +
+      `─────────────────\n\n` +
+      `👤 *Клиент:* ${appointment.clientName}\n` +
+      `📞 *Телефон:* ${appointment.clientPhone}\n` +
+      `🔧 *Услуга:* ${appointment.serviceName}\n` +
+      `📅 *Предложен час:* ${dateStr} в ${timeStr}\n\n` +
+      (decision === 'accept'
+        ? 'Клиентът прие предложението.'
+        : 'Клиентът отказа предложението.');
+
+    return this.sendMessage(botToken, ownerChatId, text);
   }
 
   /**
@@ -238,15 +359,19 @@ export class TelegramService {
     chatId: string,
     text: string,
     replyMarkup?: object,
+    parseMode: 'Markdown' | undefined = 'Markdown',
   ): Promise<SendMessageResult> {
     try {
       const url = `${this.apiBase}${botToken}/sendMessage`;
       const body: Record<string, unknown> = {
         chat_id: chatId,
         text,
-        parse_mode: 'Markdown',
         disable_web_page_preview: true,
       };
+
+      if (parseMode) {
+        body.parse_mode = parseMode;
+      }
 
       if (replyMarkup) {
         body.reply_markup = JSON.stringify(replyMarkup);
@@ -301,7 +426,7 @@ export class TelegramService {
   /**
    * Задава webhook за бота
    */
-  async setWebhook(botToken: string, webhookUrl: string): Promise<boolean> {
+  async setWebhook(botToken: string, webhookUrl: string): Promise<TelegramWebhookResult> {
     const response = await fetch(`${this.apiBase}${botToken}/setWebhook`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -311,7 +436,73 @@ export class TelegramService {
         drop_pending_updates: true,
       }),
     });
-    const data = await response.json() as { ok: boolean };
-    return data.ok;
+    const data = await response.json() as { ok: boolean; description?: string; error_code?: number };
+    return {
+      ok: data.ok,
+      description: this.normalizeTelegramDescription(data.description, data.error_code),
+      errorCode: data.error_code,
+    };
+  }
+
+  async getWebhookInfo(botToken: string): Promise<{
+    ok: boolean;
+    url?: string;
+    pendingUpdateCount?: number;
+    lastErrorMessage?: string;
+    lastErrorDate?: number;
+  }> {
+    const response = await fetch(`${this.apiBase}${botToken}/getWebhookInfo`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(10000),
+    });
+    const data = await response.json() as {
+      ok: boolean;
+      result?: {
+        url: string;
+        pending_update_count: number;
+        last_error_message?: string;
+        last_error_date?: number;
+      };
+    };
+
+    return {
+      ok: data.ok,
+      url: data.result?.url,
+      pendingUpdateCount: data.result?.pending_update_count,
+      lastErrorMessage: data.result?.last_error_message,
+      lastErrorDate: data.result?.last_error_date,
+    };
+  }
+
+  async getBotProfile(botToken: string): Promise<TelegramBotProfileResult> {
+    const response = await fetch(`${this.apiBase}${botToken}/getMe`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(10000),
+    });
+    const data = await response.json() as {
+      ok: boolean;
+      result?: {
+        username?: string;
+        first_name?: string;
+      };
+      description?: string;
+      error_code?: number;
+    };
+
+    return {
+      ok: data.ok,
+      username: data.result?.username,
+      firstName: data.result?.first_name,
+      description: this.normalizeTelegramDescription(data.description, data.error_code),
+      errorCode: data.error_code,
+    };
+  }
+
+  private normalizeTelegramDescription(description?: string, errorCode?: number) {
+    if (errorCode === 404 || description === 'Not Found') {
+      return 'Невалиден Bot Token.';
+    }
+
+    return description;
   }
 }

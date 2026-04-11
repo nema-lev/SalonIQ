@@ -2,6 +2,86 @@
 -- Извиква се при регистрация на нов бизнес
 -- Всеки tenant получава пълно копие на таблиците в своя схема
 
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'business_type') THEN
+    CREATE TYPE public.business_type AS ENUM (
+      'SALON',
+      'BARBERSHOP',
+      'HAIR_SALON',
+      'NAIL_STUDIO',
+      'SPA',
+      'DENTAL',
+      'MASSAGE',
+      'BEAUTY',
+      'OTHER'
+    );
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'subscription_plan') THEN
+    CREATE TYPE public.subscription_plan AS ENUM ('BASIC', 'PRO', 'ENTERPRISE');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'plan_status') THEN
+    CREATE TYPE public.plan_status AS ENUM ('TRIAL', 'ACTIVE', 'PAST_DUE', 'CANCELLED');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'owner_role') THEN
+    CREATE TYPE public.owner_role AS ENUM ('OWNER', 'ADMIN');
+  END IF;
+END
+$$;
+
+CREATE TABLE IF NOT EXISTS public.tenants (
+  id                        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  slug                      VARCHAR(255) NOT NULL UNIQUE,
+  custom_domain             VARCHAR(255) UNIQUE,
+  schema_name               VARCHAR(255) NOT NULL UNIQUE,
+  business_name             VARCHAR(255) NOT NULL,
+  business_type             public.business_type NOT NULL DEFAULT 'SALON',
+  description               TEXT,
+  address                   TEXT,
+  city                      VARCHAR(255),
+  phone                     VARCHAR(50),
+  email                     VARCHAR(255),
+  website                   TEXT,
+  google_maps_url           TEXT,
+  working_hours             JSONB NOT NULL DEFAULT '{}'::jsonb,
+  plan                      public.subscription_plan NOT NULL DEFAULT 'BASIC',
+  plan_status               public.plan_status NOT NULL DEFAULT 'TRIAL',
+  trial_ends_at             TIMESTAMPTZ,
+  plan_renews_at            TIMESTAMPTZ,
+  telegram_bot_token        TEXT,
+  telegram_chat_id          TEXT,
+  sms_api_key               TEXT,
+  sms_sender_id             TEXT,
+  viber_bot_token           TEXT,
+  email_from                TEXT,
+  theme_config              JSONB NOT NULL DEFAULT '{}'::jsonb,
+  requires_confirmation     BOOLEAN NOT NULL DEFAULT false,
+  cancellation_hours        INTEGER NOT NULL DEFAULT 24,
+  reminder_hours            INTEGER[] NOT NULL DEFAULT ARRAY[24, 2],
+  max_advance_booking_days  INTEGER NOT NULL DEFAULT 60,
+  min_advance_booking_hours INTEGER NOT NULL DEFAULT 1,
+  created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  is_active                 BOOLEAN NOT NULL DEFAULT true
+);
+
+CREATE TABLE IF NOT EXISTS public.tenant_owners (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id     UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
+  name          VARCHAR(255) NOT NULL,
+  email         VARCHAR(255) NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  role          public.owner_role NOT NULL DEFAULT 'OWNER',
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE OR REPLACE FUNCTION create_tenant_schema(schema_name TEXT)
 RETURNS VOID AS $$
 BEGIN
@@ -147,7 +227,7 @@ BEGIN
       
       created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )', schema_name, schema_name, schema_name);
+    )', schema_name, schema_name, schema_name, schema_name);
 
   -- Индекс за бързо намиране на резервации по дата
   EXECUTE format('
@@ -174,7 +254,7 @@ BEGIN
       end_at      TIMESTAMPTZ NOT NULL,
       note        TEXT,
       created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )', schema_name, schema_name);
+    )', schema_name, schema_name, schema_name);
 
   -- ─── NOTIFICATIONS LOG ────────────────────────────────
   EXECUTE format('
@@ -194,7 +274,7 @@ BEGIN
       sent_at           TIMESTAMPTZ,
       delivered_at      TIMESTAMPTZ,
       created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )', schema_name, schema_name);
+    )', schema_name, schema_name, schema_name, schema_name);
 
   -- ─── WAITLIST ─────────────────────────────────────────
   EXECUTE format('
@@ -211,7 +291,7 @@ BEGIN
       notified_at   TIMESTAMPTZ,
       expires_at    TIMESTAMPTZ,
       created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )', schema_name, schema_name);
+    )', schema_name, schema_name, schema_name, schema_name);
 
   RAISE NOTICE 'Tenant schema % created successfully', schema_name;
 END;

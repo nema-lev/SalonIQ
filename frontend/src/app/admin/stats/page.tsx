@@ -90,7 +90,7 @@ export default function StatsPage() {
             />
             <StatCard
               title="Приход"
-              value={`${stats.totalRevenue} лв.`}
+              value={`${stats.totalRevenue} €`}
               icon={<TrendingUp className="w-5 h-5" />}
               color="green"
             />
@@ -124,7 +124,7 @@ export default function StatsPage() {
                           <span className="text-gray-400 mr-1.5">#{i + 1}</span>
                           {svc.name}
                         </span>
-                        <span className="text-gray-500">{svc.count} пъти · {svc.revenue} лв.</span>
+                        <span className="text-gray-500">{svc.count} пъти · {svc.revenue} €</span>
                       </div>
                       <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
                         <div
@@ -198,7 +198,7 @@ export default function StatsPage() {
                     </div>
                     <div className="min-w-0">
                       <p className="font-semibold text-gray-900 text-sm truncate">{s.name}</p>
-                      <p className="text-xs text-gray-400">{s.count} часа · {s.revenue} лв.</p>
+                      <p className="text-xs text-gray-400">{s.count} часа · {s.revenue} €</p>
                     </div>
                   </div>
                 ))}

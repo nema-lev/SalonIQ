@@ -46,7 +46,7 @@ export function StepDateTime({ serviceId, staffId, onNext, onBack }: StepDateTim
   };
 
   // Зареди слотовете за избраната дата
-  const { data: slots, isLoading: slotsLoading } = useQuery({
+  const { data: slots, isLoading: slotsLoading, error: slotsError } = useQuery({
     queryKey: ['slots', serviceId, staffId, selectedDate ? format(selectedDate, 'yyyy-MM-dd') : null],
     queryFn: () =>
       apiClient.get<TimeSlot[]>('/appointments/slots', {
@@ -57,6 +57,7 @@ export function StepDateTime({ serviceId, staffId, onNext, onBack }: StepDateTim
     enabled: !!selectedDate,
     staleTime: 30 * 1000, // 30 секунди — слотовете се променят бързо
   });
+  const resolvedSlots = slotsError || !slots ? [] : slots;
 
   const handleSelectSlot = (slot: string) => {
     setSelectedSlot(slot);
@@ -92,7 +93,10 @@ export function StepDateTime({ serviceId, staffId, onNext, onBack }: StepDateTim
       <p className="text-gray-500 mb-6">Показваме само свободните часове в реално време</p>
 
       {/* Calendar */}
-      <div className="flex justify-center mb-6">
+      <div
+        className="mb-6 overflow-hidden rounded-[28px] border border-white/70 bg-white/80 p-3 shadow-[0_18px_48px_rgba(73,39,142,0.08)] backdrop-blur-xl"
+        style={{ ['--rdp-cell-size' as string]: 'min(48px, calc((100vw - 76px) / 7))' }}
+      >
         <DayPicker
           mode="single"
           selected={selectedDate}
@@ -104,11 +108,7 @@ export function StepDateTime({ serviceId, staffId, onNext, onBack }: StepDateTim
           locale={bg}
           fromDate={today}
           toDate={maxDate}
-          modifiersClassNames={{
-            selected: 'rdp-day_selected_custom',
-            today: 'rdp-day_today_custom',
-          }}
-          className="rdp-custom"
+          className="booking-day-picker"
         />
       </div>
 
@@ -123,9 +123,9 @@ export function StepDateTime({ serviceId, staffId, onNext, onBack }: StepDateTim
             <div className="flex justify-center py-8">
               <Loader2 className="w-6 h-6 animate-spin text-[var(--color-primary)]" />
             </div>
-          ) : slots && slots.length > 0 ? (
-            <div className="grid grid-cols-4 gap-2">
-              {slots.map((slot) => (
+          ) : resolvedSlots && resolvedSlots.length > 0 ? (
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+              {resolvedSlots.map((slot) => (
                 <button
                   key={slot.start}
                   onClick={() => handleSelectSlot(slot.start)}

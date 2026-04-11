@@ -2,7 +2,7 @@
 /**
  * SalonIQ — Seed скрипт за тестови данни
  *
- * Създава примерен салон "Салон Аврора" с:
+ * Създава примерен бизнес "Примерен бизнес" с:
  * - 3 услуги, 2 служители
  * - 5 тест клиента
  * - 10 примерни резервации
@@ -19,6 +19,10 @@ const bcrypt = require('bcryptjs');
 require('dotenv').config();
 
 const DB_URL = process.env.DATABASE_URL || 'postgresql://saloniq_user:dev_password@localhost:5432/saloniq_db';
+const DEMO_SLUG = 'demo-business';
+const DEMO_SCHEMA = 'tenant_demo_business';
+const DEMO_NAME = 'Примерен бизнес';
+const DEMO_ADMIN_EMAIL = 'admin@demo-business.local';
 
 async function seed() {
   const client = new Client({ connectionString: DB_URL });
@@ -38,9 +42,9 @@ async function seed() {
         min_advance_booking_hours, max_advance_booking_days,
         plan, plan_status, is_active
       ) VALUES (
-        'salon-aurora',
-        'tenant_salon_aurora',
-        'Салон Аврора',
+        '${DEMO_SLUG}',
+        '${DEMO_SCHEMA}',
+        '${DEMO_NAME}',
         'SALON',
         'Вашият любим салон за красота в центъра на София',
         'ул. Витоша 42',
@@ -58,7 +62,7 @@ async function seed() {
       RETURNING id
     `);
 
-    const tenantRes = await client.query(`SELECT id FROM public.tenants WHERE slug = 'salon-aurora'`);
+    const tenantRes = await client.query(`SELECT id FROM public.tenants WHERE slug = '${DEMO_SLUG}'`);
     const tenantId = tenantRes.rows[0].id;
     console.log(`   Tenant ID: ${tenantId}`);
 
@@ -66,19 +70,19 @@ async function seed() {
     const passwordHash = await bcrypt.hash('admin123', 12);
     await client.query(`
       INSERT INTO public.tenant_owners (tenant_id, name, email, password_hash, role)
-      VALUES ($1, 'Елена Петрова', 'admin@salon-aurora.bg', $2, 'OWNER')
+      VALUES ($1, 'Елена Петрова', '${DEMO_ADMIN_EMAIL}', $2, 'OWNER')
       ON CONFLICT (email) DO NOTHING
     `, [tenantId, passwordHash]);
-    console.log('   Owner: admin@salon-aurora.bg / admin123');
+    console.log(`   Owner: ${DEMO_ADMIN_EMAIL} / admin123`);
 
     // ─── 3. Tenant schema ─────────────────────────────────────────────
     console.log('\n🏗️  Creating tenant schema...');
-    await client.query(`SELECT create_tenant_schema('tenant_salon_aurora')`);
-    console.log('   Schema: tenant_salon_aurora ✓');
+    await client.query(`SELECT create_tenant_schema('${DEMO_SCHEMA}')`);
+    console.log(`   Schema: ${DEMO_SCHEMA} ✓`);
 
     // ─── 4. Staff ─────────────────────────────────────────────────────
     console.log('\n👤 Creating staff...');
-    await client.query(`SET search_path TO tenant_salon_aurora, public`);
+    await client.query(`SET search_path TO ${DEMO_SCHEMA}, public`);
 
     const staff1Res = await client.query(`
       INSERT INTO staff (name, role, color, bio, specialties, working_hours, is_active, accepts_online)
@@ -191,10 +195,10 @@ async function seed() {
 
     console.log('\n🎉 Seed завършен успешно!');
     console.log('\n📋 Данни за тест:');
-    console.log('   URL: http://localhost:3000 (с header X-Tenant-Slug: salon-aurora)');
+    console.log(`   URL: http://localhost:3000 (с header X-Tenant-Slug: ${DEMO_SLUG})`);
     console.log('   Admin: http://localhost:3000/admin');
-    console.log('   Login: admin@salon-aurora.bg / admin123');
-    console.log('   Tenant slug: salon-aurora\n');
+    console.log(`   Login: ${DEMO_ADMIN_EMAIL} / admin123`);
+    console.log(`   Tenant slug: ${DEMO_SLUG}\n`);
   } finally {
     await client.end();
   }

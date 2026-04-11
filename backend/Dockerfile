@@ -1,34 +1,34 @@
 # ─── Base ─────────────────────────────────────────────────────────────
-FROM node:20-alpine AS base
+FROM node:20-bookworm-slim AS base
 WORKDIR /app
-RUN apk add --no-cache curl
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates openssl && rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
-RUN npm ci --only=production && npm cache clean --force
+RUN npm install --omit=dev --legacy-peer-deps && npm cache clean --force
 
 # ─── Builder ──────────────────────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM node:20-bookworm-slim AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+RUN npm install --legacy-peer-deps
 COPY . .
 RUN npx prisma generate
 RUN npm run build
 
 # ─── Development ──────────────────────────────────────────────────────
-FROM node:20-alpine AS development
+FROM node:20-bookworm-slim AS development
 WORKDIR /app
-RUN apk add --no-cache curl
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates openssl && rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
-RUN npm ci
+RUN npm install --legacy-peer-deps
 COPY . .
 RUN npx prisma generate
 EXPOSE 3001
 CMD ["npm", "run", "start:dev"]
 
 # ─── Production ───────────────────────────────────────────────────────
-FROM node:20-alpine AS production
+FROM node:20-bookworm-slim AS production
 WORKDIR /app
-RUN apk add --no-cache curl dumb-init
+RUN apt-get update && apt-get install -y --no-install-recommends curl dumb-init ca-certificates openssl && rm -rf /var/lib/apt/lists/*
 
 # Само production deps
 COPY --from=base /app/node_modules ./node_modules
@@ -39,14 +39,14 @@ COPY package*.json ./
 COPY prisma ./prisma
 
 # Non-root user за сигурност
-RUN addgroup -g 1001 nodejs && \
-    adduser -S -u 1001 -G nodejs nestjs && \
+RUN groupadd -g 1001 nodejs && \
+    useradd -r -u 1001 -g nodejs nestjs && \
     chown -R nestjs:nodejs /app
 USER nestjs
 
 EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-  CMD curl -f http://localhost:3001/api/health || exit 1
+  CMD curl -f http://localhost:3001/api/v1/health || exit 1
 
 ENTRYPOINT ["dumb-init", "--"]
 CMD ["node", "dist/main"]

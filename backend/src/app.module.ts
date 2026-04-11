@@ -14,7 +14,11 @@ import { StaffModule } from './modules/staff/staff.module';
 import { ServicesModule } from './modules/services/services.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { StatsModule } from './modules/stats/stats.module';
+import { PlatformModule } from './modules/platform/platform.module';
 import { HealthController } from './health.controller';
+
+const redisHost = process.env.REDIS_HOST?.trim();
+const redisEnabled = Boolean(redisHost);
 
 @Module({
   imports: [
@@ -39,25 +43,29 @@ import { HealthController } from './health.controller';
     ScheduleModule.forRoot(),
 
     // ─── BullMQ (notification queue) ───────────────────────────
-    BullModule.forRootAsync({
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        connection: {
-          host: config.get<string>('REDIS_HOST', 'localhost'),
-          port: config.get<number>('REDIS_PORT', 6379),
-          password: config.get<string>('REDIS_PASSWORD') || undefined,
-        },
-        defaultJobOptions: {
-          attempts: 3,
-          backoff: {
-            type: 'exponential',
-            delay: 5000, // 5s, 25s, 125s
-          },
-          removeOnComplete: 100,
-          removeOnFail: 500,
-        },
-      }),
-    }),
+    ...(redisEnabled
+      ? [
+          BullModule.forRootAsync({
+            inject: [ConfigService],
+            useFactory: (config: ConfigService) => ({
+              connection: {
+                host: config.get<string>('REDIS_HOST'),
+                port: config.get<number>('REDIS_PORT', 6379),
+                password: config.get<string>('REDIS_PASSWORD') || undefined,
+              },
+              defaultJobOptions: {
+                attempts: 3,
+                backoff: {
+                  type: 'exponential',
+                  delay: 5000, // 5s, 25s, 125s
+                },
+                removeOnComplete: 100,
+                removeOnFail: 500,
+              },
+            }),
+          }),
+        ]
+      : []),
 
     // ─── Health checks ──────────────────────────────────────────
     TerminusModule,
@@ -72,6 +80,7 @@ import { HealthController } from './health.controller';
     ServicesModule,
     NotificationsModule,
     StatsModule,
+    PlatformModule,
   ],
   controllers: [HealthController],
 })

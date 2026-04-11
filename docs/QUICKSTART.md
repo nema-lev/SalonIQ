@@ -61,15 +61,15 @@ npm run dev
 sudo nano /etc/hosts
 
 # Добави:
-127.0.0.1 salon-aurora.localhost
+127.0.0.1 demo-business.localhost
 
 # Windows: C:\Windows\System32\drivers\etc\hosts
 ```
 
 След това:
-- **Booking страница:** http://salon-aurora.localhost:3000
-- **Admin панел:** http://salon-aurora.localhost:3000/admin
-- **Email:** owner@salon-aurora.bg
+- **Booking страница:** http://demo-business.localhost:3000
+- **Admin панел:** http://demo-business.localhost:3000/admin
+- **Email:** owner@demo-business.local
 - **Парола:** demo123
 
 ## 5. Telegram тест (по избор)
@@ -87,11 +87,11 @@ ngrok http 3001
 # Вземи HTTPS URL (напр. https://abc123.ngrok.io)
 # Задай webhook:
 curl -X POST "https://api.telegram.org/bot<ТВОЯТ_BOT_TOKEN>/setWebhook" \
-  -d "url=https://abc123.ngrok.io/api/v1/webhooks/telegram/salon-aurora"
+  -d "url=https://abc123.ngrok.io/api/v1/webhooks/telegram/demo-business"
 
 # Добави bot token в базата:
 docker exec -i saloniq-postgres psql -U saloniq_user -d saloniq_db \
-  -c "UPDATE public.tenants SET telegram_bot_token = '<TOKEN>', telegram_chat_id = '<YOUR_CHAT_ID>' WHERE slug = 'salon-aurora';"
+  -c "UPDATE public.tenants SET telegram_bot_token = '<TOKEN>', telegram_chat_id = '<YOUR_CHAT_ID>' WHERE slug = 'demo-business';"
 ```
 
 ## Полезни команди
@@ -118,7 +118,7 @@ docker-compose up postgres redis -d
 
 Всяка заявка трябва да съдържа `X-Tenant-Slug` header:
 ```
-X-Tenant-Slug: salon-aurora
+X-Tenant-Slug: demo-business
 ```
 
 Браузърът го добавя автоматично (от hostname).
@@ -127,5 +127,5 @@ X-Tenant-Slug: salon-aurora
 ```bash
 # Пример: свободни слотове
 curl "http://localhost:3001/api/v1/appointments/slots?serviceId=UUID&staffId=UUID&date=2025-04-15" \
-  -H "X-Tenant-Slug: salon-aurora"
+  -H "X-Tenant-Slug: demo-business"
 ```

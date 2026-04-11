@@ -1,7 +1,6 @@
 import {
   IsString,
   IsEmail,
-  IsUUID,
   IsISO8601,
   IsOptional,
   IsBoolean,
@@ -12,14 +11,21 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
+import { normalizeBulgarianPhone } from '../../../common/utils/phone';
 
 export class CreateAppointmentDto {
   @ApiProperty({ description: 'ID на услугата' })
-  @IsUUID()
+  @Matches(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    { message: 'Невалиден serviceId' },
+  )
   serviceId: string;
 
   @ApiProperty({ description: 'ID на служителя' })
-  @IsUUID()
+  @Matches(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    { message: 'Невалиден staffId' },
+  )
   staffId: string;
 
   @ApiProperty({ description: 'Начало на часа (ISO 8601)', example: '2025-04-15T10:30:00+03:00' })
@@ -35,8 +41,8 @@ export class CreateAppointmentDto {
 
   @ApiProperty({ description: 'Телефон (задължителен за известявания)', example: '+359888123456' })
   @IsString()
-  @Matches(/^\+?[0-9\s\-()]{7,20}$/, { message: 'Невалиден телефонен номер' })
-  @Transform(({ value }) => value?.replace(/\s/g, ''))
+  @Matches(/^(?:\+359\d{9}|0\d{9})$/, { message: 'Невалиден телефонен номер' })
+  @Transform(({ value }) => normalizeBulgarianPhone(value))
   clientPhone: string;
 
   @ApiPropertyOptional({ description: 'Email адрес' })
@@ -56,7 +62,19 @@ export class CreateAppointmentDto {
   @IsOptional()
   intakeData?: Record<string, unknown>;
 
-  @ApiProperty({ description: 'Съгласие за известявания (GDPR)' })
+  @ApiPropertyOptional({ description: 'Transactional известията са задължителни и по подразбиране са включени' })
   @IsBoolean()
-  consentGiven: boolean;
+  @IsOptional()
+  consentGiven?: boolean;
+
+  @ApiPropertyOptional({ description: 'Изпрати предложение към клиента вместо директно потвърждение (admin only)' })
+  @IsBoolean()
+  @IsOptional()
+  askClient?: boolean;
+
+  @ApiPropertyOptional({ description: 'Публичният base URL на приложението за SMS/Telegram линкове (admin only)' })
+  @IsString()
+  @IsOptional()
+  @Transform(({ value }) => value?.trim())
+  publicBaseUrl?: string;
 }

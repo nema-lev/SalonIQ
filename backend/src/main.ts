@@ -3,6 +3,7 @@ import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import helmet from 'helmet';
+import { json, urlencoded } from 'express';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
@@ -19,9 +20,14 @@ async function bootstrap() {
 
   // ─── Security ─────────────────────────────────────────────────────
   app.use(helmet());
+  app.use(json({ limit: '12mb' }));
+  app.use(urlencoded({ extended: true, limit: '12mb' }));
 
   // CORS — позволява wildcard поддомейни за white-label
-  const corsOrigins = configService.get<string>('CORS_ORIGINS', 'http://localhost:3000');
+  const corsOrigins = configService.get<string>(
+    'CORS_ORIGINS',
+    'http://localhost:3000,https://*.vercel.app',
+  );
   app.enableCors({
     origin: (origin, callback) => {
       if (!origin) return callback(null, true); // Same-origin заявки

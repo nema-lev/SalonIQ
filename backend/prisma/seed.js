@@ -1,7 +1,7 @@
 /**
  * SalonIQ — Seed Script
  *
- * Създава demo tenant "Салон Аврора" с:
+ * Създава tenant "Примерен бизнес" с:
  *  - 2 служители
  *  - 6 услуги в 2 категории
  *  - 3 тестови клиента
@@ -18,6 +18,13 @@ const bcrypt = require('bcryptjs');
 
 const DB_URL = process.env.DATABASE_URL ||
   'postgresql://saloniq_user:dev_password_change_in_prod@localhost:5432/saloniq_db';
+const DEMO_SLUG = 'demo-business';
+const DEMO_SCHEMA = 'tenant_demo_business';
+const DEMO_NAME = 'Примерен бизнес';
+const DEMO_INFO_EMAIL = 'info@demo-business.local';
+const DEMO_OWNER_EMAIL = 'owner@demo-business.local';
+const DEMO_ADMIN_EMAIL = 'admin@demo-business.local';
+const DEMO_SECOND_OWNER_EMAIL = 'elena@demo-business.local';
 
 async function seed() {
   const client = new Client({ connectionString: DB_URL });
@@ -37,15 +44,15 @@ async function seed() {
         min_advance_booking_hours, max_advance_booking_days,
         plan, plan_status
       ) VALUES (
-        'demo',
-        'tenant_demo',
-        'Салон Аврора',
+        '${DEMO_SLUG}',
+        '${DEMO_SCHEMA}',
+        '${DEMO_NAME}',
         'SALON',
         'Вашият любим салон за красота в София. Работим с любов към детайла.',
         'ул. Витоша 42',
         'София',
         '+359 888 123 456',
-        'info@salon-aurora.bg',
+        '${DEMO_INFO_EMAIL}',
         '',
         '',
         '{"primaryColor":"#7c3aed","secondaryColor":"#a855f7","accentColor":"#f59e0b","borderRadius":"rounded"}',
@@ -58,7 +65,7 @@ async function seed() {
     `);
 
     const tenantRes = await client.query(
-      `SELECT id, schema_name FROM public.tenants WHERE slug = 'demo'`
+      `SELECT id, schema_name FROM public.tenants WHERE slug = '${DEMO_SLUG}'`
     );
     const tenant = tenantRes.rows[0];
     console.log(`  ✓ Tenant: ${tenant.id}`);
@@ -67,10 +74,13 @@ async function seed() {
     const passwordHash = await bcrypt.hash('demo1234', 12);
     await client.query(`
       INSERT INTO public.tenant_owners (tenant_id, name, email, password_hash, role)
-      VALUES ($1, 'Елена Петрова', 'elena@salon-aurora.bg', $2, 'OWNER')
+      VALUES
+        ($1, 'Елена Петрова', '${DEMO_SECOND_OWNER_EMAIL}', $2, 'OWNER'),
+        ($1, 'Елена Петрова', '${DEMO_OWNER_EMAIL}', $2, 'OWNER'),
+        ($1, 'Елена Петрова', '${DEMO_ADMIN_EMAIL}', $2, 'ADMIN')
       ON CONFLICT (email) DO NOTHING
     `, [tenant.id, passwordHash]);
-    console.log('  ✓ Owner: elena@salon-aurora.bg / demo1234');
+    console.log(`  ✓ Owners: ${DEMO_SECOND_OWNER_EMAIL} / demo1234, ${DEMO_OWNER_EMAIL} / demo1234, ${DEMO_ADMIN_EMAIL} / demo1234`);
 
     // ─── 3. Създай tenant schema ─────────────────────────────────────
     await client.query(`SELECT create_tenant_schema($1)`, [tenant.schema_name]);
@@ -192,8 +202,8 @@ async function seed() {
     console.log('✅ Seed complete!');
     console.log('');
     console.log('Demo данни:');
-    console.log('  🌐 Booking: http://localhost:3000 (с header X-Tenant-Slug: demo)');
-    console.log('  🔐 Admin login: elena@salon-aurora.bg / demo1234');
+    console.log(`  🌐 Booking: http://localhost:3000 (с header X-Tenant-Slug: ${DEMO_SLUG})`);
+    console.log(`  🔐 Admin login: ${DEMO_SECOND_OWNER_EMAIL} / demo1234`);
     console.log('  📋 Swagger: http://localhost:3001/docs');
 
   } catch (err) {

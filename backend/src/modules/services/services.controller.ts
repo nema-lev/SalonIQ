@@ -65,7 +65,7 @@ export class ServicesController {
       `INSERT INTO services (name, description, category, duration_minutes, price, color, is_public)
        VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
       [dto.name, dto.description||null, dto.category||null,
-       dto.duration_minutes, dto.price||null, dto.color||'#8b5cf6', dto.is_public??true],
+       dto.duration_minutes, dto.price ?? null, dto.color||'#8b5cf6', dto.is_public??true],
     );
     return { id: rows[0].id };
   }
@@ -85,7 +85,7 @@ export class ServicesController {
        duration_minutes=$4, price=$5, color=$6, is_public=$7, updated_at=NOW()
        WHERE id=$8`,
       [dto.name, dto.description||null, dto.category||null,
-       dto.duration_minutes, dto.price||null, dto.color||'#8b5cf6',
+       dto.duration_minutes, dto.price ?? null, dto.color||'#8b5cf6',
        dto.is_public??true, id],
     );
     return { id };

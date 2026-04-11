@@ -25,9 +25,13 @@ const schema = z.object({
   description: z.string().optional(),
   category: z.string().optional(),
   duration_minutes: z.coerce.number().min(5).max(480),
-  price: z.coerce.number().min(0).optional(),
+  price: z.preprocess(
+    (value) => (value === '' || value == null ? undefined : Number(value)),
+    z.number().min(0).optional(),
+  ),
   color: z.string().regex(/^#[0-9a-f]{6}$/i),
   is_public: z.boolean(),
+  showPrice: z.boolean().default(true),
 });
 type FormValues = z.infer<typeof schema>;
 
@@ -49,10 +53,19 @@ export default function AdminServicesPage() {
   });
 
   const mutation = useMutation({
-    mutationFn: (data: FormValues) =>
+    mutationFn: (data: FormValues) => {
+      const payload = {
+        ...data,
+        price: data.showPrice ? data.price ?? null : null,
+      };
+      delete (payload as Partial<FormValues>).showPrice;
+
+      return (
       editing
-        ? apiClient.patch(`/services/${editing.id}`, data)
-        : apiClient.post('/services', data),
+        ? apiClient.patch(`/services/${editing.id}`, payload)
+        : apiClient.post('/services', payload)
+      );
+    },
     onSuccess: () => {
       toast.success(editing ? 'Услугата е обновена' : 'Услугата е добавена');
       qc.invalidateQueries({ queryKey: ['admin-services'] });
@@ -73,18 +86,20 @@ export default function AdminServicesPage() {
       price: svc.price ?? undefined,
       color: svc.color,
       is_public: svc.is_public,
+      showPrice: svc.price != null,
     });
     setShowForm(true);
   };
 
   const selectedColor = watch('color');
+  const showPrice = watch('showPrice');
 
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
         <p className="text-sm text-gray-500">{services?.length ?? 0} услуги</p>
         <button
-          onClick={() => { setEditing(null); reset({ color: '#7c3aed', is_public: true, duration_minutes: 60 }); setShowForm(true); }}
+          onClick={() => { setEditing(null); reset({ color: '#7c3aed', is_public: true, duration_minutes: 60, showPrice: true }); setShowForm(true); }}
           className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white bg-[var(--color-primary)] hover:opacity-90 transition-all"
         >
           <Plus className="w-4 h-4" />Нова услуга
@@ -106,7 +121,9 @@ export default function AdminServicesPage() {
                 <div className="flex items-center gap-4 text-sm text-gray-400 mt-0.5">
                   {svc.category && <span className="flex items-center gap-1"><Tag className="w-3 h-3" />{svc.category}</span>}
                   <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{svc.duration_minutes} мин.</span>
-                  {svc.price != null && <span className="font-semibold text-gray-600">{svc.price} лв.</span>}
+                  <span className="font-semibold text-gray-600">
+                    {svc.price != null ? `${svc.price} €` : 'Цена по запитване'}
+                  </span>
                 </div>
               </div>
               <button onClick={() => openEdit(svc)} className="p-2 rounded-lg hover:bg-gray-50 transition-colors">
@@ -142,8 +159,16 @@ export default function AdminServicesPage() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Цена (лв.)</label>
-                  <input {...register('price')} type="number" step="0.01" min={0} placeholder="0.00" className="w-full px-3 py-2.5 rounded-xl border-2 border-gray-200 focus:border-[var(--color-primary)] outline-none text-sm" />
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Цена (€)</label>
+                  <input
+                    {...register('price')}
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    placeholder={showPrice ? '0.00' : 'Скрита'}
+                    disabled={!showPrice}
+                    className="w-full px-3 py-2.5 rounded-xl border-2 border-gray-200 focus:border-[var(--color-primary)] outline-none text-sm disabled:bg-gray-50 disabled:text-gray-400"
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Цвят</label>
@@ -163,6 +188,10 @@ export default function AdminServicesPage() {
               <label className="flex items-center gap-2 cursor-pointer">
                 <input {...register('is_public')} type="checkbox" className="accent-[var(--color-primary)] w-4 h-4" />
                 <span className="text-sm text-gray-700">Видима за клиенти (онлайн резервации)</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input {...register('showPrice')} type="checkbox" className="accent-[var(--color-primary)] w-4 h-4" />
+                <span className="text-sm text-gray-700">Показвай цена към услугата</span>
               </label>
               <div className="flex gap-3 pt-2">
                 <button type="button" onClick={() => setShowForm(false)} className="flex-1 py-2.5 rounded-xl border-2 border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50">Отказ</button>

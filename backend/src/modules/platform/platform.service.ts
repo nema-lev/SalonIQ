@@ -88,6 +88,7 @@ export class PlatformService {
     tenantId: string,
     dto: {
       businessType?: string;
+      plan?: string;
       planStatus?: string;
       planRenewsAt?: string | null;
       isActive?: boolean;
@@ -110,13 +111,15 @@ export class PlatformService {
       `
       UPDATE public.tenants
       SET business_type = $1::public.business_type,
-          plan_status = $2::public.plan_status,
-          plan_renews_at = $3,
-          is_active = $4,
+          plan = $2::public.subscription_plan,
+          plan_status = $3::public.plan_status,
+          plan_renews_at = $4,
+          is_active = $5,
           updated_at = NOW()
-      WHERE id = $5::uuid
+      WHERE id = $6::uuid
       `,
       dto.businessType ?? current.business_type,
+      dto.plan ?? current.plan,
       dto.planStatus ?? current.plan_status,
       planRenewsAt,
       dto.isActive ?? current.is_active,
@@ -193,13 +196,14 @@ export class PlatformService {
     const rows = await this.prisma.$queryRaw<
       {
         id: string;
+        plan: string;
         business_type: string;
         plan_status: string;
         plan_renews_at: Date | null;
         is_active: boolean;
       }[]
     >`
-      SELECT id, business_type, plan_status, plan_renews_at, is_active
+      SELECT id, plan, business_type, plan_status, plan_renews_at, is_active
       FROM public.tenants
       WHERE id = ${tenantId}::uuid
       LIMIT 1

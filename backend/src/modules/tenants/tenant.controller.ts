@@ -34,6 +34,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentTenant } from '../../common/decorators/tenant.decorator';
 import { getNotificationTemplates } from '../notifications/template.utils';
 import { TelegramService } from '../notifications/telegram.service';
+import { buildBulgarianPhoneVariants, normalizeBulgarianPhone } from '../../common/utils/phone';
 
 class UpdateGeneralSettingsDto {
   @IsString()
@@ -113,6 +114,16 @@ class UpdateGeneralSettingsDto {
 }
 
 class UpdateNotificationSettingsDto {
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  enableTelegramNotifications?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  enableSmsNotifications?: boolean;
+
   @IsOptional()
   @IsString()
   @Transform(({ value }) => {
@@ -268,6 +279,16 @@ class TelegramWebhookActionDto {
   telegramChatId?: string;
 }
 
+class ClientTelegramLinkDto {
+  @IsString()
+  @MinLength(1)
+  tenantSlug: string;
+
+  @IsString()
+  @MinLength(3)
+  clientPhone: string;
+}
+
 @ApiTags('tenants')
 @Controller({ path: 'tenants', version: '1' })
 export class TenantController {
@@ -329,6 +350,8 @@ export class TenantController {
     const currentTheme = this.parseTheme(current.theme_config);
     const nextTheme = {
       ...currentTheme,
+      ...(dto.enableTelegramNotifications !== undefined ? { enableTelegramNotifications: dto.enableTelegramNotifications } : {}),
+      ...(dto.enableSmsNotifications !== undefined ? { enableSmsNotifications: dto.enableSmsNotifications } : {}),
       notificationTemplates: {
         ...getNotificationTemplates(currentTheme),
         ...(dto.bookingPendingTemplate !== undefined ? { bookingPending: dto.bookingPendingTemplate.trim() } : {}),
@@ -381,6 +404,8 @@ export class TenantController {
     const currentTheme = this.parseTheme(current.theme_config);
 
     return {
+      enableTelegramNotifications: currentTheme.enableTelegramNotifications ?? true,
+      enableSmsNotifications: currentTheme.enableSmsNotifications ?? Boolean(current.sms_api_key && current.sms_sender_id),
       telegramBotToken: current.telegram_bot_token || '',
       telegramChatId: current.telegram_chat_id || '',
       smsApiKey: current.sms_api_key || '',
@@ -424,6 +449,7 @@ export class TenantController {
     if (!botToken) {
       return {
         hasBotToken: false,
+        enableTelegramNotifications: currentTheme.enableTelegramNotifications ?? true,
         botProfile: null,
         linkedChatId: chatId,
         ownerChatLinked: Boolean(chatId),
@@ -444,6 +470,7 @@ export class TenantController {
     if (!botProfile.ok) {
       return {
         hasBotToken: true,
+        enableTelegramNotifications: currentTheme.enableTelegramNotifications ?? true,
         botProfile,
         linkedChatId: chatId,
         ownerChatLinked: Boolean(chatId),
@@ -463,6 +490,7 @@ export class TenantController {
 
     return {
       hasBotToken: true,
+      enableTelegramNotifications: currentTheme.enableTelegramNotifications ?? true,
       botProfile,
       linkedChatId: chatId,
       ownerChatLinked: Boolean(chatId),
@@ -671,6 +699,8 @@ export class TenantController {
     const setupToken = randomBytes(16).toString('hex');
     const nextTheme = {
       ...currentTheme,
+      telegramBotUsername: botProfile.username,
+      telegramBotFirstName: botProfile.firstName || null,
       telegramOwnerSetupToken: setupToken,
       telegramOwnerSetupExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
     };
@@ -691,6 +721,64 @@ export class TenantController {
       botLink: `https://t.me/${botProfile.username}?start=owner_setup_${setupToken}`,
       expiresAt: nextTheme.telegramOwnerSetupExpiresAt,
       linkedChatId: current.telegram_chat_id || null,
+    };
+  }
+
+  @Post('telegram/client-link')
+  @ApiOperation({ summary: 'Генерирай client Telegram deep link за public booking flow' })
+  async createClientTelegramLink(@Body() dto: ClientTelegramLinkDto) {
+    const tenantSlug = dto.tenantSlug.trim();
+    const clientPhone = normalizeBulgarianPhone(dto.clientPhone);
+
+    if (!tenantSlug) {
+      throw new BadRequestException('Липсва tenant slug.');
+    }
+
+    if (!clientPhone) {
+      throw new BadRequestException('Липсва валиден телефон.');
+    }
+
+    const tenants = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT id, slug, schema_name, telegram_bot_token, theme_config FROM public.tenants WHERE slug = $1 AND is_active = true LIMIT 1`,
+      tenantSlug,
+    );
+
+    if (!tenants.length) {
+      throw new NotFoundException('Бизнесът не е намерен.');
+    }
+
+    const tenant = tenants[0];
+    const theme = this.parseTheme(tenant.theme_config);
+    if (!tenant.telegram_bot_token) {
+      throw new BadRequestException('За този бизнес няма свързан Telegram бот.');
+    }
+
+    if ((theme.enableTelegramNotifications ?? true) !== true) {
+      throw new BadRequestException('Telegram известията са изключени за този бизнес.');
+    }
+
+    const botProfile = await this.telegramService.getBotProfile(tenant.telegram_bot_token);
+    if (!botProfile.ok || !botProfile.username) {
+      throw new BadRequestException(
+        botProfile.description || 'Telegram Bot Token-ът е невалиден.',
+      );
+    }
+
+    const phoneVariants = buildBulgarianPhoneVariants(clientPhone);
+    const linkedRows = await this.prisma.queryInSchema<{ telegram_chat_id: string | null }[]>(
+      tenant.schema_name,
+      `SELECT telegram_chat_id
+       FROM clients
+       WHERE phone = ANY($1::text[])
+       LIMIT 1`,
+      [phoneVariants],
+    );
+
+    return {
+      botUsername: botProfile.username,
+      botLink: `https://t.me/${botProfile.username}?start=${encodeURIComponent(clientPhone)}`,
+      normalizedPhone: clientPhone,
+      linkedChatId: linkedRows[0]?.telegram_chat_id || null,
     };
   }
 
@@ -799,6 +887,8 @@ export class TenantController {
       allowRandomStaffSelection: theme.allowRandomStaffSelection ?? true,
       allowClientCancellation: theme.allowClientCancellation ?? true,
       collectClientEmail: theme.collectClientEmail ?? true,
+      enableTelegramNotifications: theme.enableTelegramNotifications ?? true,
+      enableSmsNotifications: theme.enableSmsNotifications ?? Boolean(tenant.sms_api_key && tenant.sms_sender_id),
       notificationTemplates,
       theme: {
         primaryColor: theme.primaryColor || '#7c3aed',

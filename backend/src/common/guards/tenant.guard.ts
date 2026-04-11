@@ -134,6 +134,8 @@ export class TenantGuard implements CanActivate {
       allowRandomStaffSelection: themeConfig.allowRandomStaffSelection ?? true,
       allowClientCancellation: themeConfig.allowClientCancellation ?? true,
       collectClientEmail: themeConfig.collectClientEmail ?? true,
+      enableTelegramNotifications: themeConfig.enableTelegramNotifications ?? true,
+      enableSmsNotifications: themeConfig.enableSmsNotifications ?? Boolean(tenant.sms_api_key && tenant.sms_sender_id),
       notificationTemplates: getNotificationTemplates(themeConfig),
     };
 

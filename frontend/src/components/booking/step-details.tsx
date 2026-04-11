@@ -39,6 +39,14 @@ interface StepDetailsProps {
 export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
   const tenant = useTenant();
   const copy = getBusinessCopy(tenant.businessType);
+  const notificationCopy =
+    tenant.enableTelegramNotifications && tenant.enableSmsNotifications
+      ? 'Потвържденията и напомнянията се изпращат с приоритет в Telegram, а при липсващ Telegram чат могат да минат по SMS.'
+      : tenant.enableTelegramNotifications
+        ? 'Потвържденията и напомнянията се изпращат през Telegram, когато номерът е свързан с бота.'
+        : tenant.enableSmsNotifications
+          ? 'Потвържденията и напомнянията се изпращат по SMS.'
+          : 'Потвържденията и напомнянията в момента са изключени от настройките на бизнеса.';
   const schema = useMemo(() => buildSchema(tenant.collectClientEmail), [tenant.collectClientEmail]);
   const {
     register,
@@ -186,7 +194,7 @@ export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
         </div>
 
         <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-          С резервацията се изпращат задължителни потвърждение и напомняне за часа.
+          {notificationCopy}
         </div>
 
         <button

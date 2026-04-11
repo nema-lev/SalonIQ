@@ -99,9 +99,11 @@ export class NotificationProcessor extends WorkerHost {
         : (tenant.theme_config || {});
     const allowClientCancellation = themeConfig.allowClientCancellation ?? true;
     const notificationTemplates = getNotificationTemplates(themeConfig);
+    const telegramChannelEnabled = themeConfig.enableTelegramNotifications ?? true;
+    const smsChannelEnabled = themeConfig.enableSmsNotifications ?? Boolean(tenant.sms_api_key && tenant.sms_sender_id);
 
-    const hasTelegram = Boolean(tenant.telegram_bot_token);
-    const hasSms = Boolean(tenant.sms_api_key && tenant.sms_sender_id);
+    const hasTelegram = telegramChannelEnabled && Boolean(tenant.telegram_bot_token);
+    const hasSms = smsChannelEnabled && Boolean(tenant.sms_api_key && tenant.sms_sender_id);
 
     if (!hasTelegram && !hasSms) {
       this.logger.warn(`Tenant ${tenantId} has no Telegram or SMS configuration — skipping`);
@@ -133,11 +135,7 @@ export class NotificationProcessor extends WorkerHost {
     }
     const appt = appointments[0];
 
-    // 3. Провери consent — не изпращаме без съгласие
-    if (!appt.notifications_consent) {
-      this.logger.debug(`Client ${clientId} has no notification consent — skipping`);
-      return;
-    }
+    const canNotifyClient = Boolean(appt.notifications_consent);
 
     const appointmentDetails: AppointmentDetails = {
       id: appt.id,
@@ -174,20 +172,42 @@ export class NotificationProcessor extends WorkerHost {
         ? `${proposal.publicBaseUrl}/api/v1/appointments/proposal/${tenant.slug}/respond?decision=reject&token=${proposal.rejectToken}`
         : null;
 
+    if (
+      hasTelegram &&
+      tenant.telegram_chat_id &&
+      job.name === NotificationJobType.BOOKING_CONFIRMED
+    ) {
+      await this.telegramService.sendOwnerNewBooking(
+        tenant.telegram_bot_token,
+        tenant.telegram_chat_id,
+        { ...appointmentDetails, clientName: appt.client_name },
+        tenant.business_name,
+        (job.data.status as 'confirmed' | 'pending') || 'confirmed',
+        notificationTemplates.ownerNewBooking,
+      );
+    }
+
+    if (!canNotifyClient) {
+      this.logger.debug(`Client ${clientId} has no notification consent — skipping client-facing notification`);
+      return;
+    }
+
     // 4. Изпрати правилното известяване
     let result: { success: boolean; messageId?: number; error?: string } | null = null;
     let notifType = job.name;
+    let resultChannel: NotificationChannel = NotificationChannel.TELEGRAM;
 
     switch (job.name as NotificationJobType) {
       case NotificationJobType.BOOKING_PROPOSAL:
-        if (hasTelegram && appt.telegram_chat_id) {
+        if (canNotifyClient && hasTelegram && appt.telegram_chat_id) {
+          resultChannel = NotificationChannel.TELEGRAM;
           result = await this.telegramService.sendProposalRequest(
             tenant.telegram_bot_token,
             appt.telegram_chat_id,
             appointmentDetails,
             tenant.business_name,
           );
-        } else if (hasSms && acceptUrl && rejectUrl) {
+        } else if (canNotifyClient && hasSms && acceptUrl && rejectUrl) {
           const zonedStart = toZonedTime(appointmentDetails.startAt, TIMEZONE);
           const dateStr = format(zonedStart, "d MMMM yyyy 'г.'", { locale: bg });
           const timeStr = format(zonedStart, 'HH:mm');
@@ -203,6 +223,7 @@ export class NotificationProcessor extends WorkerHost {
             apiToken: tenant.sms_api_key!,
             senderId: tenant.sms_sender_id!,
           });
+          resultChannel = NotificationChannel.SMS;
           result = {
             success: smsResult.success,
             error: smsResult.error,
@@ -211,7 +232,8 @@ export class NotificationProcessor extends WorkerHost {
         break;
 
       case NotificationJobType.BOOKING_CONFIRMED:
-        if (hasTelegram && appt.telegram_chat_id) {
+        if (canNotifyClient && hasTelegram && appt.telegram_chat_id) {
+          resultChannel = NotificationChannel.TELEGRAM;
           result = await this.telegramService.sendBookingConfirmation(
             tenant.telegram_bot_token,
             appt.telegram_chat_id,
@@ -223,7 +245,7 @@ export class NotificationProcessor extends WorkerHost {
               ? notificationTemplates.bookingPending
               : notificationTemplates.bookingConfirmed,
           );
-        } else if (hasSms) {
+        } else if (canNotifyClient && hasSms) {
           const zonedStart = toZonedTime(appointmentDetails.startAt, TIMEZONE);
           const dateStr = format(zonedStart, "d MMMM yyyy 'г.'", { locale: bg });
           const timeStr = format(zonedStart, 'HH:mm');
@@ -239,23 +261,14 @@ export class NotificationProcessor extends WorkerHost {
             apiToken: tenant.sms_api_key!,
             senderId: tenant.sms_sender_id!,
           });
+          resultChannel = NotificationChannel.SMS;
           result = { success: smsResult.success, error: smsResult.error };
-        }
-        // Извести и собственика
-        if (hasTelegram && tenant.telegram_chat_id) {
-          await this.telegramService.sendOwnerNewBooking(
-            tenant.telegram_bot_token,
-            tenant.telegram_chat_id,
-            { ...appointmentDetails, clientName: appt.client_name },
-            tenant.business_name,
-            (job.data.status as 'confirmed' | 'pending') || 'confirmed',
-            notificationTemplates.ownerNewBooking,
-          );
         }
         break;
 
       case NotificationJobType.REMINDER_24H:
-        if (hasTelegram && appt.telegram_chat_id) {
+        if (canNotifyClient && hasTelegram && appt.telegram_chat_id) {
+          resultChannel = NotificationChannel.TELEGRAM;
           result = await this.telegramService.sendReminder(
             tenant.telegram_bot_token,
             appt.telegram_chat_id,
@@ -265,7 +278,7 @@ export class NotificationProcessor extends WorkerHost {
             allowClientCancellation,
             notificationTemplates.reminder24h,
           );
-        } else if (hasSms) {
+        } else if (canNotifyClient && hasSms) {
           const zonedStart = toZonedTime(appointmentDetails.startAt, TIMEZONE);
           const dateStr = format(zonedStart, "d MMMM yyyy 'г.'", { locale: bg });
           const timeStr = format(zonedStart, 'HH:mm');
@@ -280,6 +293,7 @@ export class NotificationProcessor extends WorkerHost {
             apiToken: tenant.sms_api_key!,
             senderId: tenant.sms_sender_id!,
           });
+          resultChannel = NotificationChannel.SMS;
           result = { success: smsResult.success, error: smsResult.error };
         }
         // Маркирай че е изпратен reminder
@@ -291,7 +305,8 @@ export class NotificationProcessor extends WorkerHost {
         break;
 
       case NotificationJobType.REMINDER_2H:
-        if (hasTelegram && appt.telegram_chat_id) {
+        if (canNotifyClient && hasTelegram && appt.telegram_chat_id) {
+          resultChannel = NotificationChannel.TELEGRAM;
           result = await this.telegramService.sendReminder(
             tenant.telegram_bot_token,
             appt.telegram_chat_id,
@@ -301,7 +316,7 @@ export class NotificationProcessor extends WorkerHost {
             allowClientCancellation,
             notificationTemplates.reminder2h,
           );
-        } else if (hasSms) {
+        } else if (canNotifyClient && hasSms) {
           const zonedStart = toZonedTime(appointmentDetails.startAt, TIMEZONE);
           const dateStr = format(zonedStart, "d MMMM yyyy 'г.'", { locale: bg });
           const timeStr = format(zonedStart, 'HH:mm');
@@ -316,6 +331,7 @@ export class NotificationProcessor extends WorkerHost {
             apiToken: tenant.sms_api_key!,
             senderId: tenant.sms_sender_id!,
           });
+          resultChannel = NotificationChannel.SMS;
           result = { success: smsResult.success, error: smsResult.error };
         }
         await this.prisma.queryInSchema(
@@ -329,7 +345,8 @@ export class NotificationProcessor extends WorkerHost {
       case NotificationJobType.BOOKING_CANCELLED_CLIENT:
       case NotificationJobType.BOOKING_CANCELLED_BUSINESS: {
         const cancelledBy = job.data.newStatus === 'cancelled' ? 'owner' : 'client';
-        if (hasTelegram && appt.telegram_chat_id) {
+        if (canNotifyClient && hasTelegram && appt.telegram_chat_id) {
+          resultChannel = NotificationChannel.TELEGRAM;
           result = await this.telegramService.sendCancellation(
             tenant.telegram_bot_token,
             appt.telegram_chat_id,
@@ -340,7 +357,7 @@ export class NotificationProcessor extends WorkerHost {
             bookingUrl,
             notificationTemplates.cancellation,
           );
-        } else if (hasSms) {
+        } else if (canNotifyClient && hasSms) {
           const zonedStart = toZonedTime(appointmentDetails.startAt, TIMEZONE);
           const dateStr = format(zonedStart, "d MMMM yyyy 'г.'", { locale: bg });
           const timeStr = format(zonedStart, 'HH:mm');
@@ -354,10 +371,16 @@ export class NotificationProcessor extends WorkerHost {
             apiToken: tenant.sms_api_key!,
             senderId: tenant.sms_sender_id!,
           });
+          resultChannel = NotificationChannel.SMS;
           result = { success: smsResult.success, error: smsResult.error };
         }
         break;
       }
+    }
+
+    if (!result) {
+      this.logger.debug(`No eligible notification channel for appointment ${appointmentId}`);
+      return;
     }
 
     // 5. Логвай резултата
@@ -370,7 +393,7 @@ export class NotificationProcessor extends WorkerHost {
       [
         appointmentId,
         clientId,
-        NotificationChannel.TELEGRAM,
+        resultChannel,
         notifType,
         result?.success ? NotificationStatus.SENT : NotificationStatus.FAILED,
         result?.messageId?.toString() || null,

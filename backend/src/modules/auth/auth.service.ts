@@ -7,15 +7,20 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
+import { createHash, randomBytes } from 'crypto';
 import { TenantPrismaService } from '../../common/prisma/tenant-prisma.service';
+import { TelegramService } from '../notifications/telegram.service';
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly prisma: TenantPrismaService,
     private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
+    private readonly telegramService: TelegramService,
   ) {}
 
   async login(email: string, password: string) {
@@ -166,6 +171,128 @@ export class AuthService {
     };
   }
 
+  async requestOwnerRecovery(email: string, publicBaseUrl?: string) {
+    const rows = await this.prisma.$queryRaw<
+      {
+        owner_id: string;
+        owner_email: string;
+        tenant_id: string;
+        slug: string;
+        business_name: string;
+        telegram_bot_token: string | null;
+        telegram_chat_id: string | null;
+        theme_config: unknown;
+      }[]
+    >`
+      SELECT
+        o.id AS owner_id,
+        o.email AS owner_email,
+        t.id AS tenant_id,
+        t.slug,
+        t.business_name,
+        t.telegram_bot_token,
+        t.telegram_chat_id,
+        t.theme_config
+      FROM public.tenant_owners o
+      JOIN public.tenants t ON t.id = o.tenant_id
+      WHERE o.email = ${email.trim().toLowerCase()}
+      ORDER BY o.created_at ASC
+      LIMIT 1
+    `;
+
+    if (!rows.length) {
+      return { accepted: true };
+    }
+
+    const owner = rows[0];
+    const theme = this.parseTheme(owner.theme_config);
+    const telegramEnabled = theme.enableTelegramNotifications ?? true;
+
+    if (!telegramEnabled || !owner.telegram_bot_token || !owner.telegram_chat_id) {
+      return { accepted: true };
+    }
+
+    const token = `${owner.tenant_id}.${randomBytes(32).toString('hex')}`;
+    const tokenHash = this.hashRecoveryToken(token);
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    const nextTheme = {
+      ...theme,
+      ownerRecoveryTokenHash: tokenHash,
+      ownerRecoveryExpiresAt: expiresAt,
+      ownerRecoveryOwnerId: owner.owner_id,
+      ownerRecoveryOwnerEmail: owner.owner_email,
+    };
+
+    await this.prisma.$executeRawUnsafe(
+      `
+      UPDATE public.tenants
+      SET theme_config = $1::jsonb,
+          updated_at = NOW()
+      WHERE id = $2::uuid
+      `,
+      JSON.stringify(nextTheme),
+      owner.tenant_id,
+    );
+
+    const resetUrl = this.buildOwnerRecoveryLink(owner.slug, publicBaseUrl, token);
+    await this.telegramService.sendOwnerPasswordRecovery(
+      owner.telegram_bot_token,
+      owner.telegram_chat_id,
+      owner.business_name,
+      resetUrl,
+    );
+
+    return { accepted: true };
+  }
+
+  async verifyOwnerRecoveryToken(token: string) {
+    const recovery = await this.loadOwnerRecoverySession(token);
+    return {
+      valid: true,
+      businessName: recovery.businessName,
+      ownerEmail: this.maskEmail(recovery.ownerEmail),
+      expiresAt: recovery.expiresAt.toISOString(),
+    };
+  }
+
+  async resetOwnerPasswordByRecoveryToken(token: string, newPassword: string) {
+    const recovery = await this.loadOwnerRecoverySession(token);
+    const nextPasswordHash = await this.hashPassword(newPassword);
+    const clearedTheme = { ...recovery.theme };
+
+    delete clearedTheme.ownerRecoveryTokenHash;
+    delete clearedTheme.ownerRecoveryExpiresAt;
+    delete clearedTheme.ownerRecoveryOwnerId;
+    delete clearedTheme.ownerRecoveryOwnerEmail;
+
+    await this.prisma.$executeRawUnsafe(
+      `
+      UPDATE public.tenant_owners
+      SET password_hash = $1,
+          updated_at = NOW()
+      WHERE id = $2::uuid
+      `,
+      nextPasswordHash,
+      recovery.ownerId,
+    );
+
+    await this.prisma.$executeRawUnsafe(
+      `
+      UPDATE public.tenants
+      SET theme_config = $1::jsonb,
+          updated_at = NOW()
+      WHERE id = $2::uuid
+      `,
+      JSON.stringify(clearedTheme),
+      recovery.tenantId,
+    );
+
+    return {
+      reset: true,
+      ownerEmail: this.maskEmail(recovery.ownerEmail),
+    };
+  }
+
   async updateCurrentOwner(
     ownerId: string,
     dto: {
@@ -278,6 +405,96 @@ export class AuthService {
         tenantSlug: owner.tenantSlug,
       },
     };
+  }
+
+  private parseTheme(themeConfig: unknown): Record<string, any> {
+    if (typeof themeConfig === 'string') {
+      return JSON.parse(themeConfig || '{}');
+    }
+
+    if (themeConfig && typeof themeConfig === 'object') {
+      return themeConfig as Record<string, any>;
+    }
+
+    return {};
+  }
+
+  private hashRecoveryToken(token: string) {
+    return createHash('sha256').update(token).digest('hex');
+  }
+
+  private buildOwnerRecoveryLink(tenantSlug: string, publicBaseUrl?: string, token?: string) {
+    const cleanedOrigin = (publicBaseUrl || '').trim().replace(/\/+$/, '');
+
+    if (cleanedOrigin) {
+      return `${cleanedOrigin}/admin/reset-password?token=${encodeURIComponent(token || '')}`;
+    }
+
+    const appDomain = this.configService.get<string>('APP_DOMAIN', 'saloniq.bg');
+    return `https://${tenantSlug}.${appDomain}/admin/reset-password?token=${encodeURIComponent(token || '')}`;
+  }
+
+  private async loadOwnerRecoverySession(token: string) {
+    const [tenantId] = token.split('.', 1);
+    if (!tenantId || !/^[0-9a-fA-F-]{36}$/.test(tenantId)) {
+      throw new UnauthorizedException('Невалиден recovery token.');
+    }
+
+    const rows = await this.prisma.$queryRaw<
+      {
+        id: string;
+        business_name: string;
+        theme_config: unknown;
+      }[]
+    >`
+      SELECT id, business_name, theme_config
+      FROM public.tenants
+      WHERE id = ${tenantId}::uuid
+      LIMIT 1
+    `;
+
+    if (!rows.length) {
+      throw new UnauthorizedException('Невалиден recovery token.');
+    }
+
+    const tenant = rows[0];
+    const theme = this.parseTheme(tenant.theme_config);
+    const storedHash = typeof theme.ownerRecoveryTokenHash === 'string' ? theme.ownerRecoveryTokenHash : '';
+    const ownerId = typeof theme.ownerRecoveryOwnerId === 'string' ? theme.ownerRecoveryOwnerId : '';
+    const ownerEmail = typeof theme.ownerRecoveryOwnerEmail === 'string' ? theme.ownerRecoveryOwnerEmail : '';
+    const expiresAtRaw = typeof theme.ownerRecoveryExpiresAt === 'string' ? theme.ownerRecoveryExpiresAt : '';
+    const expiresAt = expiresAtRaw ? new Date(expiresAtRaw) : null;
+
+    if (!storedHash || !ownerId || !ownerEmail || !expiresAt || Number.isNaN(expiresAt.getTime())) {
+      throw new UnauthorizedException('Recovery token-ът вече не е валиден.');
+    }
+
+    if (expiresAt.getTime() < Date.now()) {
+      throw new UnauthorizedException('Recovery token-ът е изтекъл.');
+    }
+
+    if (storedHash !== this.hashRecoveryToken(token)) {
+      throw new UnauthorizedException('Невалиден recovery token.');
+    }
+
+    return {
+      tenantId: tenant.id,
+      businessName: tenant.business_name,
+      ownerId,
+      ownerEmail,
+      expiresAt,
+      theme,
+    };
+  }
+
+  private maskEmail(email: string) {
+    const [local, domain] = email.split('@');
+    if (!local || !domain) {
+      return email;
+    }
+
+    const visible = local.length <= 2 ? local[0] : local.slice(0, 2);
+    return `${visible}${'*'.repeat(Math.max(local.length - visible.length, 1))}@${domain}`;
   }
 
   private assertTenantOwnerAccess(tenant: {

@@ -32,6 +32,10 @@ class UpdatePlatformTenantDto {
   businessType?: string;
 
   @IsOptional()
+  @IsIn(['BASIC', 'PRO', 'ENTERPRISE'])
+  plan?: string;
+
+  @IsOptional()
   @IsIn(['TRIAL', 'ACTIVE', 'PAST_DUE', 'CANCELLED'])
   planStatus?: string;
 

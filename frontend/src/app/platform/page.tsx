@@ -4,9 +4,10 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Loader2, LogOut, Shield, ShieldOff, UserCog } from 'lucide-react';
+import { Loader2, LogOut, ShieldOff, UserCog } from 'lucide-react';
 import { apiClient, setAuthToken, setTenantSlug } from '@/lib/api-client';
 import { BUSINESS_TYPES, BUSINESS_TYPE_LABELS, getBusinessTypeConfig, type BusinessTypeKey } from '@/lib/business-config';
+import { PLAN_LABELS, SUBSCRIPTION_PLANS, getSubscriptionPlanConfig, type SubscriptionPlanKey } from '@/lib/plan-config';
 
 type TenantCard = {
   id: string;
@@ -34,10 +35,11 @@ const PLAN_STATUSES = ['TRIAL', 'ACTIVE', 'PAST_DUE', 'CANCELLED'] as const;
 export default function PlatformDashboardPage() {
   const router = useRouter();
   const qc = useQueryClient();
-  const [drafts, setDrafts] = useState<Record<string, { businessType: string; planStatus: string; planRenewsAt: string; isActive: boolean; tempPassword: string }>>({});
+  const [drafts, setDrafts] = useState<Record<string, { businessType: string; plan: string; planStatus: string; planRenewsAt: string; isActive: boolean; tempPassword: string }>>({});
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'attention' | 'dueSoon' | 'blocked' | 'healthy'>('all');
   const [businessTypeFilter, setBusinessTypeFilter] = useState<'ALL' | BusinessTypeKey>('ALL');
+  const [planFilter, setPlanFilter] = useState<'ALL' | SubscriptionPlanKey>('ALL');
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['platform-tenants'],
@@ -47,7 +49,7 @@ export default function PlatformDashboardPage() {
   const tenants = data ?? [];
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, payload }: { id: string; payload: { businessType: string; planStatus: string; planRenewsAt: string | null; isActive: boolean } }) =>
+    mutationFn: ({ id, payload }: { id: string; payload: { businessType: string; plan: string; planStatus: string; planRenewsAt: string | null; isActive: boolean } }) =>
       apiClient.patch(`/platform/tenants/${id}`, payload),
     onSuccess: () => {
       toast.success('Бизнесът е обновен.');
@@ -88,25 +90,31 @@ export default function PlatformDashboardPage() {
   const tenantCards = useMemo(() => {
     return tenants.map((tenant) => {
       const renewsAt = tenant.planRenewsAt ? new Date(tenant.planRenewsAt) : null;
+      const planProfile = getSubscriptionPlanConfig(tenant.plan as SubscriptionPlanKey);
       const daysUntilRenewal = renewsAt
         ? Math.ceil((renewsAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
         : null;
       const dueSoon = daysUntilRenewal !== null && daysUntilRenewal >= 0 && daysUntilRenewal <= 7;
       const overdue = daysUntilRenewal !== null && daysUntilRenewal < 0;
+      const overStaffLimit =
+        planProfile.staffLimit !== null && tenant.summary.staff > planProfile.staffLimit;
       const attention =
         tenant.access.blocked ||
         dueSoon ||
         overdue ||
+        overStaffLimit ||
         tenant.summary.pending > 0 ||
         tenant.planStatus === 'PAST_DUE' ||
         tenant.planStatus === 'CANCELLED';
 
       return {
         tenant,
+        planProfile,
         renewsAt,
         daysUntilRenewal,
         dueSoon,
         overdue,
+        overStaffLimit,
         attention,
       };
     });
@@ -118,6 +126,10 @@ export default function PlatformDashboardPage() {
     return tenantCards
       .filter(({ tenant, attention, dueSoon }) => {
         if (businessTypeFilter !== 'ALL' && tenant.businessType !== businessTypeFilter) {
+          return false;
+        }
+
+        if (planFilter !== 'ALL' && tenant.plan !== planFilter) {
           return false;
         }
 
@@ -147,6 +159,7 @@ export default function PlatformDashboardPage() {
           tenant.owner.name || '',
           tenant.owner.email || '',
           BUSINESS_TYPE_LABELS[(tenant.businessType as BusinessTypeKey) || 'OTHER'] || tenant.businessType,
+          PLAN_LABELS[(tenant.plan as SubscriptionPlanKey) || 'BASIC'] || tenant.plan,
         ]
           .join(' ')
           .toLowerCase()
@@ -165,7 +178,7 @@ export default function PlatformDashboardPage() {
 
         return a.tenant.businessName.localeCompare(b.tenant.businessName, 'bg');
       });
-  }, [businessTypeFilter, query, statusFilter, tenantCards]);
+  }, [businessTypeFilter, planFilter, query, statusFilter, tenantCards]);
 
   const totals = useMemo(() => {
     return tenantCards.reduce(
@@ -175,17 +188,19 @@ export default function PlatformDashboardPage() {
         acc.pending += card.tenant.summary.pending;
         acc.dueSoon += card.dueSoon ? 1 : 0;
         acc.unpaid += card.overdue || card.tenant.planStatus === 'PAST_DUE' || card.tenant.planStatus === 'CANCELLED' ? 1 : 0;
+        acc.overStaffLimit += card.overStaffLimit ? 1 : 0;
         return acc;
       },
-      { tenants: 0, blocked: 0, pending: 0, dueSoon: 0, unpaid: 0 },
+      { tenants: 0, blocked: 0, pending: 0, dueSoon: 0, unpaid: 0, overStaffLimit: 0 },
     );
   }, [tenantCards]);
 
-  const updateDraft = (tenant: TenantCard, patch: Partial<{ businessType: string; planStatus: string; planRenewsAt: string; isActive: boolean; tempPassword: string }>) => {
+  const updateDraft = (tenant: TenantCard, patch: Partial<{ businessType: string; plan: string; planStatus: string; planRenewsAt: string; isActive: boolean; tempPassword: string }>) => {
     setDrafts((current) => ({
       ...current,
       [tenant.id]: {
         businessType: current[tenant.id]?.businessType ?? tenant.businessType,
+        plan: current[tenant.id]?.plan ?? tenant.plan,
         planStatus: current[tenant.id]?.planStatus ?? tenant.planStatus,
         planRenewsAt: current[tenant.id]?.planRenewsAt ?? (tenant.planRenewsAt ? tenant.planRenewsAt.slice(0, 10) : ''),
         isActive: current[tenant.id]?.isActive ?? tenant.isActive,
@@ -236,7 +251,7 @@ export default function PlatformDashboardPage() {
           <div>
             <h1 style={{ margin: 0, fontSize: 34, fontWeight: 900, color: '#111827', letterSpacing: '-0.04em' }}>Platform Admin</h1>
             <p style={{ margin: '8px 0 0', color: '#6b7280' }}>
-              Бизнеси: {totals.tenants} · Блокирани: {totals.blocked} · Плащане скоро: {totals.dueSoon} · Чакащи заявки: {totals.pending}
+              Бизнеси: {totals.tenants} · Блокирани: {totals.blocked} · Плащане скоро: {totals.dueSoon} · Чакащи заявки: {totals.pending} · Над staff лимит: {totals.overStaffLimit}
             </p>
           </div>
           <button
@@ -255,10 +270,11 @@ export default function PlatformDashboardPage() {
           <DashboardKpi label="Плащане до 7 дни" value={String(totals.dueSoon)} tone={totals.dueSoon ? 'warning' : 'neutral'} />
           <DashboardKpi label="Неплатени / overdue" value={String(totals.unpaid)} tone={totals.unpaid ? 'danger' : 'neutral'} />
           <DashboardKpi label="Чакащи заявки" value={String(totals.pending)} tone={totals.pending ? 'warning' : 'neutral'} />
+          <DashboardKpi label="Над staff лимит" value={String(totals.overStaffLimit)} tone={totals.overStaffLimit ? 'warning' : 'neutral'} />
         </div>
 
         <div style={{ marginBottom: 16, display: 'grid', gap: 12 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(220px, 1fr)', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
             <input
               type="search"
               value={query}
@@ -275,6 +291,18 @@ export default function PlatformDashboardPage() {
               {BUSINESS_TYPES.map((value) => (
                 <option key={value} value={value}>
                   {BUSINESS_TYPE_LABELS[value]}
+                </option>
+              ))}
+            </select>
+            <select
+              value={planFilter}
+              onChange={(e) => setPlanFilter(e.target.value as 'ALL' | SubscriptionPlanKey)}
+              style={{ width: '100%', border: '1px solid #d1d5db', borderRadius: 16, padding: '12px 14px', fontSize: 14, background: '#fff' }}
+            >
+              <option value="ALL">Всички планове</option>
+              {SUBSCRIPTION_PLANS.map((value) => (
+                <option key={value} value={value}>
+                  {PLAN_LABELS[value]}
                 </option>
               ))}
             </select>
@@ -302,15 +330,17 @@ export default function PlatformDashboardPage() {
         )}
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 }}>
-          {filteredTenantCards.map(({ tenant, dueSoon, overdue, daysUntilRenewal, attention }) => {
+          {filteredTenantCards.map(({ tenant, dueSoon, overdue, daysUntilRenewal, attention, overStaffLimit, planProfile }) => {
             const draft = drafts[tenant.id] ?? {
               businessType: tenant.businessType,
+              plan: tenant.plan,
               planStatus: tenant.planStatus,
               planRenewsAt: tenant.planRenewsAt ? tenant.planRenewsAt.slice(0, 10) : '',
               isActive: tenant.isActive,
               tempPassword: '',
             };
             const profile = getBusinessTypeConfig(draft.businessType as BusinessTypeKey);
+            const draftPlanProfile = getSubscriptionPlanConfig(draft.plan as SubscriptionPlanKey);
 
             return (
               <section
@@ -320,7 +350,9 @@ export default function PlatformDashboardPage() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
                   <div>
                     <h2 style={{ margin: 0, fontSize: 24, fontWeight: 900, color: '#111827', letterSpacing: '-0.03em' }}>{tenant.businessName}</h2>
-                    <p style={{ margin: '6px 0 0', color: '#6b7280', fontSize: 14 }}>{tenant.slug}</p>
+                    <p style={{ margin: '6px 0 0', color: '#6b7280', fontSize: 14 }}>
+                      {tenant.slug} · {PLAN_LABELS[(tenant.plan as SubscriptionPlanKey) || 'BASIC'] || tenant.plan}
+                    </p>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
                     <span
@@ -344,6 +376,11 @@ export default function PlatformDashboardPage() {
                             : `Платено още ${daysUntilRenewal} дни`}
                       </span>
                     )}
+                    {overStaffLimit && (
+                      <span style={{ fontSize: 12, fontWeight: 800, color: '#b45309' }}>
+                        Над staff лимита на {planProfile.label}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -361,6 +398,21 @@ export default function PlatformDashboardPage() {
                     <label style={{ display: 'block', marginBottom: 6, fontSize: 13, fontWeight: 700, color: '#374151' }}>Owner</label>
                     <div style={{ fontSize: 14, color: '#111827' }}>{tenant.owner.name || 'няма име'}</div>
                     <div style={{ fontSize: 13, color: '#6b7280' }}>{tenant.owner.email || 'няма email'}</div>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', marginBottom: 6, fontSize: 13, fontWeight: 700, color: '#374151' }}>Абонаментен план</label>
+                    <select
+                      value={draft.plan}
+                      onChange={(e) => updateDraft(tenant, { plan: e.target.value })}
+                      style={{ width: '100%', border: '1px solid #d1d5db', borderRadius: 12, padding: '10px 12px', fontSize: 14 }}
+                    >
+                      {SUBSCRIPTION_PLANS.map((value) => (
+                        <option key={value} value={value}>
+                          {PLAN_LABELS[value]}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   <div>
@@ -386,6 +438,31 @@ export default function PlatformDashboardPage() {
                     <p style={{ margin: '10px 0 0', fontSize: 12, color: '#6b7280' }}>
                       Admin фокус: {profile.operations.adminFocusLabel}
                     </p>
+                  </div>
+
+                  <div style={{ border: '1px solid #eef2f7', borderRadius: 16, padding: 14, background: '#fafbff' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: '#111827' }}>
+                        {draftPlanProfile.label} · {draftPlanProfile.priceLabel}
+                      </div>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: overStaffLimit ? '#b45309' : '#047857' }}>
+                        {draftPlanProfile.staffLimit === null
+                          ? 'Без staff лимит'
+                          : `До ${draftPlanProfile.staffLimit} служители`}
+                      </span>
+                    </div>
+                    <p style={{ margin: '6px 0 0', fontSize: 13, lineHeight: 1.5, color: '#6b7280' }}>{draftPlanProfile.description}</p>
+                    <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: 10 }}>
+                      <ProfileMeta label="Резервации" value={draftPlanProfile.bookingLimitLabel} />
+                      <ProfileMeta label="Локации" value={draftPlanProfile.multiLocation ? 'Multi-location' : 'Една локация'} />
+                      <ProfileMeta label="Поддръжка" value={draftPlanProfile.supportLabel} />
+                      <ProfileMeta label="Текущ staff" value={String(tenant.summary.staff)} />
+                    </div>
+                    {overStaffLimit && draftPlanProfile.staffLimit !== null && (
+                      <p style={{ margin: '10px 0 0', fontSize: 12, color: '#b45309' }}>
+                        Текущият брой служители ({tenant.summary.staff}) е над лимита на плана ({draftPlanProfile.staffLimit}).
+                      </p>
+                    )}
                   </div>
 
                   <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(2, minmax(0,1fr))' }}>
@@ -427,6 +504,7 @@ export default function PlatformDashboardPage() {
                           id: tenant.id,
                           payload: {
                             businessType: draft.businessType,
+                            plan: draft.plan,
                             planStatus: draft.planStatus,
                             planRenewsAt: draft.planRenewsAt || null,
                             isActive: draft.isActive,
@@ -452,6 +530,7 @@ export default function PlatformDashboardPage() {
                           id: tenant.id,
                           payload: {
                             businessType: draft.businessType,
+                            plan: draft.plan,
                             planStatus: draft.planStatus,
                             planRenewsAt: draft.planRenewsAt || null,
                             isActive: false,

@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { CheckCircle2, Bell, Calendar, MessageCircle } from 'lucide-react';
 import { useTenant } from '@/lib/tenant-context';
@@ -16,6 +17,8 @@ export function BookingSuccess({ appointment, formData, onNewBooking }: BookingS
   const tenant = useTenant();
   const copy = getBusinessCopy(tenant.businessType);
   const isPending = appointment.status === 'pending';
+  const [telegramBotLink, setTelegramBotLink] = useState<string | null>(null);
+  const [telegramLinked, setTelegramLinked] = useState(false);
   const reminderText =
     tenant.reminderHours.length > 0
       ? tenant.reminderHours
@@ -24,6 +27,45 @@ export function BookingSuccess({ appointment, formData, onNewBooking }: BookingS
           .map((hours) => `${hours} ${hours === 1 ? 'час' : 'часа'}`)
           .join(' и ')
       : null;
+
+  useEffect(() => {
+    if (!tenant.enableTelegramNotifications) {
+      setTelegramBotLink(null);
+      setTelegramLinked(false);
+      return;
+    }
+
+    let mounted = true;
+
+    fetch('/api/v1/tenants/telegram/client-link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tenantSlug: tenant.slug,
+        clientPhone: formData.clientPhone,
+      }),
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          return null;
+        }
+        return response.json() as Promise<{ botLink?: string; linkedChatId?: string | null }>;
+      })
+      .then((data) => {
+        if (!mounted) return;
+        setTelegramBotLink(data?.botLink || null);
+        setTelegramLinked(Boolean(data?.linkedChatId));
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setTelegramBotLink(null);
+        setTelegramLinked(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [formData.clientPhone, tenant.enableTelegramNotifications, tenant.slug]);
 
   return (
     <motion.div
@@ -83,34 +125,54 @@ export function BookingSuccess({ appointment, formData, onNewBooking }: BookingS
           </div>
         </div>
 
-        {/* Telegram reminder info */}
-        <div className="flex items-start gap-3 bg-blue-50 rounded-xl p-4 mb-6 text-left">
-          <MessageCircle className="w-5 h-5 text-blue-500 mt-0.5 flex-shrink-0" />
-          <div>
-            <p className="text-sm font-semibold text-blue-800 mb-1">
-              Известявания чрез Telegram
-            </p>
-            <p className="text-xs text-blue-600 leading-relaxed">
-              Ще получите потвърждение
-              {reminderText ? ` и напомняне ${reminderText} преди часа.` : '.'}
-              За да получавате съобщения, стартирайте бота в Telegram.
-            </p>
-            {tenant.slug && (
-              <a
-                href={`https://t.me/${tenant.slug}_bot?start=${formData.clientPhone}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="
-                  inline-flex items-center gap-1.5 mt-2 text-xs font-semibold text-blue-700
-                  bg-blue-100 hover:bg-blue-200 px-3 py-1.5 rounded-lg transition-colors
-                "
-              >
-                <Bell className="w-3.5 h-3.5" />
-                Активирай Telegram известявания
-              </a>
+        {(tenant.enableTelegramNotifications || tenant.enableSmsNotifications) && (
+          <div className="space-y-3 mb-6 text-left">
+            {tenant.enableTelegramNotifications && (
+              <div className="flex items-start gap-3 bg-blue-50 rounded-xl p-4">
+                <MessageCircle className="w-5 h-5 text-blue-500 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-semibold text-blue-800 mb-1">
+                    Известявания чрез Telegram
+                  </p>
+                  <p className="text-xs text-blue-600 leading-relaxed">
+                    {telegramLinked
+                      ? `Telegram вече е активен за този номер. Потвърждението${reminderText ? ` и напомнянията ${reminderText} преди часа` : ''} ще идват там.`
+                      : `Ще получите потвърждение${reminderText ? ` и напомняне ${reminderText} преди часа` : ''}. За да идват в Telegram, трябва да стартирате бота.`}
+                  </p>
+                  {!telegramLinked && telegramBotLink && (
+                    <a
+                      href={telegramBotLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="
+                        inline-flex items-center gap-1.5 mt-2 text-xs font-semibold text-blue-700
+                        bg-blue-100 hover:bg-blue-200 px-3 py-1.5 rounded-lg transition-colors
+                      "
+                    >
+                      <Bell className="w-3.5 h-3.5" />
+                      Отвори бота и натисни Start
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {tenant.enableSmsNotifications && (
+              <div className="flex items-start gap-3 bg-amber-50 rounded-xl p-4">
+                <Bell className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-semibold text-amber-800 mb-1">
+                    Резервни SMS известия
+                  </p>
+                  <p className="text-xs text-amber-700 leading-relaxed">
+                    Ако за този номер няма свързан Telegram чат, системата може да използва SMS като резервен канал.
+                    {tenant.enableTelegramNotifications ? ' Приоритетът е Telegram.' : ''}
+                  </p>
+                </div>
+              </div>
             )}
           </div>
-        </div>
+        )}
 
         {/* New booking button */}
         <button
@@ -123,7 +185,7 @@ export function BookingSuccess({ appointment, formData, onNewBooking }: BookingS
           "
         >
           <Calendar className="w-4 h-4" />
-          {copy.bookingAction}
+          Нова резервация
         </button>
       </motion.div>
     </motion.div>

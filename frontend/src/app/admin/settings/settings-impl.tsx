@@ -374,7 +374,7 @@ function GeneralSettings() {
             </div>
           )}
           <div className="mb-4 rounded-xl bg-gray-50 p-4 text-sm text-gray-600">
-            В момента входът е по email, не по потребителско име. Забравена парола още няма отделен автоматичен recovery flow.
+            Входът е по email, не по потребителско име. Забравена парола вече минава през Telegram recovery линк към свързания owner чат.
           </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Input
@@ -467,6 +467,8 @@ function NotificationSettings() {
     formState: { isDirty, isSubmitting },
   } = useForm({
     defaultValues: {
+      enableTelegramNotifications: tenant.enableTelegramNotifications,
+      enableSmsNotifications: tenant.enableSmsNotifications,
       telegramBotToken: '',
       telegramChatId: '',
       smsApiKey: '',
@@ -510,6 +512,8 @@ function NotificationSettings() {
 
     apiClient
       .get<{
+        enableTelegramNotifications: boolean;
+        enableSmsNotifications: boolean;
         telegramBotToken: string;
         telegramChatId: string;
         smsApiKey: string;
@@ -520,6 +524,8 @@ function NotificationSettings() {
       .then((settings) => {
         if (!mounted) return;
         reset({
+          enableTelegramNotifications: settings.enableTelegramNotifications,
+          enableSmsNotifications: settings.enableSmsNotifications,
           telegramBotToken: settings.telegramBotToken || '',
           telegramChatId: settings.telegramChatId || '',
           smsApiKey: settings.smsApiKey || '',
@@ -559,6 +565,7 @@ function NotificationSettings() {
       setTelegramStatusLoading(true);
       const result = await apiClient.post<{
         hasBotToken: boolean;
+        enableTelegramNotifications: boolean;
         botProfile: null | {
           ok: boolean;
           username?: string;
@@ -588,13 +595,14 @@ function NotificationSettings() {
       setTelegramStatusLoading(false);
     }
   };
-
   useEffect(() => {
     if (!notificationSettingsLoaded || !publicBaseUrl) return;
     void refreshTelegramStatus(getValues(), true);
   }, [notificationSettingsLoaded, publicBaseUrl]);
 
   useEffect(() => {
+    setValue('enableTelegramNotifications', tenant.enableTelegramNotifications, { shouldDirty: false });
+    setValue('enableSmsNotifications', tenant.enableSmsNotifications, { shouldDirty: false });
     setValue('reminder24h', tenant.reminderHours.includes(24), { shouldDirty: false });
     setValue('reminder2h', tenant.reminderHours.includes(2), { shouldDirty: false });
     setValue('bookingPendingTemplate', tenant.notificationTemplates.bookingPending, { shouldDirty: false });
@@ -603,7 +611,13 @@ function NotificationSettings() {
     setValue('reminder2hTemplate', tenant.notificationTemplates.reminder2h, { shouldDirty: false });
     setValue('cancellationTemplate', tenant.notificationTemplates.cancellation, { shouldDirty: false });
     setValue('ownerNewBookingTemplate', tenant.notificationTemplates.ownerNewBooking, { shouldDirty: false });
-  }, [tenant.notificationTemplates, tenant.reminderHours, setValue]);
+  }, [
+    tenant.enableSmsNotifications,
+    tenant.enableTelegramNotifications,
+    tenant.notificationTemplates,
+    tenant.reminderHours,
+    setValue,
+  ]);
 
   const reminder24h = watch('reminder24h');
   const reminder2h = watch('reminder2h');
@@ -613,6 +627,8 @@ function NotificationSettings() {
   const reminder2hTemplate = watch('reminder2hTemplate');
   const cancellationTemplate = watch('cancellationTemplate');
   const ownerNewBookingTemplate = watch('ownerNewBookingTemplate');
+  const enableTelegramNotifications = watch('enableTelegramNotifications');
+  const enableSmsNotifications = watch('enableSmsNotifications');
   const webhookUrl = publicBaseUrl ? `${publicBaseUrl}/api/v1/webhooks/telegram/${tenant.slug}` : '';
   const hasSmsConfig = Boolean(watch('smsApiKey') || watch('smsSenderId'));
   const activeReminderCount = [reminder24h, reminder2h].filter(Boolean).length;
@@ -625,6 +641,8 @@ function NotificationSettings() {
     );
 
     return {
+      enableTelegramNotifications: Boolean(values.enableTelegramNotifications),
+      enableSmsNotifications: Boolean(values.enableSmsNotifications),
       telegramBotToken: normalizeOptionalString(values.telegramBotToken),
       telegramChatId: normalizeOptionalString(values.telegramChatId),
       smsApiKey: normalizeOptionalString(values.smsApiKey),
@@ -646,8 +664,15 @@ function NotificationSettings() {
       payload,
     );
 
-    updateTenant({ reminderHours: payload.reminderHours, notificationTemplates: result.notificationTemplates });
+    updateTenant({
+      enableTelegramNotifications: payload.enableTelegramNotifications,
+      enableSmsNotifications: payload.enableSmsNotifications,
+      reminderHours: payload.reminderHours,
+      notificationTemplates: result.notificationTemplates,
+    });
     reset({
+      enableTelegramNotifications: payload.enableTelegramNotifications,
+      enableSmsNotifications: payload.enableSmsNotifications,
       telegramBotToken: values.telegramBotToken || '',
       telegramChatId: values.telegramChatId || '',
       smsApiKey: values.smsApiKey || '',
@@ -1022,8 +1047,14 @@ function NotificationSettings() {
           <div className="grid gap-3 md:grid-cols-3">
             <InlineStat
               label="Telegram"
-              value={telegramStatus?.botProfile?.ok ? 'Свързан бот' : 'Не е готов'}
-              tone={telegramStatus?.botProfile?.ok ? 'success' : 'neutral'}
+              value={
+                !enableTelegramNotifications
+                  ? 'Изключен'
+                  : telegramStatus?.botProfile?.ok
+                    ? 'Свързан бот'
+                    : 'Не е готов'
+              }
+              tone={!enableTelegramNotifications ? 'neutral' : telegramStatus?.botProfile?.ok ? 'success' : 'neutral'}
             />
             <InlineStat
               label="Активни напомняния"
@@ -1032,11 +1063,40 @@ function NotificationSettings() {
             />
             <InlineStat
               label="Резервен SMS"
-              value={hasSmsConfig ? 'Активен' : 'Изключен'}
-              tone={hasSmsConfig ? 'warning' : 'neutral'}
+              value={enableSmsNotifications ? (hasSmsConfig ? 'Активен' : 'Чака настройка') : 'Изключен'}
+              tone={enableSmsNotifications && hasSmsConfig ? 'warning' : 'neutral'}
             />
           </div>
 
+          <div className="grid gap-3">
+            <label className="flex items-start gap-3 rounded-xl border border-gray-200 p-4">
+              <input
+                type="checkbox"
+                {...register('enableTelegramNotifications')}
+                className="mt-0.5 h-5 w-5 rounded accent-[var(--color-primary)]"
+              />
+              <div>
+                <p className="font-semibold text-gray-800">Включи Telegram известия</p>
+                <p className="mt-0.5 text-sm text-gray-500">
+                  Използва се с приоритет пред SMS, но само ако клиентът вече е натиснал Start и имаме свързан Telegram чат.
+                </p>
+              </div>
+            </label>
+
+            <label className="flex items-start gap-3 rounded-xl border border-gray-200 p-4">
+              <input
+                type="checkbox"
+                {...register('enableSmsNotifications')}
+                className="mt-0.5 h-5 w-5 rounded accent-[var(--color-primary)]"
+              />
+              <div>
+                <p className="font-semibold text-gray-800">Включи SMS fallback</p>
+                <p className="mt-0.5 text-sm text-gray-500">
+                  Ако и Telegram, и SMS са включени, приложението първо опитва Telegram. SMS се използва само ако няма свързан Telegram чат за клиента.
+                </p>
+              </div>
+            </label>
+          </div>
           <div className="grid gap-3">
             <label className="flex items-start gap-3 rounded-xl border border-gray-200 p-4">
               <input

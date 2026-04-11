@@ -328,6 +328,27 @@ export class TelegramService {
     return this.sendMessage(botToken, ownerChatId, text);
   }
 
+  async sendOwnerPasswordRecovery(
+    botToken: string,
+    ownerChatId: string,
+    businessName: string,
+    resetUrl: string,
+  ): Promise<SendMessageResult> {
+    const text =
+      `🔐 *${businessName} — възстановяване на достъпа*\n` +
+      `─────────────────\n\n` +
+      `Получена е заявка за смяна на паролата за admin входа.\n\n` +
+      `Използвайте бутона по-долу, за да зададете нова парола. Линкът е валиден 30 минути.`;
+
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: '🔑 Смени паролата', url: resetUrl }],
+      ],
+    };
+
+    return this.sendMessage(botToken, ownerChatId, text, keyboard);
+  }
+
   /**
    * Изпраща съобщение за рожден ден (маркетинг — само с consent)
    */

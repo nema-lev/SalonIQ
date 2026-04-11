@@ -38,6 +38,8 @@ export interface TenantConfig {
   allowRandomStaffSelection: boolean;
   allowClientCancellation: boolean;
   collectClientEmail: boolean;
+  enableTelegramNotifications: boolean;
+  enableSmsNotifications: boolean;
   notificationTemplates: NotificationTemplates;
 }
 

@@ -5,6 +5,7 @@ import { TelegramService } from './telegram.service';
 import { AppointmentsService } from '../appointments/appointments.service';
 import { AppointmentStatus } from '../../common/types/enums';
 import type { Tenant } from '@prisma/client';
+import { buildBulgarianPhoneVariants, normalizeBulgarianPhone } from '../../common/utils/phone';
 
 interface TelegramUpdate {
   update_id: number;
@@ -334,11 +335,17 @@ export class TelegramWebhookController {
       // Запази chat_id ако има phone в payload
       const parts = rawText.split(' ');
       if (parts.length > 1) {
-        const phone = parts[1]; // /start +359888123456
+        const phone = normalizeBulgarianPhone(parts[1]); // /start +359888123456
+        const phoneVariants = buildBulgarianPhoneVariants(phone);
+
+        if (!phoneVariants.length) {
+          return;
+        }
+
         await this.prisma.queryInSchema(
           tenant.schema_name,
-          `UPDATE clients SET telegram_chat_id = $1 WHERE phone = $2`,
-          [chatId, phone],
+          `UPDATE clients SET telegram_chat_id = $1 WHERE phone = ANY($2::text[])`,
+          [chatId, phoneVariants],
         );
       }
     }

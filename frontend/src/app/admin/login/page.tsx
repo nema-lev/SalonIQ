@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
@@ -114,6 +114,18 @@ export default function LoginPage() {
             {mutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
             Влез
           </button>
+
+          <div style={{ display: 'grid', gap: 8 }}>
+            <Link
+              href="/admin/forgot-password"
+              style={{ fontSize: 14, fontWeight: 700, color: 'var(--color-primary)', textDecoration: 'none' }}
+            >
+              Забравена парола?
+            </Link>
+            <p style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: '#6b7280' }}>
+              Recovery flow-ът изпраща Telegram линк към вече свързания owner бот. Ако owner Telegram още не е свързан, super admin трябва да зададе временна парола.
+            </p>
+          </div>
         </form>
       </div>
     </div>

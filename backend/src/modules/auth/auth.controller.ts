@@ -55,6 +55,31 @@ class UpdateProfileDto {
   newPassword?: string;
 }
 
+class RecoveryRequestDto {
+  @IsEmail()
+  email: string;
+
+  @IsOptional()
+  @IsString()
+  publicBaseUrl?: string;
+}
+
+class RecoveryVerifyDto {
+  @IsString()
+  @MinLength(10)
+  token: string;
+}
+
+class RecoveryResetDto {
+  @IsString()
+  @MinLength(10)
+  token: string;
+
+  @IsString()
+  @MinLength(6)
+  newPassword: string;
+}
+
 @ApiTags('auth')
 @Controller({ path: 'auth', version: '1' })
 export class AuthController {
@@ -72,6 +97,27 @@ export class AuthController {
   @ApiOperation({ summary: 'Вход за platform super admin' })
   loginPlatform(@Body() dto: PlatformLoginDto) {
     return this.authService.loginPlatform(dto.email, dto.password);
+  }
+
+  @Post('recovery/request')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Заяви recovery линк за owner вход през Telegram' })
+  requestRecovery(@Body() dto: RecoveryRequestDto) {
+    return this.authService.requestOwnerRecovery(dto.email, dto.publicBaseUrl);
+  }
+
+  @Post('recovery/verify')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Провери валидността на owner recovery token' })
+  verifyRecovery(@Body() dto: RecoveryVerifyDto) {
+    return this.authService.verifyOwnerRecoveryToken(dto.token);
+  }
+
+  @Post('recovery/reset')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Смени owner паролата чрез recovery token' })
+  resetRecovery(@Body() dto: RecoveryResetDto) {
+    return this.authService.resetOwnerPasswordByRecoveryToken(dto.token, dto.newPassword);
   }
 
   @Get('me')

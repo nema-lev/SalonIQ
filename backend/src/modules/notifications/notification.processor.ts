@@ -84,7 +84,7 @@ export class NotificationProcessor extends WorkerHost {
         sms_api_key, sms_sender_id,
         business_name, address, slug,
         reminder_hours, theme_config
-       FROM tenants WHERE id = $1`,
+       FROM tenants WHERE id = $1::uuid`,
       [tenantId],
     );
 

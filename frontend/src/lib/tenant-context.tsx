@@ -21,6 +21,7 @@ export interface TenantConfig {
   slug: string;
   businessName: string;
   businessType: string;
+  plan: string;
   description: string | null;
   address: string | null;
   city: string | null;

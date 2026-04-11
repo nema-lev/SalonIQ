@@ -117,6 +117,7 @@ export class TenantGuard implements CanActivate {
       schemaName: tenant.schema_name,
       businessName: tenant.business_name,
       businessType: tenant.business_type,
+      plan: tenant.plan,
       address: tenant.address,
       phone: tenant.phone,
       telegramBotToken: tenant.telegram_bot_token,

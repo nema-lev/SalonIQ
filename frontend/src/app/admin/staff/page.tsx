@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { AxiosError } from 'axios';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -8,6 +9,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Archive, Loader2, Pencil, Plus, Scissors, User, UserRoundCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiClient } from '@/lib/api-client';
+import { getSubscriptionPlanConfig, PLAN_LABELS } from '@/lib/plan-config';
+import { useTenant } from '@/lib/tenant-context';
 
 interface StaffMember {
   id: string;
@@ -47,6 +50,7 @@ const COLORS = ['#7c3aed', '#8b5cf6', '#a855f7', '#ec4899', '#ef4444', '#f59e0b'
 
 export default function AdminStaffPage() {
   const qc = useQueryClient();
+  const tenant = useTenant();
   const [editing, setEditing] = useState<StaffMember | null>(null);
   const [showForm, setShowForm] = useState(false);
 
@@ -63,6 +67,9 @@ export default function AdminStaffPage() {
   });
 
   const serviceOptions = useMemo(() => services ?? [], [services]);
+  const planProfile = useMemo(() => getSubscriptionPlanConfig(tenant.plan), [tenant.plan]);
+  const staffCount = staff?.length ?? 0;
+  const reachedStaffLimit = planProfile.staffLimit != null && staffCount >= planProfile.staffLimit;
 
   const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -112,8 +119,10 @@ export default function AdminStaffPage() {
         serviceIds: [],
       });
     },
-    onError: () => {
-      toast.error('Грешка при запазване на служителя.');
+    onError: (error) => {
+      const errorMessage = (error as AxiosError<{ message?: string | string[] }>).response?.data?.message;
+      const message = Array.isArray(errorMessage) ? errorMessage.join('\n') : errorMessage;
+      toast.error(message || 'Грешка при запазване на служителя.');
     },
   });
 
@@ -140,6 +149,11 @@ export default function AdminStaffPage() {
   });
 
   const openCreate = () => {
+    if (reachedStaffLimit) {
+      toast.error(`Текущият план (${PLAN_LABELS[(tenant.plan as keyof typeof PLAN_LABELS) || 'BASIC'] || tenant.plan}) е достигнал лимита за Персонал.`);
+      return;
+    }
+
     setEditing(null);
     reset({
       name: '',
@@ -182,17 +196,37 @@ export default function AdminStaffPage() {
     <div>
       <div className="mb-6 flex items-center justify-between gap-3">
         <div>
-          <p className="text-sm text-gray-500">{staff?.length ?? 0} профила</p>
+          <p className="text-sm text-gray-500">
+            {staffCount} профила
+            {planProfile.staffLimit != null ? ` от ${planProfile.staffLimit}` : ' · без лимит'}
+          </p>
         </div>
         <button
           type="button"
           onClick={openCreate}
-          className="inline-flex items-center gap-2 rounded-xl bg-[var(--color-primary)] px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+          disabled={reachedStaffLimit}
+          className="inline-flex items-center gap-2 rounded-xl bg-[var(--color-primary)] px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Plus className="w-4 h-4" />
           Нов служител
         </button>
       </div>
+
+      {planProfile.staffLimit != null ? (
+        <div className={`mb-6 rounded-2xl border px-4 py-3 text-sm ${
+          reachedStaffLimit
+            ? 'border-amber-200 bg-amber-50 text-amber-900'
+            : 'border-gray-200 bg-white text-gray-600'
+        }`}>
+          <p className="font-semibold text-gray-900">
+            План {PLAN_LABELS[(tenant.plan as keyof typeof PLAN_LABELS) || 'BASIC'] || tenant.plan}
+          </p>
+          <p className="mt-1">
+            Лимитът за Персонал е {planProfile.staffLimit} профила. Редакцията и архивирането остават активни.
+            {reachedStaffLimit ? ' Добавянето на нов служител е блокирано до ъпгрейд на плана.' : ''}
+          </p>
+        </div>
+      ) : null}
 
       {staffLoading ? (
         <div className="flex justify-center py-20">

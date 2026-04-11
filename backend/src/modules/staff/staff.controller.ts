@@ -1,5 +1,6 @@
 import {
   Body,
+  ConflictException,
   Controller,
   Get,
   HttpCode,
@@ -69,6 +70,12 @@ class UpsertStaffDto {
 @Controller({ path: 'staff', version: '1' })
 export class StaffController {
   constructor(private readonly prisma: TenantPrismaService) {}
+
+  private readonly STAFF_LIMITS: Record<string, number | null> = {
+    BASIC: 2,
+    PRO: 8,
+    ENTERPRISE: null,
+  };
 
   /** Публичен списък на активния персонал (по избор: за конкретна услуга) */
   @Get()
@@ -146,6 +153,8 @@ export class StaffController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Създай служител от admin панела' })
   async create(@CurrentTenant() tenant: any, @Body() dto: UpsertStaffDto) {
+    await this.assertCanCreateStaff(tenant);
+
     const rows = await this.prisma.queryInSchema<{ id: string }[]>(
       tenant.schemaName,
       `
@@ -261,5 +270,25 @@ export class StaffController {
     if (typeof value !== 'string') return null;
     const trimmed = value.trim();
     return trimmed === '' ? null : trimmed;
+  }
+
+  private async assertCanCreateStaff(tenant: { schemaName: string; plan?: string }) {
+    const staffLimit = this.STAFF_LIMITS[tenant.plan || 'BASIC'] ?? this.STAFF_LIMITS.BASIC;
+    if (staffLimit == null) {
+      return;
+    }
+
+    const rows = await this.prisma.queryInSchema<{ count: string }[]>(
+      tenant.schemaName,
+      `SELECT COUNT(*)::text AS count FROM staff`,
+      [],
+    );
+
+    const currentCount = Number(rows[0]?.count || 0);
+    if (currentCount >= staffLimit) {
+      throw new ConflictException(
+        `Планът позволява до ${staffLimit} профила в Персонал. Ъпгрейдни плана, за да добавиш още.`,
+      );
+    }
   }
 }

@@ -871,6 +871,7 @@ export class TenantController {
       slug: tenant.slug,
       businessName: tenant.business_name,
       businessType: tenant.business_type,
+      plan: tenant.plan,
       description: tenant.description,
       address: tenant.address,
       city: tenant.city,

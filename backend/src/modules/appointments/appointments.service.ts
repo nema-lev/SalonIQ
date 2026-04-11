@@ -495,7 +495,7 @@ export class AppointmentsService {
 
     // 8. Постави в notification queue
     if (status === AppointmentStatus.PROPOSAL_PENDING) {
-      await this.notificationQueue.add(
+      await this.safeAddNotificationJob(
         NotificationJobType.BOOKING_PROPOSAL,
         {
           tenantId: tenant.id,
@@ -503,7 +503,12 @@ export class AppointmentsService {
           appointmentId,
           clientId,
         },
-        { delay: 0 },
+        {
+          tenantSlug: tenant.slug,
+          appointmentId,
+          context: 'create-proposal',
+          delay: 0,
+        },
       );
     } else {
       await this.scheduleNotifications(tenant, appointmentId, clientId, status, startAt);
@@ -598,7 +603,7 @@ export class AppointmentsService {
       ],
     );
 
-    await this.notificationQueue.add(
+    await this.safeAddNotificationJob(
       NotificationJobType.BOOKING_PROPOSAL,
       {
         tenantId: tenant.id,
@@ -606,7 +611,12 @@ export class AppointmentsService {
         appointmentId: appointment.id,
         clientId: appointment.client_id,
       },
-      { delay: 0 },
+      {
+        tenantSlug: tenant.slug,
+        appointmentId: appointment.id,
+        context: 'propose-alternative',
+        delay: 0,
+      },
     );
 
     return {
@@ -876,14 +886,22 @@ export class AppointmentsService {
     );
 
     // Изпрати известие за промяната
-    await this.notificationQueue.add('status-changed', {
-      tenantId: tenant.id,
-      tenantSchemaName: tenant.schemaName,
-      appointmentId,
-      clientId: appointment.client_id,
-      newStatus,
-      reason,
-    });
+    await this.safeAddNotificationJob(
+      'status-changed',
+      {
+        tenantId: tenant.id,
+        tenantSchemaName: tenant.schemaName,
+        appointmentId,
+        clientId: appointment.client_id,
+        newStatus,
+        reason,
+      },
+      {
+        tenantSlug: tenant.slug,
+        appointmentId,
+        context: 'status-change',
+      },
+    );
 
     return { id: appointmentId, status: newStatus };
   }
@@ -945,29 +963,46 @@ export class AppointmentsService {
     };
 
     // Незабавно потвърждение
-    await this.notificationQueue.add(
+    await this.safeAddNotificationJob(
       NotificationJobType.BOOKING_CONFIRMED,
       { ...baseData, status },
-      { delay: 0 },
+      {
+        tenantSlug: tenant.slug,
+        appointmentId,
+        context: 'booking-confirmed',
+        delay: 0,
+      },
     );
 
     // Reminder 24ч преди
     const reminder24h = addHours(startAt, -24).getTime() - Date.now();
     if (reminder24h > 0 && reminderHours.includes(24)) {
-      await this.notificationQueue.add(
+      await this.safeAddNotificationJob(
         NotificationJobType.REMINDER_24H,
         baseData,
-        { delay: reminder24h, jobId: `reminder-24h-${appointmentId}` },
+        {
+          tenantSlug: tenant.slug,
+          appointmentId,
+          context: 'reminder-24h',
+          delay: reminder24h,
+          jobId: `reminder-24h-${appointmentId}`,
+        },
       );
     }
 
     // Reminder 2ч преди
     const reminder2h = addHours(startAt, -2).getTime() - Date.now();
     if (reminder2h > 0 && reminderHours.includes(2)) {
-      await this.notificationQueue.add(
+      await this.safeAddNotificationJob(
         NotificationJobType.REMINDER_2H,
         baseData,
-        { delay: reminder2h, jobId: `reminder-2h-${appointmentId}` },
+        {
+          tenantSlug: tenant.slug,
+          appointmentId,
+          context: 'reminder-2h',
+          delay: reminder2h,
+          jobId: `reminder-2h-${appointmentId}`,
+        },
       );
     }
   }
@@ -991,19 +1026,53 @@ export class AppointmentsService {
 
     const reminder24h = addHours(startAt, -24).getTime() - Date.now();
     if (reminder24h > 0 && reminderHours.includes(24)) {
-      await this.notificationQueue.add(
+      await this.safeAddNotificationJob(
         NotificationJobType.REMINDER_24H,
         baseData,
-        { delay: reminder24h, jobId: `reminder-24h-${appointmentId}` },
+        {
+          tenantSlug: tenant.slug,
+          appointmentId,
+          context: 'proposal-reminder-24h',
+          delay: reminder24h,
+          jobId: `reminder-24h-${appointmentId}`,
+        },
       );
     }
 
     const reminder2h = addHours(startAt, -2).getTime() - Date.now();
     if (reminder2h > 0 && reminderHours.includes(2)) {
-      await this.notificationQueue.add(
+      await this.safeAddNotificationJob(
         NotificationJobType.REMINDER_2H,
         baseData,
-        { delay: reminder2h, jobId: `reminder-2h-${appointmentId}` },
+        {
+          tenantSlug: tenant.slug,
+          appointmentId,
+          context: 'proposal-reminder-2h',
+          delay: reminder2h,
+          jobId: `reminder-2h-${appointmentId}`,
+        },
+      );
+    }
+  }
+
+  private async safeAddNotificationJob(
+    name: string,
+    data: unknown,
+    meta: { tenantSlug: string; appointmentId: string; context: string; delay?: number; jobId?: string },
+  ) {
+    try {
+      await this.notificationQueue.add(
+        name,
+        data,
+        {
+          ...(meta.delay !== undefined ? { delay: meta.delay } : {}),
+          ...(meta.jobId ? { jobId: meta.jobId } : {}),
+        },
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `Notification dispatch failed (${meta.context}) for appointment ${meta.appointmentId} in tenant ${meta.tenantSlug}: ${message}`,
       );
     }
   }

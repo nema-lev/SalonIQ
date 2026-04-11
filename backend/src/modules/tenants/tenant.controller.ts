@@ -390,6 +390,98 @@ export class TenantController {
     };
   }
 
+  @Post('settings/notifications/telegram/status')
+  @UseGuards(JwtAuthGuard, TenantGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Провери текущия Telegram setup статус' })
+  async getTelegramStatus(
+    @CurrentTenant() tenant: any,
+    @Body() dto: TelegramWebhookActionDto,
+  ) {
+    const current = await this.persistTelegramCredentialsFromAction(tenant.id, dto);
+    const currentTheme = this.parseTheme(current.theme_config);
+    const botToken = current.telegram_bot_token;
+    const chatId = current.telegram_chat_id || null;
+    const publicBaseUrl = dto.publicBaseUrl?.trim().replace(/\/$/, '') || null;
+    const expectedWebhookUrl = publicBaseUrl
+      ? `${publicBaseUrl}/api/v1/webhooks/telegram/${tenant.slug}`
+      : null;
+    const rawOwnerSetupExpiresAt =
+      typeof currentTheme.telegramOwnerSetupExpiresAt === 'string'
+        ? currentTheme.telegramOwnerSetupExpiresAt
+        : null;
+    const ownerSetupExpiresAt = rawOwnerSetupExpiresAt
+      ? new Date(rawOwnerSetupExpiresAt)
+      : null;
+    const ownerSetupPending = Boolean(
+      typeof currentTheme.telegramOwnerSetupToken === 'string' &&
+      currentTheme.telegramOwnerSetupToken &&
+      ownerSetupExpiresAt &&
+      Number.isFinite(ownerSetupExpiresAt.getTime()) &&
+      ownerSetupExpiresAt.getTime() > Date.now(),
+    );
+
+    if (!botToken) {
+      return {
+        hasBotToken: false,
+        botProfile: null,
+        linkedChatId: chatId,
+        ownerChatLinked: Boolean(chatId),
+        ownerSetupPending,
+        ownerSetupExpiresAt: ownerSetupExpiresAt?.toISOString() || null,
+        expectedWebhookUrl,
+        webhook: {
+          connected: false,
+          webhookUrl: '',
+          pendingUpdateCount: 0,
+          lastErrorMessage: undefined,
+        },
+      };
+    }
+
+    const botProfile = await this.telegramService.getBotProfile(botToken);
+
+    if (!botProfile.ok) {
+      return {
+        hasBotToken: true,
+        botProfile,
+        linkedChatId: chatId,
+        ownerChatLinked: Boolean(chatId),
+        ownerSetupPending,
+        ownerSetupExpiresAt: ownerSetupExpiresAt?.toISOString() || null,
+        expectedWebhookUrl,
+        webhook: {
+          connected: false,
+          webhookUrl: '',
+          pendingUpdateCount: 0,
+          lastErrorMessage: undefined,
+        },
+      };
+    }
+
+    const info = await this.telegramService.getWebhookInfo(botToken);
+
+    return {
+      hasBotToken: true,
+      botProfile,
+      linkedChatId: chatId,
+      ownerChatLinked: Boolean(chatId),
+      ownerSetupPending,
+      ownerSetupExpiresAt: ownerSetupExpiresAt?.toISOString() || null,
+      expectedWebhookUrl,
+      webhook: {
+        connected: Boolean(
+          info.ok &&
+          info.url &&
+          (!expectedWebhookUrl || info.url === expectedWebhookUrl),
+        ),
+        webhookUrl: info.url || '',
+        pendingUpdateCount: info.pendingUpdateCount,
+        lastErrorMessage: info.lastErrorMessage,
+      },
+    };
+  }
+
   @Patch('settings/booking')
   @UseGuards(JwtAuthGuard, TenantGuard)
   @ApiBearerAuth()

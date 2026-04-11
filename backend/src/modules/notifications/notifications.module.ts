@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { TelegramService } from './telegram.service';
 import { SmsApiService } from './smsapi.service';
@@ -12,14 +12,14 @@ const redisEnabled = Boolean(redisHost);
 @Module({
   imports: [
     ...(redisEnabled ? [BullModule.registerQueue({ name: 'notifications' })] : []),
-    AppointmentsModule,
+    forwardRef(() => AppointmentsModule),
   ],
   controllers: [TelegramWebhookController],
   providers: [
     TelegramService,
     SmsApiService,
-    ...(redisEnabled ? [NotificationProcessor] : []),
+    NotificationProcessor,
   ],
-  exports: [TelegramService],
+  exports: [TelegramService, NotificationProcessor],
 })
 export class NotificationsModule {}

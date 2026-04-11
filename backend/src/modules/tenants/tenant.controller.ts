@@ -306,25 +306,21 @@ export class TenantController {
     @CurrentTenant() tenant: any,
     @Body() dto: UpdateGeneralSettingsDto,
   ) {
-    const current = await this.getTenantRowById(tenant.id);
-
     await this.prisma.$executeRawUnsafe(
       `
       UPDATE public.tenants
       SET business_name = $1,
-          business_type = $2,
-          description = $3,
-          address = $4,
-          city = $5,
-          phone = $6,
-          email = $7,
-          website = $8,
-          google_maps_url = $9,
+          description = $2,
+          address = $3,
+          city = $4,
+          phone = $5,
+          email = $6,
+          website = $7,
+          google_maps_url = $8,
           updated_at = NOW()
-      WHERE id = $10::uuid
+      WHERE id = $9::uuid
       `,
       dto.businessName.trim(),
-      current.business_type,
       this.nullable(dto.description),
       this.nullable(dto.address),
       this.nullable(dto.city),

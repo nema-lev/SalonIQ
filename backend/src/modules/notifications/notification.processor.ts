@@ -125,7 +125,7 @@ export class NotificationProcessor extends WorkerHost {
        JOIN clients c ON c.id = a.client_id
        JOIN services sv ON sv.id = a.service_id
        JOIN staff s ON s.id = a.staff_id
-       WHERE a.id = $1`,
+       WHERE a.id = $1::uuid`,
       [appointmentId],
     );
 
@@ -299,7 +299,7 @@ export class NotificationProcessor extends WorkerHost {
         // Маркирай че е изпратен reminder
         await this.prisma.queryInSchema(
           tenantSchemaName,
-          `UPDATE appointments SET reminder_24h_sent_at = NOW() WHERE id = $1`,
+          `UPDATE appointments SET reminder_24h_sent_at = NOW() WHERE id = $1::uuid`,
           [appointmentId],
         );
         break;
@@ -336,7 +336,7 @@ export class NotificationProcessor extends WorkerHost {
         }
         await this.prisma.queryInSchema(
           tenantSchemaName,
-          `UPDATE appointments SET reminder_2h_sent_at = NOW() WHERE id = $1`,
+          `UPDATE appointments SET reminder_2h_sent_at = NOW() WHERE id = $1::uuid`,
           [appointmentId],
         );
         break;

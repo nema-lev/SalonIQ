@@ -29,6 +29,7 @@ interface TenantWebhookRow {
   schema_name: string;
   telegram_bot_token: string;
   business_name: string;
+  custom_domain?: string | null;
   telegram_chat_id?: string | null;
   address?: string | null;
   theme_config?: unknown;
@@ -64,6 +65,7 @@ export class TelegramWebhookController {
     // Намери tenant-а
     const tenants = await this.prisma.$queryRaw<TenantWebhookRow[]>`
       SELECT id, slug, schema_name, telegram_bot_token, business_name,
+             custom_domain,
              theme_config,
              telegram_chat_id, cancellation_hours, address
       FROM public.tenants
@@ -314,6 +316,7 @@ export class TelegramWebhookController {
     const chatId = message.chat.id.toString();
     const rawText = message.text?.trim() || '';
     const text = rawText.toLowerCase();
+    const bookingUrl = tenant.custom_domain ? `https://${tenant.custom_domain}` : null;
     const possiblePhone = normalizeBulgarianPhone(rawText);
     const possiblePhoneVariants = buildBulgarianPhoneVariants(possiblePhone);
 
@@ -331,14 +334,15 @@ export class TelegramWebhookController {
         chatId,
         `👋 *Здравейте!*\n\nТова е официалният бот на *${tenant.business_name}*.\n\n` +
         `Ще получавате потвърждения и напомняния за вашите часове тук.\n\n` +
-        `За автоматично свързване използвайте бутона след резервация, или изпратете телефона си в този чат.\n\n` +
-        `За записване на час: https://${tenant.slug}.saloniq.bg`,
+        `За автоматично свързване използвайте бутона след резервация, или изпратете телефона си в този чат.` +
+        (bookingUrl ? `\n\nЗа записване на час: ${bookingUrl}` : ''),
       );
 
       // Запази chat_id ако има phone в payload
       const parts = rawText.split(' ');
       if (parts.length > 1) {
-        const phone = normalizeBulgarianPhone(parts[1]); // /start +359888123456
+        const startPayload = parts[1].startsWith('phone_') ? parts[1].replace('phone_', '') : parts[1];
+        const phone = normalizeBulgarianPhone(startPayload);
         const phoneVariants = buildBulgarianPhoneVariants(phone);
 
         if (!phoneVariants.length) {

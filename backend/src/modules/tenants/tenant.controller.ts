@@ -772,7 +772,7 @@ export class TenantController {
 
     return {
       botUsername: botProfile.username,
-      botLink: `https://t.me/${botProfile.username}?start=${encodeURIComponent(clientPhone)}`,
+      botLink: `https://t.me/${botProfile.username}?start=phone_${clientPhone.replace(/^\+/, '')}`,
       normalizedPhone: clientPhone,
       linkedChatId: linkedRows[0]?.telegram_chat_id || null,
     };

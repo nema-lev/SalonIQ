@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { useTenant, useTenantActions } from '@/lib/tenant-context';
 import { apiClient } from '@/lib/api-client';
+import { getSubscriptionPlanConfig, PLAN_LABELS } from '@/lib/plan-config';
 import {
   DEFAULT_NOTIFICATION_TEMPLATES,
   TEMPLATE_TOKENS,
@@ -192,6 +193,7 @@ const Input = forwardRef<
 function GeneralSettings() {
   const tenant = useTenant();
   const { updateTenant } = useTenantActions();
+  const planProfile = useMemo(() => getSubscriptionPlanConfig(tenant.plan), [tenant.plan]);
   const [ownerProfile, setOwnerProfile] = useState<null | { name: string; email: string }>(null);
   const [ownerProfileError, setOwnerProfileError] = useState<string | null>(null);
   const {
@@ -331,6 +333,47 @@ function GeneralSettings() {
   return (
     <div className="space-y-5">
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-5 pb-28">
+        <Card title="План и достъп">
+          <div className="rounded-2xl border border-gray-200 bg-gray-50/80 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-gray-500">Текущ план</p>
+                <div className="mt-2 inline-flex items-center rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-gray-900 shadow-sm">
+                  {PLAN_LABELS[(tenant.plan as keyof typeof PLAN_LABELS) || 'BASIC'] || tenant.plan}
+                </div>
+                <p className="mt-3 max-w-2xl text-sm leading-relaxed text-gray-600">
+                  {planProfile.description}
+                </p>
+              </div>
+              <div className="rounded-2xl bg-white px-4 py-3 text-right shadow-sm">
+                <p className="text-xs uppercase tracking-[0.16em] text-gray-400">Цена</p>
+                <p className="mt-1 text-lg font-black text-gray-900">{planProfile.priceLabel}</p>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded-2xl bg-white px-4 py-3 shadow-sm">
+                <p className="text-xs uppercase tracking-[0.16em] text-gray-400">Персонал</p>
+                <p className="mt-1 text-sm font-semibold text-gray-900">
+                  {planProfile.staffLimit == null ? 'Без лимит' : `До ${planProfile.staffLimit} профила`}
+                </p>
+              </div>
+              <div className="rounded-2xl bg-white px-4 py-3 shadow-sm">
+                <p className="text-xs uppercase tracking-[0.16em] text-gray-400">Резервации</p>
+                <p className="mt-1 text-sm font-semibold text-gray-900">{planProfile.bookingLimitLabel}</p>
+              </div>
+              <div className="rounded-2xl bg-white px-4 py-3 shadow-sm">
+                <p className="text-xs uppercase tracking-[0.16em] text-gray-400">Поддръжка</p>
+                <p className="mt-1 text-sm font-semibold text-gray-900">{planProfile.supportLabel}</p>
+              </div>
+            </div>
+
+            <p className="mt-4 text-xs leading-relaxed text-gray-500">
+              Типът бизнес, планът, статусът на абонамента и блокирането на достъп се управляват само от super admin панела.
+            </p>
+          </div>
+        </Card>
+
         <Card title="Информация за бизнеса">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div className="md:col-span-2">

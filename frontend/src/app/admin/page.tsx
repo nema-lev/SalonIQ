@@ -2,7 +2,7 @@
 
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format, addDays, subDays, isToday } from 'date-fns';
+import { format, addDays, subDays, isToday, startOfDay, endOfDay, startOfWeek, endOfWeek, eachDayOfInterval, isSameDay } from 'date-fns';
 import { bg } from 'date-fns/locale';
 import {
   ChevronLeft,
@@ -106,6 +106,30 @@ interface NotificationLogEntry {
   sent_at: string | null;
   delivered_at: string | null;
   created_at: string;
+}
+
+interface CalendarBoardStaff {
+  id: string;
+  name: string;
+  color: string;
+  is_active: boolean;
+  accepts_online: boolean;
+  working_hours: Record<string, { open: string; close: string; isOpen: boolean }>;
+}
+
+interface StaffException {
+  id: string;
+  staff_id: string;
+  type: string;
+  start_at: string;
+  end_at: string;
+  note: string | null;
+}
+
+interface CalendarBoardResponse {
+  staff: CalendarBoardStaff[];
+  appointments: Appointment[];
+  exceptions: StaffException[];
 }
 
 interface AppointmentContextResponse {
@@ -330,6 +354,10 @@ function getMinuteOffset(value: string, startHour: number) {
   return date.getHours() * 60 + date.getMinutes() - startHour * 60;
 }
 
+function getWorkingDayKey(value: Date) {
+  return format(value, 'EEE', { locale: bg }).toLowerCase().slice(0, 3);
+}
+
 export default function AdminCalendarPage() {
   const qc = useQueryClient();
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -337,14 +365,31 @@ export default function AdminCalendarPage() {
   const [proposalTarget, setProposalTarget] = useState<Appointment | null>(null);
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const [mobileWorkspace, setMobileWorkspace] = useState<'calendar' | 'inbox'>('calendar');
-  const [calendarView, setCalendarView] = useState<'grid' | 'list'>('grid');
+  const [calendarView, setCalendarView] = useState<'grid' | 'list' | 'week'>('grid');
   const [staffFilter, setStaffFilter] = useState<string>('all');
+  const [draggedAppointmentId, setDraggedAppointmentId] = useState<string | null>(null);
+  const [dropPreview, setDropPreview] = useState<{ staffId: string; startAt: string } | null>(null);
   const dateInputRef = useRef<HTMLInputElement | null>(null);
   const dateKey = format(currentDate, 'yyyy-MM-dd');
+  const rangeStart = useMemo(
+    () => (calendarView === 'week' ? startOfWeek(currentDate, { weekStartsOn: 1 }) : startOfDay(currentDate)),
+    [calendarView, currentDate],
+  );
+  const rangeEndExclusive = useMemo(
+    () =>
+      calendarView === 'week'
+        ? addDays(endOfWeek(currentDate, { weekStartsOn: 1 }), 1)
+        : addDays(endOfDay(currentDate), 1),
+    [calendarView, currentDate],
+  );
 
-  const { data: appointments, isLoading, refetch } = useQuery({
-    queryKey: ['appointments', dateKey],
-    queryFn: () => apiClient.get<Appointment[]>('/appointments', { date: dateKey }),
+  const { data: calendarBoard, isLoading, refetch } = useQuery({
+    queryKey: ['appointments-calendar-board', rangeStart.toISOString(), rangeEndExclusive.toISOString()],
+    queryFn: () =>
+      apiClient.get<CalendarBoardResponse>('/appointments/calendar-board', {
+        from: rangeStart.toISOString(),
+        to: rangeEndExclusive.toISOString(),
+      }),
     staleTime: 30 * 1000,
   });
 
@@ -364,6 +409,25 @@ export default function AdminCalendarPage() {
     queryFn: () => apiClient.get<AppointmentContextResponse>(`/appointments/${selectedRecordId}/context`),
     enabled: Boolean(selectedRecordId),
     staleTime: 15 * 1000,
+  });
+
+  const rescheduleMutation = useMutation({
+    mutationFn: ({ id, startAt, staffId }: { id: string; startAt: string; staffId: string }) =>
+      apiClient.patch(`/appointments/${id}/reschedule`, { startAt, staffId }),
+    onSuccess: () => {
+      refetch();
+      qc.invalidateQueries({ queryKey: ['appointments-upcoming'] });
+      qc.invalidateQueries({ queryKey: ['admin-header-upcoming'] });
+      qc.invalidateQueries({ queryKey: ['appointment-context'] });
+      toast.success('Часът е преместен.');
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Неуспешно преместване на часа.');
+    },
+    onSettled: () => {
+      setDraggedAppointmentId(null);
+      setDropPreview(null);
+    },
   });
 
   const handleStatusChange = async (id: string, status: string) => {
@@ -397,16 +461,32 @@ export default function AdminCalendarPage() {
     qc.invalidateQueries({ queryKey: ['appointments-upcoming'] });
     qc.invalidateQueries({ queryKey: ['admin-header-upcoming'] });
     qc.invalidateQueries({ queryKey: ['appointment-context'] });
+    qc.invalidateQueries({ queryKey: ['appointments-calendar-board'] });
   };
 
-  const dayAppointments = useMemo(() => sortByStartAt(appointments), [appointments]);
-  const calendarStaff = useMemo(() => {
-    const grouped = new Map<
-      string,
-      { id: string; name: string; color: string; appointments: Appointment[] }
-    >();
+  const handleDropReschedule = (appointmentId: string, startAt: string, staffId: string) => {
+    rescheduleMutation.mutate({ id: appointmentId, startAt, staffId });
+  };
 
-    for (const appointment of dayAppointments) {
+  const appointments = calendarBoard?.appointments ?? [];
+  const dayAppointments = useMemo(
+    () => sortByStartAt(appointments.filter((item) => isSameDay(new Date(item.start_at), currentDate))),
+    [appointments, currentDate],
+  );
+  const calendarStaff = useMemo(() => {
+    const grouped = new Map<string, { id: string; name: string; color: string; appointments: Appointment[]; working_hours: CalendarBoardStaff['working_hours'] }>();
+
+    for (const staffMember of calendarBoard?.staff ?? []) {
+      grouped.set(staffMember.id, {
+        id: staffMember.id,
+        name: staffMember.name,
+        color: staffMember.color || '#D946EF',
+        appointments: [],
+        working_hours: staffMember.working_hours,
+      });
+    }
+
+    for (const appointment of appointments) {
       const existing = grouped.get(appointment.staff_id);
       if (existing) {
         existing.appointments.push(appointment);
@@ -418,11 +498,12 @@ export default function AdminCalendarPage() {
         name: appointment.staff_name,
         color: appointment.staff_color || appointment.service_color || '#D946EF',
         appointments: [appointment],
+        working_hours: {},
       });
     }
 
     return [...grouped.values()].sort((left, right) => left.name.localeCompare(right.name, 'bg'));
-  }, [dayAppointments]);
+  }, [appointments, calendarBoard?.staff]);
   const inboxItems = useMemo(() => sortByStartAt(upcoming).map(buildInboxItem), [upcoming]);
   const actionItems = useMemo(
     () => inboxItems.filter((item) => item.bucket === 'actions'),
@@ -457,9 +538,42 @@ export default function AdminCalendarPage() {
     () => (staffFilter === 'all' ? dayAppointments : dayAppointments.filter((item) => item.staff_id === staffFilter)),
     [dayAppointments, staffFilter],
   );
+  const appointmentsInView = useMemo(
+    () =>
+      calendarView === 'week'
+        ? sortByStartAt(
+            appointments.filter((item) => (staffFilter === 'all' ? true : item.staff_id === staffFilter)),
+          )
+        : filteredDayAppointments,
+    [appointments, calendarView, filteredDayAppointments, staffFilter],
+  );
+  const confirmedInView = useMemo(
+    () => appointmentsInView.filter((appointment) => appointment.status === 'confirmed').length,
+    [appointmentsInView],
+  );
+  const pendingInView = useMemo(
+    () => appointmentsInView.filter((appointment) => appointment.status === 'pending').length,
+    [appointmentsInView],
+  );
+  const weekDays = useMemo(
+    () =>
+      calendarView === 'week'
+        ? eachDayOfInterval({ start: startOfWeek(currentDate, { weekStartsOn: 1 }), end: endOfWeek(currentDate, { weekStartsOn: 1 }) })
+        : [currentDate],
+    [calendarView, currentDate],
+  );
   const visibleStaffColumns = useMemo(
     () => (staffFilter === 'all' ? calendarStaff : calendarStaff.filter((staff) => staff.id === staffFilter)),
     [calendarStaff, staffFilter],
+  );
+  const visibleExceptions = useMemo(
+    () =>
+      (calendarBoard?.exceptions ?? []).filter(
+        (exception) =>
+          (staffFilter === 'all' || exception.staff_id === staffFilter) &&
+          (calendarView !== 'week' ? isSameDay(new Date(exception.start_at), currentDate) : true),
+      ),
+    [calendarBoard?.exceptions, calendarView, currentDate, staffFilter],
   );
   const calendarRange = useMemo(() => buildCalendarRange(filteredDayAppointments), [filteredDayAppointments]);
   const hourSlots = useMemo(
@@ -478,6 +592,20 @@ export default function AdminCalendarPage() {
     if (minutes < startMinutes || minutes > endMinutes) return null;
     return ((minutes - startMinutes) / 60) * pixelsPerHour;
   }, [calendarRange.endHour, calendarRange.startHour, currentDate]);
+  const halfHourDropSlots = useMemo(
+    () =>
+      Array.from({ length: (calendarRange.endHour - calendarRange.startHour) * 2 }, (_, index) => {
+        const totalMinutes = calendarRange.startHour * 60 + index * 30;
+        const hour = Math.floor(totalMinutes / 60);
+        const minute = totalMinutes % 60;
+        return {
+          key: `${hour}-${minute}`,
+          top: index * (pixelsPerHour / 2),
+          label: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
+        };
+      }),
+    [calendarRange.endHour, calendarRange.startHour],
+  );
 
   useEffect(() => {
     if (selectedRecordId) return;
@@ -596,7 +724,7 @@ export default function AdminCalendarPage() {
               <div className="mt-1 text-xs text-gray-500">Обновления</div>
             </div>
             <div className="rounded-2xl border border-white/70 bg-white/90 px-4 py-3 shadow-sm">
-              <div className="text-2xl font-black text-emerald-700">{dayAppointments.length}</div>
+	              <div className="text-2xl font-black text-emerald-700">{appointmentsInView.length}</div>
               <div className="mt-1 text-xs text-gray-500">Часа за деня</div>
             </div>
             <div className="rounded-2xl border border-white/70 bg-white/90 px-4 py-3 shadow-sm">
@@ -852,6 +980,18 @@ export default function AdminCalendarPage() {
 	                      <Rows3 className="h-4 w-4" />
 	                      Списък
 	                    </button>
+	                    <button
+	                      type="button"
+	                      onClick={() => setCalendarView('week')}
+	                      className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
+	                        calendarView === 'week'
+	                          ? 'bg-[var(--color-primary)] text-white shadow-lg shadow-[var(--color-primary)]/20'
+	                          : 'text-gray-600'
+	                      }`}
+	                    >
+	                      <CalendarDays className="h-4 w-4" />
+	                      Седмица
+	                    </button>
 	                  </div>
 	                  <button
 	                    onClick={() => setCurrentDate(subDays(currentDate, 1))}
@@ -910,19 +1050,15 @@ export default function AdminCalendarPage() {
 
               <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                 <div className="rounded-2xl border border-white/70 bg-white/90 px-4 py-3 shadow-sm">
-                  <div className="text-xl font-black text-gray-900">{dayAppointments.length}</div>
-                  <div className="mt-1 text-xs text-gray-500">Всички записи</div>
+                  <div className="text-xl font-black text-gray-900">{appointmentsInView.length}</div>
+                  <div className="mt-1 text-xs text-gray-500">{calendarView === 'week' ? 'Записи за седмицата' : 'Всички записи'}</div>
                 </div>
                 <div className="rounded-2xl border border-white/70 bg-white/90 px-4 py-3 shadow-sm">
-                  <div className="text-xl font-black text-emerald-700">
-                    {dayAppointments.filter((appointment) => appointment.status === 'confirmed').length}
-                  </div>
+                  <div className="text-xl font-black text-emerald-700">{confirmedInView}</div>
                   <div className="mt-1 text-xs text-gray-500">Запазени часове</div>
                 </div>
                 <div className="rounded-2xl border border-white/70 bg-white/90 px-4 py-3 shadow-sm">
-                  <div className="text-xl font-black text-amber-700">
-                    {dayAppointments.filter((appointment) => appointment.status === 'pending').length}
-                  </div>
+                  <div className="text-xl font-black text-amber-700">{pendingInView}</div>
                   <div className="mt-1 text-xs text-gray-500">Нови заявки</div>
                 </div>
                 <div className="rounded-2xl border border-white/70 bg-white/90 px-4 py-3 shadow-sm">
@@ -937,7 +1073,7 @@ export default function AdminCalendarPage() {
 	                <div className="flex justify-center py-20">
 	                  <Loader2 className="w-8 h-8 animate-spin text-[var(--color-primary)]" />
 	                </div>
-	              ) : !dayAppointments.length ? (
+	              ) : !appointmentsInView.length ? (
 	                <div className="rounded-[28px] border border-dashed border-gray-200 bg-white/80 px-6 py-16 text-center">
 	                  <p className="text-lg font-semibold text-gray-400">Няма записани часове за този ден</p>
 	                  <p className="mt-2 text-sm text-gray-300">Можете да изберете друга дата или да добавите ръчна резервация.</p>
@@ -947,11 +1083,17 @@ export default function AdminCalendarPage() {
 	                  <div className="flex flex-col gap-3 rounded-[28px] border border-white/70 bg-white/80 p-4 shadow-sm">
 	                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
 	                      <div>
-	                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Day board</p>
-	                        <h4 className="mt-1 text-base font-black text-gray-900">Разпределение по специалисти</h4>
-	                        <p className="mt-1 text-sm text-gray-500">
-	                          Календарът е разделен по специалисти и часове, вместо само като последователен списък.
-	                        </p>
+		                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
+		                          {calendarView === 'week' ? 'Week board' : 'Day board'}
+		                        </p>
+		                        <h4 className="mt-1 text-base font-black text-gray-900">
+		                          {calendarView === 'week' ? 'Седмичен преглед по дни' : 'Разпределение по специалисти'}
+		                        </h4>
+		                        <p className="mt-1 text-sm text-gray-500">
+		                          {calendarView === 'week'
+		                            ? 'Виждате натоварването за цялата седмица, без да губите action inbox-а и detail rail-а.'
+		                            : 'Календарът е разделен по специалисти и часове, вместо само като последователен списък.'}
+		                        </p>
 	                      </div>
 	                      <div className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-600">
 	                        <SlidersHorizontal className="h-4 w-4" />
@@ -1003,9 +1145,107 @@ export default function AdminCalendarPage() {
 	                    </div>
 	                  </div>
 
-	                  {calendarView === 'grid' ? (
-	                    <div className="hidden lg:block">
-	                      <div className="overflow-x-auto rounded-[28px] border border-white/70 bg-white/90 shadow-sm">
+		                  {calendarView === 'week' ? (
+		                    <div className="overflow-x-auto rounded-[28px] border border-white/70 bg-white/90 shadow-sm">
+		                      <div className="grid min-w-[980px] grid-cols-7 gap-0">
+		                        {weekDays.map((day) => {
+		                          const items = sortByStartAt(
+		                            appointments.filter(
+		                              (appointment) =>
+		                                isSameDay(new Date(appointment.start_at), day) &&
+		                                (staffFilter === 'all' || appointment.staff_id === staffFilter),
+		                            ),
+		                          );
+		                          const activeCount = items.filter((item) => item.status === 'confirmed').length;
+		                          const requestCount = items.filter((item) => item.status === 'pending').length;
+		                          const hasSelection = items.some((item) => item.id === selectedRecordId);
+		                          const exceptionCount = (calendarBoard?.exceptions ?? []).filter(
+		                            (exception) =>
+		                              isSameDay(new Date(exception.start_at), day) &&
+		                              (staffFilter === 'all' || exception.staff_id === staffFilter),
+		                          ).length;
+
+		                          return (
+		                            <div
+		                              key={day.toISOString()}
+		                              className={`min-h-[560px] border-r border-gray-100 px-3 py-4 last:border-r-0 ${
+		                                isToday(day) ? 'bg-[var(--color-primary)]/3' : 'bg-white/70'
+		                              } ${hasSelection ? 'ring-1 ring-inset ring-[var(--color-primary)]/20' : ''}`}
+		                            >
+		                              <div className="border-b border-gray-100 pb-3">
+		                                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+		                                  {format(day, 'EEEE', { locale: bg })}
+		                                </p>
+		                                <div className="mt-1 flex items-center justify-between gap-2">
+		                                  <h5 className="text-lg font-black text-gray-900">{format(day, 'd MMM', { locale: bg })}</h5>
+		                                  {isToday(day) && (
+		                                    <span className="rounded-full bg-[var(--color-primary)]/10 px-2.5 py-1 text-[11px] font-bold text-[var(--color-primary)]">
+		                                      Днес
+		                                    </span>
+		                                  )}
+		                                </div>
+		                                <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-semibold">
+		                                  <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-700">{activeCount} запазени</span>
+		                                  <span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-700">{requestCount} заявки</span>
+		                                  {exceptionCount > 0 && (
+		                                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">{exceptionCount} блока</span>
+		                                  )}
+		                                </div>
+		                              </div>
+
+		                              <div className="mt-3 space-y-2">
+		                                {!items.length ? (
+		                                  <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-3 py-5 text-center text-sm text-gray-400">
+		                                    Няма записи
+		                                  </div>
+		                                ) : (
+		                                  items.map((appointment) => {
+		                                    const statusCfg = getOwnerStatusPresentation(appointment);
+		                                    const accent = appointment.service_color || appointment.staff_color || 'var(--color-primary)';
+		                                    const isSelected = appointment.id === selectedRecordId;
+
+		                                    return (
+		                                      <button
+		                                        key={appointment.id}
+		                                        type="button"
+		                                        onClick={() => {
+		                                          setCurrentDate(day);
+		                                          setSelectedRecordId(appointment.id);
+		                                        }}
+		                                        className={`w-full rounded-2xl border p-3 text-left shadow-sm transition-transform hover:scale-[1.01] ${
+		                                          isSelected ? 'ring-2 ring-[var(--color-primary)]/25' : ''
+		                                        }`}
+		                                        style={{
+		                                          borderColor: colorWithAlpha(accent, '55', 'rgba(14, 165, 233, 0.3)'),
+		                                          backgroundColor: colorWithAlpha(accent, '18', 'rgba(14, 165, 233, 0.08)'),
+		                                        }}
+		                                      >
+		                                        <div className="flex items-start justify-between gap-2">
+		                                          <p className="text-[11px] font-bold text-gray-700">
+		                                            {format(new Date(appointment.start_at), 'HH:mm')} - {format(new Date(appointment.end_at), 'HH:mm')}
+		                                          </p>
+		                                          <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusCfg.cls}`}>
+		                                            {statusCfg.label}
+		                                          </span>
+		                                        </div>
+		                                        <p className="mt-2 line-clamp-2 text-sm font-black text-gray-900">{appointment.client_name}</p>
+		                                        <p className="mt-1 line-clamp-2 text-xs font-semibold text-gray-700">{appointment.service_name}</p>
+		                                        <p className="mt-2 text-[11px] text-gray-500">
+		                                          {staffFilter === 'all' ? appointment.staff_name : formatBulgarianPhoneForDisplay(appointment.client_phone)}
+		                                        </p>
+		                                      </button>
+		                                    );
+		                                  })
+		                                )}
+		                              </div>
+		                            </div>
+		                          );
+		                        })}
+		                      </div>
+		                    </div>
+		                  ) : calendarView === 'grid' ? (
+		                    <div className="block">
+		                      <div className="overflow-x-auto rounded-[28px] border border-white/70 bg-white/90 shadow-sm">
 	                        <div
 	                          className="grid min-w-[880px]"
 	                          style={{ gridTemplateColumns: `72px repeat(${Math.max(visibleStaffColumns.length, 1)}, minmax(220px, 1fr))` }}
@@ -1050,15 +1290,116 @@ export default function AdminCalendarPage() {
 	                            })}
 	                          </div>
 
-	                          {visibleStaffColumns.map((staffMember) => (
-	                            <div
-	                              key={staffMember.id}
-	                              className="relative border-r border-gray-100 bg-white/70 last:border-r-0"
-	                              style={{ height: `${calendarHeight}px` }}
-	                            >
-	                              {hourSlots.slice(0, -1).map((hour) => {
-	                                const top = (hour - calendarRange.startHour) * pixelsPerHour;
-	                                return (
+		                          {visibleStaffColumns.map((staffMember) => (
+		                            <div
+		                              key={staffMember.id}
+		                              className="relative border-r border-gray-100 bg-white/70 last:border-r-0"
+		                              style={{ height: `${calendarHeight}px` }}
+		                            >
+		                              {(() => {
+		                                const dayKey = getWorkingDayKey(currentDate);
+		                                const schedule = staffMember.working_hours?.[dayKey];
+		                                const staffExceptions = visibleExceptions.filter((exception) => exception.staff_id === staffMember.id);
+		                                const overlays: Array<{ top: number; height: number; label: string; kind: 'closed' | 'exception' }> = [];
+
+		                                if (!schedule?.isOpen) {
+		                                  overlays.push({
+		                                    top: 0,
+		                                    height: calendarHeight,
+		                                    label: 'Почивен ден',
+		                                    kind: 'closed',
+		                                  });
+		                                } else {
+		                                  const [openHour, openMinute] = schedule.open.split(':').map(Number);
+		                                  const [closeHour, closeMinute] = schedule.close.split(':').map(Number);
+		                                  const openOffset = (openHour * 60 + openMinute - calendarRange.startHour * 60) / 60 * pixelsPerHour;
+		                                  const closeOffset = (closeHour * 60 + closeMinute - calendarRange.startHour * 60) / 60 * pixelsPerHour;
+
+		                                  if (openOffset > 0) {
+		                                    overlays.push({
+		                                      top: 0,
+		                                      height: openOffset,
+		                                      label: 'Извън работно време',
+		                                      kind: 'closed',
+		                                    });
+		                                  }
+		                                  if (closeOffset < calendarHeight) {
+		                                    overlays.push({
+		                                      top: Math.max(closeOffset, 0),
+		                                      height: Math.max(calendarHeight - closeOffset, 0),
+		                                      label: 'Извън работно време',
+		                                      kind: 'closed',
+		                                    });
+		                                  }
+		                                }
+
+		                                for (const exception of staffExceptions) {
+		                                  const top = Math.max((getMinuteOffset(exception.start_at, calendarRange.startHour) / 60) * pixelsPerHour, 0);
+		                                  const bottom = Math.min((getMinuteOffset(exception.end_at, calendarRange.startHour) / 60) * pixelsPerHour, calendarHeight);
+		                                  const height = Math.max(bottom - top, 40);
+		                                  overlays.push({
+		                                    top,
+		                                    height,
+		                                    label: exception.note || 'Блокиран интервал',
+		                                    kind: 'exception',
+		                                  });
+		                                }
+
+		                                return overlays.map((overlay, index) => (
+		                                  <div
+		                                    key={`${staffMember.id}-overlay-${index}`}
+		                                    className={`absolute left-0 right-0 z-0 border-y ${
+		                                      overlay.kind === 'exception' ? 'border-slate-300/70' : 'border-gray-200/80'
+		                                    }`}
+		                                    style={{
+		                                      top: `${overlay.top}px`,
+		                                      height: `${overlay.height}px`,
+		                                      background:
+		                                        overlay.kind === 'exception'
+		                                          ? 'repeating-linear-gradient(-45deg, rgba(148,163,184,0.16), rgba(148,163,184,0.16) 6px, rgba(148,163,184,0.05) 6px, rgba(148,163,184,0.05) 12px)'
+		                                          : 'rgba(148,163,184,0.08)',
+		                                    }}
+		                                  >
+		                                    <span className="absolute left-2 top-2 rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-500 shadow-sm">
+		                                      {overlay.label}
+		                                    </span>
+		                                  </div>
+		                                ));
+		                              })()}
+
+		                              {halfHourDropSlots.map((slot) => (
+		                                <div
+		                                  key={`${staffMember.id}-${slot.key}`}
+		                                  className={`absolute left-0 right-0 z-[1] transition-colors ${
+		                                    dropPreview?.staffId === staffMember.id &&
+		                                    dropPreview?.startAt &&
+		                                    format(new Date(dropPreview.startAt), 'HH:mm') === slot.label
+		                                      ? 'bg-[var(--color-primary)]/8'
+		                                      : ''
+		                                  }`}
+		                                  style={{ top: `${slot.top}px`, height: `${pixelsPerHour / 2}px` }}
+		                                  onDragOver={(event) => {
+		                                    if (!draggedAppointmentId) return;
+		                                    event.preventDefault();
+		                                    const [hour, minute] = slot.label.split(':').map(Number);
+		                                    const nextStart = new Date(currentDate);
+		                                    nextStart.setHours(hour, minute, 0, 0);
+		                                    setDropPreview({ staffId: staffMember.id, startAt: nextStart.toISOString() });
+		                                  }}
+		                                  onDrop={(event) => {
+		                                    event.preventDefault();
+		                                    if (!draggedAppointmentId) return;
+		                                    const [hour, minute] = slot.label.split(':').map(Number);
+		                                    const nextStart = new Date(currentDate);
+		                                    nextStart.setHours(hour, minute, 0, 0);
+		                                    handleDropReschedule(draggedAppointmentId, nextStart.toISOString(), staffMember.id);
+		                                  }}
+		                                />
+		                              ))}
+
+		                              {hourSlots.slice(0, -1).map((hour) => {
+		                                const top = (hour - calendarRange.startHour) * pixelsPerHour;
+		                                return (
 	                                  <div
 	                                    key={hour}
 	                                    className="absolute left-0 right-0 border-t border-gray-100"
@@ -1076,9 +1417,9 @@ export default function AdminCalendarPage() {
 	                                </div>
 	                              )}
 
-	                              {staffMember.appointments.map((appointment) => {
-	                                const startOffset = getMinuteOffset(appointment.start_at, calendarRange.startHour);
-	                                const endOffset = getMinuteOffset(appointment.end_at, calendarRange.startHour);
+		                              {staffMember.appointments.map((appointment) => {
+		                                const startOffset = getMinuteOffset(appointment.start_at, calendarRange.startHour);
+		                                const endOffset = getMinuteOffset(appointment.end_at, calendarRange.startHour);
 	                                const top = (startOffset / 60) * pixelsPerHour + 4;
 	                                const height = Math.max(((endOffset - startOffset) / 60) * pixelsPerHour - 8, 56);
 	                                const statusCfg = getOwnerStatusPresentation(appointment);
@@ -1089,13 +1430,19 @@ export default function AdminCalendarPage() {
 	                                const endTime = format(new Date(appointment.end_at), 'HH:mm');
 
 	                                return (
-	                                  <button
-	                                    key={appointment.id}
-	                                    type="button"
-	                                    onClick={() => setSelectedRecordId(appointment.id)}
-	                                    className={`absolute left-2 right-2 rounded-2xl border p-3 text-left shadow-sm transition-transform hover:scale-[1.01] ${
-	                                      isSelected ? 'ring-2 ring-[var(--color-primary)]/25' : ''
-	                                    }`}
+		                                  <button
+		                                    key={appointment.id}
+		                                    type="button"
+		                                    draggable={!['completed', 'cancelled', 'no_show'].includes(appointment.status)}
+		                                    onDragStart={() => setDraggedAppointmentId(appointment.id)}
+		                                    onDragEnd={() => {
+		                                      setDraggedAppointmentId(null);
+		                                      setDropPreview(null);
+		                                    }}
+		                                    onClick={() => setSelectedRecordId(appointment.id)}
+		                                    className={`absolute left-2 right-2 z-[2] rounded-2xl border p-3 text-left shadow-sm transition-transform hover:scale-[1.01] ${
+		                                      isSelected ? 'ring-2 ring-[var(--color-primary)]/25' : ''
+		                                    }`}
 	                                    style={{
 	                                      top: `${top}px`,
 	                                      height: `${height}px`,
@@ -1125,7 +1472,7 @@ export default function AdminCalendarPage() {
 	                    </div>
 	                  ) : null}
 
-	                  <div className={`${calendarView === 'grid' ? 'lg:hidden' : ''} space-y-4`}>
+		                  <div className={`${calendarView === 'list' ? 'space-y-4' : 'hidden'}`}>
 	                    {filteredDayAppointments.map((appointment) => {
 	                      const startTime = format(new Date(appointment.start_at), 'HH:mm');
 	                      const endTime = format(new Date(appointment.end_at), 'HH:mm');
@@ -1259,9 +1606,9 @@ export default function AdminCalendarPage() {
           <div className="glass-panel rounded-[28px] border border-white/60 p-5 shadow-xl shadow-black/5 xl:sticky xl:top-0">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Детайлен панел</p>
 
-            {selectedAppointment || selectedInboxItem ? (
-              <div className="mt-4 space-y-5">
-                <div>
+	            {selectedAppointment || selectedInboxItem ? (
+	              <div className="mt-4 space-y-5">
+	                <div>
                   <div className="flex items-center gap-2">
                     {selectedInboxItem && (
                       <span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${selectedInboxItem.toneClass}`}>
@@ -1281,31 +1628,102 @@ export default function AdminCalendarPage() {
                   <h3 className="mt-3 text-xl font-black text-gray-900">
                     {detailedAppointment?.client_name || selectedInboxItem?.client_name}
                   </h3>
-                  <p className="mt-1 text-sm text-gray-500">
-                    {detailedAppointment
-                      ? `${detailedAppointment.service_name} при ${detailedAppointment.staff_name}`
-                      : selectedInboxItem?.summary}
-                  </p>
-                </div>
+	                  <p className="mt-1 text-sm text-gray-500">
+	                    {detailedAppointment
+	                      ? `${detailedAppointment.service_name} при ${detailedAppointment.staff_name}`
+	                      : selectedInboxItem?.summary}
+	                  </p>
+	                </div>
 
-                <div className="grid gap-3">
-                  <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Дата и слот</p>
-                    <p className="mt-2 text-sm font-semibold text-gray-900">
-                      {formatAppointmentDay(detailedAppointment?.start_at || selectedInboxItem!.start_at)}
-                    </p>
-                  </div>
-                  <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Телефон</p>
-                    <p className="mt-2 text-sm font-semibold text-gray-900">
-                      {formatBulgarianPhoneForDisplay(
-                        detailedAppointment?.client_phone || selectedInboxItem!.client_phone,
-                      )}
-                    </p>
-                  </div>
-                  {selectedContext?.appointment && (
-                    <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Име в клиентската база</p>
+	                {detailedAppointment && (
+	                  <div className="grid gap-2">
+	                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Бързи действия</p>
+	                    <div className="grid grid-cols-2 gap-2">
+	                      {detailedAppointment.status !== 'proposal_pending' &&
+	                        ['pending', 'confirmed'].includes(detailedAppointment.status) && (
+	                          <button
+	                            type="button"
+	                            onClick={() =>
+	                              handleStatusChange(
+	                                detailedAppointment.id,
+	                                detailedAppointment.status === 'pending' ? 'confirmed' : 'completed',
+	                              )
+	                            }
+	                            className="rounded-2xl bg-emerald-600 px-3 py-3 text-sm font-semibold text-white hover:opacity-90"
+	                          >
+	                            {detailedAppointment.status === 'pending' ? 'Потвърди' : 'Приключи'}
+	                          </button>
+	                        )}
+	                      {['pending', 'proposal_pending'].includes(detailedAppointment.status) && (
+	                        <button
+	                          type="button"
+	                          onClick={() => {
+	                            setProposalTarget(detailedAppointment);
+	                            setShowBookingModal(true);
+	                          }}
+	                          className="rounded-2xl border border-violet-200 bg-violet-50 px-3 py-3 text-sm font-semibold text-violet-700 hover:bg-violet-100"
+	                        >
+	                          Предложи нов час
+	                        </button>
+	                      )}
+	                      {detailedAppointment.status === 'confirmed' && (
+	                        <button
+	                          type="button"
+	                          onClick={() => handleStatusChange(detailedAppointment.id, 'no_show')}
+	                          className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+	                        >
+	                          Неявил се
+	                        </button>
+	                      )}
+	                      {!['completed', 'cancelled', 'no_show'].includes(detailedAppointment.status) && (
+	                        <button
+	                          type="button"
+	                          onClick={() => handleStatusChange(detailedAppointment.id, 'cancelled')}
+	                          className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-3 text-sm font-semibold text-rose-700 hover:bg-rose-100"
+	                        >
+	                          {detailedAppointment.status === 'confirmed' ? 'Отмени' : 'Откажи'}
+	                        </button>
+	                      )}
+	                    </div>
+	                  </div>
+	                )}
+
+	                <div className="grid gap-3">
+	                  <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
+	                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Дата и слот</p>
+	                    <p className="mt-2 text-sm font-semibold text-gray-900">
+	                      {formatAppointmentDay(detailedAppointment?.start_at || selectedInboxItem!.start_at)}
+	                    </p>
+	                  </div>
+	                  <div className="grid grid-cols-2 gap-3">
+	                    <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
+	                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Телефон</p>
+	                      <p className="mt-2 text-sm font-semibold text-gray-900">
+	                        {formatBulgarianPhoneForDisplay(
+	                          detailedAppointment?.client_phone || selectedInboxItem!.client_phone,
+	                        )}
+	                      </p>
+	                    </div>
+	                    <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
+	                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Стойност</p>
+	                      <p className="mt-2 text-sm font-semibold text-gray-900">
+	                        {detailedAppointment?.price != null ? `${detailedAppointment.price} €` : 'Няма цена'}
+	                      </p>
+	                    </div>
+	                  </div>
+	                  {detailedAppointment && (
+	                    <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
+	                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Резюме</p>
+	                      <div className="mt-2 space-y-2 text-sm text-gray-700">
+	                        <p><span className="font-semibold text-gray-900">Услуга:</span> {detailedAppointment.service_name}</p>
+	                        <p><span className="font-semibold text-gray-900">Специалист:</span> {detailedAppointment.staff_name}</p>
+	                        <p><span className="font-semibold text-gray-900">Статус:</span> {getOwnerStatusPresentation(detailedAppointment).label}</p>
+	                      </div>
+	                    </div>
+	                  )}
+	                  {selectedContext?.appointment && (
+	                    <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
+	                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Име в клиентската база</p>
                       <p className="mt-2 text-sm font-semibold text-gray-900">
                         {selectedContext.appointment.client_name_source === 'owner'
                           ? 'Ръчно име от собственика'
@@ -1345,9 +1763,7 @@ export default function AdminCalendarPage() {
                   )}
                 </div>
 
-                {detailedAppointment && <div>{renderPrimaryActions(detailedAppointment)}</div>}
-
-                <div className="rounded-3xl border border-gray-100 bg-white/80 p-4">
+	                <div className="rounded-3xl border border-gray-100 bg-white/80 p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Notification center</p>

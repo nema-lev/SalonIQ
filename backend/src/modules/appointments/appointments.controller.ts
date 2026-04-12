@@ -115,6 +115,23 @@ export class AppointmentsController {
     return this.appointmentsService.findByDate(tenant, new Date(date), staffId);
   }
 
+  @Get('calendar-board')
+  @UseGuards(JwtAuthGuard, TenantGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Календарен борд за диапазон с резервации, специалисти и блокирани интервали' })
+  async getCalendarBoard(
+    @Query('from') from: string,
+    @Query('to') to: string,
+    @Query('staffId') staffId: string | undefined,
+    @CurrentTenant() tenant: Tenant,
+  ) {
+    if (!from || !to) {
+      throw new BadRequestException('Липсва диапазон за календара.');
+    }
+
+    return this.appointmentsService.getCalendarBoard(tenant, new Date(from), new Date(to), staffId);
+  }
+
   @Get('upcoming')
   @UseGuards(JwtAuthGuard, TenantGuard)
   @ApiBearerAuth()
@@ -169,6 +186,22 @@ export class AppointmentsController {
       dto.reason,
       dto.cancelledBy,
     );
+  }
+
+  @Patch(':id/reschedule')
+  @UseGuards(JwtAuthGuard, TenantGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Премести резервация към нов час/специалист от admin календара' })
+  async reschedule(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: { startAt?: string; staffId?: string },
+    @CurrentTenant() tenant: Tenant,
+  ) {
+    if (!dto?.startAt) {
+      throw new BadRequestException('Липсва нов начален час.');
+    }
+
+    return this.appointmentsService.rescheduleAppointment(tenant, id, dto.startAt, dto.staffId);
   }
 
   @Get('proposal/:slug/respond')

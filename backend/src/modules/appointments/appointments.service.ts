@@ -122,6 +122,80 @@ export class AppointmentsService {
     return rows;
   }
 
+  async getCalendarBoard(tenant: Tenant, from: Date, to: Date, staffId?: string) {
+    const fromUtc = new Date(from);
+    const toUtc = new Date(to);
+
+    const staffRows = await this.prisma.queryInSchema<any[]>(
+      tenant.schemaName,
+      `
+      SELECT id, name, color, is_active, accepts_online, working_hours
+      FROM staff
+      WHERE is_active = true
+        ${staffId ? 'AND id = $1::uuid' : ''}
+      ORDER BY name ASC
+      `,
+      staffId ? [staffId] : [],
+    );
+
+    const appointments = await this.prisma.queryInSchema<any[]>(
+      tenant.schemaName,
+      `
+      SELECT
+        a.*,
+        c.name as client_name,
+        c.phone as client_phone,
+        c.telegram_chat_id,
+        s.name as staff_name,
+        s.color as staff_color,
+        sv.name as service_name,
+        sv.color as service_color,
+        sv.duration_minutes,
+        COALESCE(NULLIF(a.intake_data->'stateMeta'->>'transitionKind', ''), a.status) as owner_view_state,
+        CASE
+          WHEN a.status = 'pending' THEN 'Заявка'
+          WHEN a.status = 'proposal_pending' THEN 'Предложен час'
+          WHEN a.status = 'confirmed' THEN 'Запазен час'
+          WHEN a.status = 'completed' THEN 'Приключен'
+          WHEN a.status = 'no_show' THEN 'Неявил се'
+          WHEN a.status = 'cancelled' AND COALESCE(NULLIF(a.intake_data->'stateMeta'->>'transitionKind', ''), '') IN ('rejected', 'proposal_rejected') THEN 'Отказан'
+          WHEN a.status = 'cancelled' AND a.cancelled_by = 'client' THEN 'Отменен от клиент'
+          WHEN a.status = 'cancelled' AND a.cancelled_by = 'owner' THEN 'Отменен от салона'
+          WHEN a.status = 'cancelled' THEN 'Отменен'
+          ELSE a.status
+        END as owner_view_label
+      FROM appointments a
+      JOIN clients c ON c.id = a.client_id
+      JOIN staff s ON s.id = a.staff_id
+      JOIN services sv ON sv.id = a.service_id
+      WHERE a.start_at >= $1::timestamptz
+        AND a.start_at < $2::timestamptz
+        ${staffId ? 'AND a.staff_id = $3::uuid' : ''}
+      ORDER BY a.start_at ASC
+      `,
+      staffId ? [fromUtc.toISOString(), toUtc.toISOString(), staffId] : [fromUtc.toISOString(), toUtc.toISOString()],
+    );
+
+    const exceptions = await this.prisma.queryInSchema<any[]>(
+      tenant.schemaName,
+      `
+      SELECT id, staff_id, type, start_at, end_at, note
+      FROM staff_exceptions
+      WHERE start_at < $2::timestamptz
+        AND end_at > $1::timestamptz
+        ${staffId ? 'AND staff_id = $3::uuid' : ''}
+      ORDER BY start_at ASC
+      `,
+      staffId ? [fromUtc.toISOString(), toUtc.toISOString(), staffId] : [fromUtc.toISOString(), toUtc.toISOString()],
+    );
+
+    return {
+      staff: staffRows,
+      appointments,
+      exceptions,
+    };
+  }
+
   async findUpcoming(tenant: Tenant, limit = 10, mode: UpcomingMode = 'all') {
     const whereClause =
       mode === 'pending'
@@ -1068,6 +1142,175 @@ export class AppointmentsService {
     );
 
     return { id: appointmentId, status: newStatus };
+  }
+
+  async rescheduleAppointment(
+    tenant: Tenant,
+    appointmentId: string,
+    startAtIso: string,
+    staffId?: string,
+  ) {
+    await this.prisma.ensureServiceGroupColumns(tenant.schemaName);
+
+    const [appointment] = await this.prisma.queryInSchema<any[]>(
+      tenant.schemaName,
+      `
+      SELECT
+        a.id,
+        a.client_id,
+        a.staff_id,
+        a.service_id,
+        a.status,
+        a.intake_data,
+        sv.duration_minutes,
+        sv.buffer_before_min,
+        sv.buffer_after_min,
+        sv.booking_mode
+      FROM appointments a
+      JOIN services sv ON sv.id = a.service_id
+      WHERE a.id = $1::uuid
+      LIMIT 1
+      `,
+      [appointmentId],
+    );
+
+    if (!appointment) {
+      throw new NotFoundException('Резервацията не е намерена.');
+    }
+
+    if (
+      [AppointmentStatus.CANCELLED, AppointmentStatus.COMPLETED, AppointmentStatus.NO_SHOW].includes(
+        appointment.status,
+      )
+    ) {
+      throw new BadRequestException('Този запис не може да бъде преместен.');
+    }
+
+    if (appointment.booking_mode === 'group') {
+      throw new BadRequestException('Груповите сесии не могат да се местят с drag/drop.');
+    }
+
+    const nextStaffId = staffId || appointment.staff_id;
+    const nextStartAt = new Date(startAtIso);
+    if (Number.isNaN(nextStartAt.getTime())) {
+      throw new BadRequestException('Невалиден нов час.');
+    }
+
+    const totalDuration =
+      Number(appointment.duration_minutes || 0) +
+      Number(appointment.buffer_before_min || 0) +
+      Number(appointment.buffer_after_min || 0);
+    const nextEndAt = addMinutes(nextStartAt, totalDuration);
+
+    const dayOfWeek = format(toZonedTime(nextStartAt, TIMEZONE), 'EEE').toLowerCase();
+    const [staffRow] = await this.prisma.queryInSchema<
+      { working_hours: Record<string, { open: string; close: string; isOpen: boolean }> }[]
+    >(
+      tenant.schemaName,
+      `SELECT working_hours FROM staff WHERE id = $1::uuid AND is_active = true LIMIT 1`,
+      [nextStaffId],
+    );
+
+    if (!staffRow) {
+      throw new NotFoundException('Специалистът не е намерен.');
+    }
+
+    const daySchedule = staffRow.working_hours?.[dayOfWeek];
+    if (!daySchedule?.isOpen) {
+      throw new ConflictException('Специалистът не работи в този ден.');
+    }
+
+    const [openHour, openMin] = daySchedule.open.split(':').map(Number);
+    const [closeHour, closeMin] = daySchedule.close.split(':').map(Number);
+    const workStart = fromZonedTime(
+      new Date(toZonedTime(nextStartAt, TIMEZONE).setHours(openHour, openMin, 0, 0)),
+      TIMEZONE,
+    );
+    const workEnd = fromZonedTime(
+      new Date(toZonedTime(nextStartAt, TIMEZONE).setHours(closeHour, closeMin, 0, 0)),
+      TIMEZONE,
+    );
+
+    if (
+      (isBefore(nextStartAt, workStart) && nextStartAt.getTime() !== workStart.getTime()) ||
+      (isAfter(nextEndAt, workEnd) && nextEndAt.getTime() !== workEnd.getTime())
+    ) {
+      throw new ConflictException('Новият час е извън работното време на специалиста.');
+    }
+
+    const exceptionConflicts = await this.prisma.queryInSchema<any[]>(
+      tenant.schemaName,
+      `
+      SELECT id
+      FROM staff_exceptions
+      WHERE staff_id = $1::uuid
+        AND start_at < $3::timestamptz
+        AND end_at > $2::timestamptz
+      LIMIT 1
+      `,
+      [nextStaffId, nextStartAt.toISOString(), nextEndAt.toISOString()],
+    );
+
+    if (exceptionConflicts.length) {
+      throw new ConflictException('Новият час попада в блокиран интервал.');
+    }
+
+    const appointmentConflicts = await this.prisma.queryInSchema<any[]>(
+      tenant.schemaName,
+      `
+      SELECT id
+      FROM appointments
+      WHERE id <> $1::uuid
+        AND staff_id = $2::uuid
+        AND status NOT IN ('cancelled', 'no_show')
+        AND (start_at, end_at) OVERLAPS ($3::timestamptz, $4::timestamptz)
+      LIMIT 1
+      `,
+      [appointmentId, nextStaffId, nextStartAt.toISOString(), nextEndAt.toISOString()],
+    );
+
+    if (appointmentConflicts.length) {
+      throw new ConflictException('Специалистът вече е зает в този интервал.');
+    }
+
+    const intakeData = this.parseIntakeData(appointment.intake_data);
+    const unchangedState =
+      appointment.status === AppointmentStatus.PROPOSAL_PENDING
+        ? 'proposal_sent'
+        : appointment.status === AppointmentStatus.PENDING
+          ? 'requested'
+          : 'approved';
+
+    await this.prisma.queryInSchema(
+      tenant.schemaName,
+      `
+      UPDATE appointments
+      SET staff_id = $1::uuid,
+          start_at = $2::timestamptz,
+          end_at = $3::timestamptz,
+          intake_data = $4::jsonb,
+          updated_at = NOW()
+      WHERE id = $5::uuid
+      `,
+      [
+        nextStaffId,
+        nextStartAt.toISOString(),
+        nextEndAt.toISOString(),
+        JSON.stringify({
+          ...intakeData,
+          stateMeta: this.buildOwnerStateMeta(appointment.status, appointment.status, unchangedState),
+        }),
+        appointmentId,
+      ],
+    );
+
+    return {
+      id: appointmentId,
+      staffId: nextStaffId,
+      startAt: nextStartAt,
+      endAt: nextEndAt,
+      status: appointment.status,
+    };
   }
 
   // ─── Private helpers ──────────────────────────────────────────────────

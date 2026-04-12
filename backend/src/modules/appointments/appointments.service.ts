@@ -923,7 +923,17 @@ export class AppointmentsService {
       [phoneVariants],
     );
 
-    if (existing.length) return existing[0].id;
+    if (existing.length) {
+      await this.prisma.queryInSchema(
+        schemaName,
+        `UPDATE clients
+         SET notifications_consent = true,
+             consent_given_at = COALESCE(consent_given_at, NOW())
+         WHERE id = $1::uuid`,
+        [existing[0].id],
+      );
+      return existing[0].id;
+    }
 
     const created = await this.prisma.queryInSchema<{ id: string }[]>(
       schemaName,

@@ -84,7 +84,7 @@ interface ClientSuggestion {
 }
 
 const STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
-  pending: { label: 'Изчаква', cls: 'bg-amber-100 text-amber-700 border-amber-200' },
+  pending: { label: 'Нова заявка', cls: 'bg-amber-100 text-amber-700 border-amber-200' },
   proposal_pending: { label: 'Чака клиент', cls: 'bg-violet-100 text-violet-700 border-violet-200' },
   confirmed: { label: 'Потвърден', cls: 'bg-green-100 text-green-700 border-green-200' },
   completed: { label: 'Завършен', cls: 'bg-blue-100 text-blue-700 border-blue-200' },
@@ -205,7 +205,7 @@ export default function AdminCalendarPage() {
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-gray-900 truncate">{appt.client_name}</p>
                     <p className="text-xs text-gray-500 mt-1 truncate">
-                      {appt.service_name} · {appt.staff_name} · {appt.status === 'proposal_pending' ? 'чака клиент' : 'чака потвърждение'}
+                      {appt.service_name} · {appt.staff_name} · {appt.status === 'proposal_pending' ? 'чака клиент' : 'чака решение'}
                     </p>
                   </div>
                   <div className="text-right flex-shrink-0">

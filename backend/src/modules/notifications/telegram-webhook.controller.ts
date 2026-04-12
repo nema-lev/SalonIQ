@@ -359,7 +359,11 @@ export class TelegramWebhookController {
 
         await this.prisma.queryInSchema(
           tenant.schema_name,
-          `UPDATE clients SET telegram_chat_id = $1 WHERE phone = ANY($2::text[])`,
+          `UPDATE clients
+           SET telegram_chat_id = $1,
+               notifications_consent = true,
+               consent_given_at = COALESCE(consent_given_at, NOW())
+           WHERE phone = ANY($2::text[])`,
           [chatId, phoneVariants],
         );
 
@@ -377,7 +381,9 @@ export class TelegramWebhookController {
       const updateResult = await this.prisma.queryInSchema<{ id: string }[]>(
         tenant.schema_name,
         `UPDATE clients
-         SET telegram_chat_id = $1
+         SET telegram_chat_id = $1,
+             notifications_consent = true,
+             consent_given_at = COALESCE(consent_given_at, NOW())
          WHERE phone = ANY($2::text[])
          RETURNING id`,
         [chatId, possiblePhoneVariants],

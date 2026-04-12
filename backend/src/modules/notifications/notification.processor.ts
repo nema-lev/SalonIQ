@@ -415,7 +415,9 @@ export class NotificationProcessor extends WorkerHost {
     }
 
     if (!result) {
-      this.logger.debug(`No eligible notification channel for appointment ${appointmentId}`);
+      this.logger.debug(
+        `No eligible notification channel for appointment ${appointmentId} (consent=${appt.notifications_consent}, clientTelegram=${Boolean(appt.telegram_chat_id)}, hasTelegram=${hasTelegram}, hasSms=${hasSms}, preferredChannel=${appt.preferred_channel || 'none'})`,
+      );
       return;
     }
 

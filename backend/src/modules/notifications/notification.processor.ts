@@ -20,6 +20,7 @@ interface NotificationJobData {
   status?: string;
   reason?: string;
   newStatus?: string;
+  previousStatus?: string;
   cancelledBy?: 'client' | 'owner';
 }
 
@@ -403,6 +404,11 @@ export class NotificationProcessor extends WorkerHost {
 
         if (job.data.newStatus === 'cancelled') {
           const cancelledBy = job.name === NotificationJobType.BOOKING_CANCELLED_CLIENT ? 'client' : 'owner';
+          const notificationFlow =
+            cancelledBy === 'owner' &&
+            (job.data.previousStatus === 'pending' || job.data.previousStatus === 'proposal_pending')
+              ? 'rejected'
+              : 'cancelled';
           if (canNotifyClient && hasTelegram && appt.telegram_chat_id) {
             resultChannel = NotificationChannel.TELEGRAM;
             result = await this.telegramService.sendCancellation(
@@ -411,9 +417,10 @@ export class NotificationProcessor extends WorkerHost {
               appointmentDetails,
               tenant.business_name,
               cancelledBy,
+              notificationFlow,
               job.data.reason,
               bookingUrl,
-              notificationTemplates.cancellation,
+              notificationFlow === 'cancelled' ? notificationTemplates.cancellation : undefined,
             );
           } else if (canNotifyClient && hasSms) {
             const zonedStart = toZonedTime(appointmentDetails.startAt, TIMEZONE);
@@ -425,6 +432,7 @@ export class NotificationProcessor extends WorkerHost {
               businessName: tenant.business_name,
               dateStr,
               timeStr,
+              flow: notificationFlow,
               reason: job.data.reason,
               apiToken: tenant.sms_api_key!,
               senderId: tenant.sms_sender_id!,

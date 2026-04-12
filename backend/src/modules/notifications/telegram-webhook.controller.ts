@@ -277,13 +277,13 @@ export class TelegramWebhookController {
     await this.telegramService.answerCallbackQuery(
       tenant.telegram_bot_token,
       queryId,
-      '❌ Резервацията е отменена.',
+      '❌ Заявката е отказана.',
     );
 
     await this.telegramService.sendMessage(
       tenant.telegram_bot_token,
       chatId,
-      `❌ Резервацията е *отменена*. Клиентът ще получи известяване.`,
+      `❌ Заявката е *отказана*. Клиентът ще получи известяване.`,
     );
   }
 

@@ -208,6 +208,7 @@ export class TelegramService {
     appointment: AppointmentDetails,
     businessName: string,
     cancelledBy: 'client' | 'owner',
+    flow: 'rejected' | 'cancelled',
     reason?: string,
     bookingUrl?: string,
     template?: string,
@@ -230,15 +231,23 @@ export class TelegramService {
           Цена: appointment.price ? `${appointment.price} €` : '',
           Причина: reason || '',
         })
-      : `❌ *${businessName} — Отменен час*\n` +
-        `─────────────────\n\n` +
-        `*${appointment.clientName}*, часът Ви на *${dateStr} в ${timeStr}* беше отменен` +
-        (cancelledBy === 'owner' ? ' от нашия екип' : '') +
-        '.\n' +
-        (reason ? `\n📝 *Причина:* ${reason}\n` : '') +
-        (cancelledBy === 'owner' && bookingUrl
-          ? `\nМожете да запишете нов час тук:\n${bookingUrl}`
-          : '\nАко желаете, можете да запишете нов час.');
+      : flow === 'rejected'
+        ? `❌ *${businessName} — Заявката не е потвърдена*\n` +
+          `─────────────────\n\n` +
+          `*${appointment.clientName}*, заявката Ви за *${dateStr} в ${timeStr}* не можа да бъде потвърдена.\n` +
+          (reason ? `\n📝 *Причина:* ${reason}\n` : '') +
+          (bookingUrl
+            ? `\nМожете да изберете друг час тук:\n${bookingUrl}`
+            : '\nМожете да изберете друг удобен час от клиентския портал.')
+        : `❌ *${businessName} — Отменен час*\n` +
+          `─────────────────\n\n` +
+          `*${appointment.clientName}*, часът Ви на *${dateStr} в ${timeStr}* беше отменен` +
+          (cancelledBy === 'owner' ? ' от нашия екип' : '') +
+          '.\n' +
+          (reason ? `\n📝 *Причина:* ${reason}\n` : '') +
+          (cancelledBy === 'owner' && bookingUrl
+            ? `\nМожете да запишете нов час тук:\n${bookingUrl}`
+            : '\nАко желаете, можете да запишете нов час.');
 
     const keyboard =
       bookingUrl

@@ -86,13 +86,19 @@ export class SmsApiService {
 
   async sendCancellationSms(opts: {
     phone: string; clientName: string; businessName: string;
-    dateStr: string; timeStr: string; reason?: string | null;
+    dateStr: string; timeStr: string; flow: 'rejected' | 'cancelled'; reason?: string | null;
     apiToken: string; senderId: string;
   }) {
-    const lines = [
-      `${opts.businessName}: Отменен час`,
-      `${opts.clientName}, часът Ви на ${opts.dateStr} в ${opts.timeStr} беше отменен.`,
-    ];
+    const lines =
+      opts.flow === 'rejected'
+        ? [
+            `${opts.businessName}: Заявката не е потвърдена`,
+            `${opts.clientName}, заявката Ви за ${opts.dateStr} в ${opts.timeStr} не можа да бъде потвърдена.`,
+          ]
+        : [
+            `${opts.businessName}: Отменен час`,
+            `${opts.clientName}, часът Ви на ${opts.dateStr} в ${opts.timeStr} беше отменен.`,
+          ];
     if (opts.reason) lines.push(`Причина: ${opts.reason}`);
     return this.sendSms(opts.phone, lines.join('\n'), opts.senderId, opts.apiToken);
   }

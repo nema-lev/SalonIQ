@@ -909,6 +909,7 @@ export class AppointmentsService {
         tenantSchemaName: tenant.schemaName,
         appointmentId,
         clientId: appointment.client_id,
+        previousStatus: appointment.status,
         newStatus,
         reason,
         cancelledBy,

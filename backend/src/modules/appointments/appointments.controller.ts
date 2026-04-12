@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Body,
   Param,
   Query,
@@ -130,6 +131,32 @@ export class AppointmentsController {
     }
 
     return this.appointmentsService.getCalendarBoard(tenant, new Date(from), new Date(to), staffId);
+  }
+
+  @Post('staff-blocks')
+  @UseGuards(JwtAuthGuard, TenantGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Създай блокиран интервал за специалист в календара' })
+  async createStaffBlock(
+    @Body() dto: { staffId?: string; startAt?: string; endAt?: string; type?: string; note?: string },
+    @CurrentTenant() tenant: Tenant,
+  ) {
+    if (!dto?.staffId || !dto?.startAt || !dto?.endAt) {
+      throw new BadRequestException('Липсват данни за блокирания интервал.');
+    }
+
+    return this.appointmentsService.createStaffException(tenant, dto.staffId, dto.startAt, dto.endAt, dto.type, dto.note);
+  }
+
+  @Delete('staff-blocks/:id')
+  @UseGuards(JwtAuthGuard, TenantGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Изтрий блокиран интервал за специалист' })
+  async deleteStaffBlock(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentTenant() tenant: Tenant,
+  ) {
+    return this.appointmentsService.deleteStaffException(tenant, id);
   }
 
   @Get('upcoming')

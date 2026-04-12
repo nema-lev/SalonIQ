@@ -196,6 +196,69 @@ export class AppointmentsService {
     };
   }
 
+  async createStaffException(
+    tenant: Tenant,
+    staffId: string,
+    startAtIso: string,
+    endAtIso: string,
+    type = 'blocked',
+    note?: string | null,
+  ) {
+    const startAt = new Date(startAtIso);
+    const endAt = new Date(endAtIso);
+    if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime())) {
+      throw new BadRequestException('Невалиден период за блокирания интервал.');
+    }
+    if (!isBefore(startAt, endAt)) {
+      throw new BadRequestException('Краят трябва да е след началото.');
+    }
+
+    const normalizedType = ['vacation', 'sick', 'blocked', 'partial_day'].includes(type) ? type : 'blocked';
+    const [staff] = await this.prisma.queryInSchema<any[]>(
+      tenant.schemaName,
+      `SELECT id, name, color FROM staff WHERE id = $1::uuid LIMIT 1`,
+      [staffId],
+    );
+
+    if (!staff) {
+      throw new NotFoundException('Специалистът не е намерен.');
+    }
+
+    const [created] = await this.prisma.queryInSchema<any[]>(
+      tenant.schemaName,
+      `
+      INSERT INTO staff_exceptions (staff_id, type, start_at, end_at, note)
+      VALUES ($1::uuid, $2, $3::timestamptz, $4::timestamptz, $5)
+      RETURNING id, staff_id, type, start_at, end_at, note, created_at
+      `,
+      [staffId, normalizedType, startAt.toISOString(), endAt.toISOString(), note?.trim() || null],
+    );
+
+    return {
+      ...created,
+      staff_name: staff.name,
+      staff_color: staff.color,
+    };
+  }
+
+  async deleteStaffException(tenant: Tenant, exceptionId: string) {
+    const [deleted] = await this.prisma.queryInSchema<any[]>(
+      tenant.schemaName,
+      `
+      DELETE FROM staff_exceptions
+      WHERE id = $1::uuid
+      RETURNING id, staff_id, type, start_at, end_at, note
+      `,
+      [exceptionId],
+    );
+
+    if (!deleted) {
+      throw new NotFoundException('Блокираният интервал не е намерен.');
+    }
+
+    return deleted;
+  }
+
   async findUpcoming(tenant: Tenant, limit = 10, mode: UpcomingMode = 'all') {
     const whereClause =
       mode === 'pending'

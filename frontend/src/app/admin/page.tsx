@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, addDays, subDays, isToday, startOfDay, endOfDay, startOfWeek, endOfWeek, eachDayOfInterval, isSameDay } from 'date-fns';
 import { bg } from 'date-fns/locale';
 import {
+  Ban,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
@@ -20,6 +21,7 @@ import {
   RefreshCcw,
   Rows3,
   SlidersHorizontal,
+  Trash2,
   TriangleAlert,
   User,
   Users,
@@ -124,6 +126,9 @@ interface StaffException {
   start_at: string;
   end_at: string;
   note: string | null;
+  created_at?: string;
+  staff_name?: string;
+  staff_color?: string;
 }
 
 interface CalendarBoardResponse {
@@ -358,18 +363,68 @@ function getWorkingDayKey(value: Date) {
   return format(value, 'EEE', { locale: bg }).toLowerCase().slice(0, 3);
 }
 
+function getExceptionTypeLabel(type: string) {
+  const labels: Record<string, string> = {
+    blocked: 'Блокирано време',
+    vacation: 'Отпуск',
+    sick: 'Болничен',
+    partial_day: 'Частичен блок',
+  };
+  return labels[type] || 'Блокиран интервал';
+}
+
+function matchesCalendarStatusFilter(
+  item: { status?: string; owner_view_state?: string },
+  filter: 'all' | 'requests' | 'booked' | 'cancelled' | 'completed',
+) {
+  if (filter === 'all') return true;
+  const key = item.owner_view_state || item.status || 'pending';
+
+  if (filter === 'requests') {
+    return ['pending', 'requested', 'proposal_pending', 'proposal_sent'].includes(key);
+  }
+
+  if (filter === 'booked') {
+    return ['confirmed', 'approved', 'booked_direct', 'proposal_accepted'].includes(key);
+  }
+
+  if (filter === 'cancelled') {
+    return [
+      'cancelled',
+      'rejected',
+      'proposal_rejected',
+      'cancelled_by_owner',
+      'cancelled_by_client',
+    ].includes(key);
+  }
+
+  return ['completed', 'no_show'].includes(key);
+}
+
 export default function AdminCalendarPage() {
   const qc = useQueryClient();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showBookingModal, setShowBookingModal] = useState(false);
+  const [showBlockEditor, setShowBlockEditor] = useState(false);
   const [proposalTarget, setProposalTarget] = useState<Appointment | null>(null);
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const [mobileWorkspace, setMobileWorkspace] = useState<'calendar' | 'inbox'>('calendar');
+  const [showMobileDetails, setShowMobileDetails] = useState(false);
   const [calendarView, setCalendarView] = useState<'grid' | 'list' | 'week'>('grid');
   const [staffFilter, setStaffFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'requests' | 'booked' | 'cancelled' | 'completed'>('all');
+  const [showUnavailable, setShowUnavailable] = useState(true);
   const [draggedAppointmentId, setDraggedAppointmentId] = useState<string | null>(null);
   const [dropPreview, setDropPreview] = useState<{ staffId: string; startAt: string } | null>(null);
   const dateInputRef = useRef<HTMLInputElement | null>(null);
+  const [blockDraft, setBlockDraft] = useState({
+    staffId: 'all',
+    date: format(new Date(), 'yyyy-MM-dd'),
+    startTime: '12:00',
+    endTime: '13:00',
+    type: 'blocked',
+    note: '',
+  });
   const dateKey = format(currentDate, 'yyyy-MM-dd');
   const rangeStart = useMemo(
     () => (calendarView === 'week' ? startOfWeek(currentDate, { weekStartsOn: 1 }) : startOfDay(currentDate)),
@@ -427,6 +482,42 @@ export default function AdminCalendarPage() {
     onSettled: () => {
       setDraggedAppointmentId(null);
       setDropPreview(null);
+    },
+  });
+
+  const createBlockMutation = useMutation({
+    mutationFn: () => {
+      const [year, month, day] = blockDraft.date.split('-').map(Number);
+      const [startHour, startMinute] = blockDraft.startTime.split(':').map(Number);
+      const [endHour, endMinute] = blockDraft.endTime.split(':').map(Number);
+      const startAt = new Date(year, month - 1, day, startHour, startMinute, 0, 0).toISOString();
+      const endAt = new Date(year, month - 1, day, endHour, endMinute, 0, 0).toISOString();
+      return apiClient.post('/appointments/staff-blocks', {
+        staffId: blockDraft.staffId,
+        startAt,
+        endAt,
+        type: blockDraft.type,
+        note: blockDraft.note.trim() || undefined,
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['appointments-calendar-board'] });
+      toast.success('Интервалът е блокиран.');
+      setBlockDraft((current) => ({ ...current, note: '' }));
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Неуспешно блокиране на интервала.');
+    },
+  });
+
+  const deleteBlockMutation = useMutation({
+    mutationFn: (id: string) => apiClient.delete(`/appointments/staff-blocks/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['appointments-calendar-board'] });
+      toast.success('Блокираният интервал е изтрит.');
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Неуспешно изтриване на блока.');
     },
   });
 
@@ -535,17 +626,26 @@ export default function AdminCalendarPage() {
   const attentionCount = actionItems.length;
   const updateCount = updateItems.length;
   const filteredDayAppointments = useMemo(
-    () => (staffFilter === 'all' ? dayAppointments : dayAppointments.filter((item) => item.staff_id === staffFilter)),
-    [dayAppointments, staffFilter],
+    () =>
+      dayAppointments.filter(
+        (item) =>
+          (staffFilter === 'all' ? true : item.staff_id === staffFilter) &&
+          matchesCalendarStatusFilter(item, statusFilter),
+      ),
+    [dayAppointments, staffFilter, statusFilter],
   );
   const appointmentsInView = useMemo(
     () =>
       calendarView === 'week'
         ? sortByStartAt(
-            appointments.filter((item) => (staffFilter === 'all' ? true : item.staff_id === staffFilter)),
+            appointments.filter(
+              (item) =>
+                (staffFilter === 'all' ? true : item.staff_id === staffFilter) &&
+                matchesCalendarStatusFilter(item, statusFilter),
+            ),
           )
         : filteredDayAppointments,
-    [appointments, calendarView, filteredDayAppointments, staffFilter],
+    [appointments, calendarView, filteredDayAppointments, staffFilter, statusFilter],
   );
   const confirmedInView = useMemo(
     () => appointmentsInView.filter((appointment) => appointment.status === 'confirmed').length,
@@ -606,6 +706,28 @@ export default function AdminCalendarPage() {
       }),
     [calendarRange.endHour, calendarRange.startHour],
   );
+  const visibleBlockList = useMemo(
+    () =>
+      [...visibleExceptions].sort(
+        (left, right) => new Date(left.start_at).getTime() - new Date(right.start_at).getTime(),
+      ),
+    [visibleExceptions],
+  );
+  const calendarTitle = useMemo(() => {
+    if (calendarView !== 'week') {
+      return format(currentDate, "d MMMM yyyy 'г.'", { locale: bg });
+    }
+
+    const weekEnd = addDays(rangeEndExclusive, -1);
+    return `${format(rangeStart, 'd MMM', { locale: bg })} – ${format(weekEnd, "d MMMM yyyy 'г.'", { locale: bg })}`;
+  }, [calendarView, currentDate, rangeEndExclusive, rangeStart]);
+  const calendarSubtitle = useMemo(() => {
+    if (calendarView !== 'week') {
+      return format(currentDate, 'EEEE', { locale: bg });
+    }
+
+    return 'Седмичен изглед по дни и специалисти';
+  }, [calendarView, currentDate]);
 
   useEffect(() => {
     if (selectedRecordId) return;
@@ -632,12 +754,26 @@ export default function AdminCalendarPage() {
     }
   }, [calendarStaff, staffFilter]);
 
+  useEffect(() => {
+    setBlockDraft((current) => ({
+      ...current,
+      date: dateKey,
+      staffId:
+        current.staffId !== 'all' && calendarStaff.some((staff) => staff.id === current.staffId)
+          ? current.staffId
+          : staffFilter === 'all'
+            ? calendarStaff[0]?.id || 'all'
+            : staffFilter,
+    }));
+  }, [calendarStaff, dateKey, staffFilter]);
+
   const goToday = () => setCurrentDate(new Date());
 
   const focusRecord = (id: string, startAt: string, workspace: 'calendar' | 'inbox' = 'calendar') => {
     setSelectedRecordId(id);
     setCurrentDate(new Date(startAt));
     setMobileWorkspace(workspace);
+    setShowMobileDetails(true);
   };
 
   const renderPrimaryActions = (appointment: Appointment) => {
@@ -947,10 +1083,10 @@ export default function AdminCalendarPage() {
 	                <div>
 	                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Календар</p>
 	                  <h3 className="mt-1 text-xl font-black text-gray-900">
-	                    {format(currentDate, "d MMMM yyyy 'г.'", { locale: bg })}
+	                    {calendarTitle}
                   </h3>
                   <p className="mt-1 text-sm capitalize text-gray-500">
-                    {format(currentDate, 'EEEE', { locale: bg })}
+                    {calendarSubtitle}
                   </p>
                 </div>
 
@@ -994,13 +1130,13 @@ export default function AdminCalendarPage() {
 	                    </button>
 	                  </div>
 	                  <button
-	                    onClick={() => setCurrentDate(subDays(currentDate, 1))}
+	                    onClick={() => setCurrentDate(subDays(currentDate, calendarView === 'week' ? 7 : 1))}
 	                    className="flex h-11 w-11 items-center justify-center rounded-2xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
 	                  >
                     <ChevronLeft className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={() => setCurrentDate(addDays(currentDate, 1))}
+                    onClick={() => setCurrentDate(addDays(currentDate, calendarView === 'week' ? 7 : 1))}
                     className="flex h-11 w-11 items-center justify-center rounded-2xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
                   >
                     <ChevronRight className="w-4 h-4" />
@@ -1073,7 +1209,7 @@ export default function AdminCalendarPage() {
 	                <div className="flex justify-center py-20">
 	                  <Loader2 className="w-8 h-8 animate-spin text-[var(--color-primary)]" />
 	                </div>
-	              ) : !appointmentsInView.length ? (
+	              ) : !appointmentsInView.length && !visibleExceptions.length ? (
 	                <div className="rounded-[28px] border border-dashed border-gray-200 bg-white/80 px-6 py-16 text-center">
 	                  <p className="text-lg font-semibold text-gray-400">Няма записани часове за този ден</p>
 	                  <p className="mt-2 text-sm text-gray-300">Можете да изберете друга дата или да добавите ръчна резервация.</p>
@@ -1143,34 +1279,79 @@ export default function AdminCalendarPage() {
 	                        })}
 	                      </div>
 	                    </div>
+
+                      <div className="flex flex-col gap-3 rounded-2xl border border-dashed border-gray-200 bg-gray-50/80 p-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="flex flex-wrap gap-2">
+                          {[
+                            { key: 'all', label: 'Всички статуси' },
+                            { key: 'requests', label: 'Заявки' },
+                            { key: 'booked', label: 'Запазени' },
+                            { key: 'cancelled', label: 'Отказани / отменени' },
+                            { key: 'completed', label: 'Приключени' },
+                          ].map((option) => (
+                            <button
+                              key={option.key}
+                              type="button"
+                              onClick={() => setStatusFilter(option.key as typeof statusFilter)}
+                              className={`rounded-2xl px-3 py-2 text-xs font-semibold transition-colors ${
+                                statusFilter === option.key
+                                  ? 'bg-gray-900 text-white'
+                                  : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-100'
+                              }`}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setShowUnavailable((current) => !current)}
+                            className={`rounded-2xl px-3 py-2 text-xs font-semibold transition-colors ${
+                              showUnavailable
+                                ? 'border border-slate-300 bg-slate-100 text-slate-700'
+                                : 'border border-gray-200 bg-white text-gray-500'
+                            }`}
+                          >
+                            {showUnavailable ? 'Скрий блоковете' : 'Покажи блоковете'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowBlockEditor(true)}
+                            className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                          >
+                            <Ban className="h-4 w-4" />
+                            Блокирай време
+                          </button>
+                        </div>
+                      </div>
 	                  </div>
 
 		                  {calendarView === 'week' ? (
 		                    <div className="overflow-x-auto rounded-[28px] border border-white/70 bg-white/90 shadow-sm">
-		                      <div className="grid min-w-[980px] grid-cols-7 gap-0">
+		                      <div className="grid min-w-[1180px] grid-cols-7 gap-0">
 		                        {weekDays.map((day) => {
-		                          const items = sortByStartAt(
-		                            appointments.filter(
-		                              (appointment) =>
-		                                isSameDay(new Date(appointment.start_at), day) &&
-		                                (staffFilter === 'all' || appointment.staff_id === staffFilter),
-		                            ),
-		                          );
-		                          const activeCount = items.filter((item) => item.status === 'confirmed').length;
-		                          const requestCount = items.filter((item) => item.status === 'pending').length;
-		                          const hasSelection = items.some((item) => item.id === selectedRecordId);
-		                          const exceptionCount = (calendarBoard?.exceptions ?? []).filter(
-		                            (exception) =>
-		                              isSameDay(new Date(exception.start_at), day) &&
-		                              (staffFilter === 'all' || exception.staff_id === staffFilter),
-		                          ).length;
+                              const dayItems = sortByStartAt(
+                                appointments.filter(
+                                  (appointment) =>
+                                    isSameDay(new Date(appointment.start_at), day) &&
+                                    (staffFilter === 'all' || appointment.staff_id === staffFilter) &&
+                                    matchesCalendarStatusFilter(appointment, statusFilter),
+                                ),
+                              );
+                              const exceptionCount = (calendarBoard?.exceptions ?? []).filter(
+                                (exception) =>
+                                  isSameDay(new Date(exception.start_at), day) &&
+                                  (staffFilter === 'all' || exception.staff_id === staffFilter),
+                              ).length;
 
 		                          return (
 		                            <div
 		                              key={day.toISOString()}
-		                              className={`min-h-[560px] border-r border-gray-100 px-3 py-4 last:border-r-0 ${
+		                              className={`min-h-[640px] border-r border-gray-100 px-3 py-4 last:border-r-0 ${
 		                                isToday(day) ? 'bg-[var(--color-primary)]/3' : 'bg-white/70'
-		                              } ${hasSelection ? 'ring-1 ring-inset ring-[var(--color-primary)]/20' : ''}`}
+		                              }`}
 		                            >
 		                              <div className="border-b border-gray-100 pb-3">
 		                                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
@@ -1185,59 +1366,147 @@ export default function AdminCalendarPage() {
 		                                  )}
 		                                </div>
 		                                <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-semibold">
-		                                  <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-700">{activeCount} запазени</span>
-		                                  <span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-700">{requestCount} заявки</span>
+		                                  <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-700">
+                                        {dayItems.filter((item) => item.status === 'confirmed').length} запазени
+                                      </span>
+		                                  <span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-700">
+                                        {dayItems.filter((item) => item.status === 'pending').length} заявки
+                                      </span>
 		                                  {exceptionCount > 0 && (
-		                                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">{exceptionCount} блока</span>
+		                                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">
+                                          {exceptionCount} блока
+                                        </span>
 		                                  )}
 		                                </div>
 		                              </div>
 
-		                              <div className="mt-3 space-y-2">
-		                                {!items.length ? (
-		                                  <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-3 py-5 text-center text-sm text-gray-400">
-		                                    Няма записи
-		                                  </div>
-		                                ) : (
-		                                  items.map((appointment) => {
-		                                    const statusCfg = getOwnerStatusPresentation(appointment);
-		                                    const accent = appointment.service_color || appointment.staff_color || 'var(--color-primary)';
-		                                    const isSelected = appointment.id === selectedRecordId;
+                              <div className="mt-3 space-y-3">
+                                {visibleStaffColumns.map((staffMember) => {
+                                  const staffItems = dayItems.filter((item) => item.staff_id === staffMember.id);
+                                  const staffBlocks = (calendarBoard?.exceptions ?? []).filter(
+                                    (exception) => exception.staff_id === staffMember.id && isSameDay(new Date(exception.start_at), day),
+                                  );
+                                  const isDropTarget =
+                                    dropPreview?.staffId === staffMember.id &&
+                                    dropPreview?.startAt &&
+                                    isSameDay(new Date(dropPreview.startAt), day);
 
-		                                    return (
-		                                      <button
-		                                        key={appointment.id}
-		                                        type="button"
-		                                        onClick={() => {
-		                                          setCurrentDate(day);
-		                                          setSelectedRecordId(appointment.id);
-		                                        }}
-		                                        className={`w-full rounded-2xl border p-3 text-left shadow-sm transition-transform hover:scale-[1.01] ${
-		                                          isSelected ? 'ring-2 ring-[var(--color-primary)]/25' : ''
-		                                        }`}
-		                                        style={{
-		                                          borderColor: colorWithAlpha(accent, '55', 'rgba(14, 165, 233, 0.3)'),
-		                                          backgroundColor: colorWithAlpha(accent, '18', 'rgba(14, 165, 233, 0.08)'),
-		                                        }}
-		                                      >
-		                                        <div className="flex items-start justify-between gap-2">
-		                                          <p className="text-[11px] font-bold text-gray-700">
-		                                            {format(new Date(appointment.start_at), 'HH:mm')} - {format(new Date(appointment.end_at), 'HH:mm')}
-		                                          </p>
-		                                          <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusCfg.cls}`}>
-		                                            {statusCfg.label}
-		                                          </span>
-		                                        </div>
-		                                        <p className="mt-2 line-clamp-2 text-sm font-black text-gray-900">{appointment.client_name}</p>
-		                                        <p className="mt-1 line-clamp-2 text-xs font-semibold text-gray-700">{appointment.service_name}</p>
-		                                        <p className="mt-2 text-[11px] text-gray-500">
-		                                          {staffFilter === 'all' ? appointment.staff_name : formatBulgarianPhoneForDisplay(appointment.client_phone)}
-		                                        </p>
-		                                      </button>
-		                                    );
-		                                  })
-		                                )}
-		                              </div>
+                                  return (
+                                    <div
+                                      key={`${day.toISOString()}-${staffMember.id}`}
+                                      className={`rounded-3xl border p-3 transition-colors ${
+                                        isDropTarget
+                                          ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/6'
+                                          : 'border-gray-100 bg-white/90'
+                                      }`}
+                                      onDragOver={(event) => {
+                                        if (!draggedAppointmentId) return;
+                                        const source = appointments.find((item) => item.id === draggedAppointmentId);
+                                        if (!source) return;
+                                        event.preventDefault();
+                                        const sourceDate = new Date(source.start_at);
+                                        const nextStart = new Date(day);
+                                        nextStart.setHours(sourceDate.getHours(), sourceDate.getMinutes(), 0, 0);
+                                        setDropPreview({ staffId: staffMember.id, startAt: nextStart.toISOString() });
+                                      }}
+                                      onDrop={(event) => {
+                                        if (!draggedAppointmentId) return;
+                                        const source = appointments.find((item) => item.id === draggedAppointmentId);
+                                        if (!source) return;
+                                        event.preventDefault();
+                                        const sourceDate = new Date(source.start_at);
+                                        const nextStart = new Date(day);
+                                        nextStart.setHours(sourceDate.getHours(), sourceDate.getMinutes(), 0, 0);
+                                        handleDropReschedule(draggedAppointmentId, nextStart.toISOString(), staffMember.id);
+                                      }}
+                                    >
+                                      <div className="flex items-center justify-between gap-2">
+                                        <div className="flex items-center gap-2">
+                                          <span
+                                            className="flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-black text-white"
+                                            style={{ backgroundColor: staffMember.color || 'var(--color-primary)' }}
+                                          >
+                                            {getInitials(staffMember.name)}
+                                          </span>
+                                          <div className="min-w-0">
+                                            <p className="truncate text-sm font-black text-gray-900">{staffMember.name}</p>
+                                            <p className="text-[11px] text-gray-500">{staffItems.length} записа</p>
+                                          </div>
+                                        </div>
+                                        {staffBlocks.length > 0 && (
+                                          <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600">
+                                            {staffBlocks.length} блока
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      {staffBlocks.length > 0 && showUnavailable && (
+                                        <div className="mt-3 flex flex-wrap gap-2">
+                                          {staffBlocks.slice(0, 2).map((block) => (
+                                            <button
+                                              key={block.id}
+                                              type="button"
+                                              onClick={() => setShowBlockEditor(true)}
+                                              className="rounded-2xl border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold text-slate-600"
+                                            >
+                                              {format(new Date(block.start_at), 'HH:mm')}–{format(new Date(block.end_at), 'HH:mm')} · {getExceptionTypeLabel(block.type)}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      )}
+
+                                      <div className="mt-3 space-y-2">
+                                        {!staffItems.length ? (
+                                          <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-3 py-4 text-center text-xs text-gray-400">
+                                            Пуснете запис тук. Ще запази същия начален час.
+                                          </div>
+                                        ) : (
+                                          staffItems.map((appointment) => {
+                                            const statusCfg = getOwnerStatusPresentation(appointment);
+                                            const accent = appointment.service_color || appointment.staff_color || 'var(--color-primary)';
+                                            const isSelected = appointment.id === selectedRecordId;
+
+                                            return (
+                                              <button
+                                                key={appointment.id}
+                                                type="button"
+                                                draggable={!['completed', 'cancelled', 'no_show'].includes(appointment.status)}
+                                                onDragStart={() => setDraggedAppointmentId(appointment.id)}
+                                                onDragEnd={() => {
+                                                  setDraggedAppointmentId(null);
+                                                  setDropPreview(null);
+                                                }}
+                                                onClick={() => focusRecord(appointment.id, appointment.start_at)}
+                                                className={`w-full rounded-2xl border p-3 text-left shadow-sm transition-transform hover:scale-[1.01] ${
+                                                  isSelected ? 'ring-2 ring-[var(--color-primary)]/25' : ''
+                                                }`}
+                                                style={{
+                                                  borderColor: colorWithAlpha(accent, '55', 'rgba(14, 165, 233, 0.3)'),
+                                                  backgroundColor: colorWithAlpha(accent, '18', 'rgba(14, 165, 233, 0.08)'),
+                                                }}
+                                              >
+                                                <div className="flex items-start justify-between gap-2">
+                                                  <p className="text-[11px] font-bold text-gray-700">
+                                                    {format(new Date(appointment.start_at), 'HH:mm')} - {format(new Date(appointment.end_at), 'HH:mm')}
+                                                  </p>
+                                                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusCfg.cls}`}>
+                                                    {statusCfg.label}
+                                                  </span>
+                                                </div>
+                                                <p className="mt-2 line-clamp-2 text-sm font-black text-gray-900">{appointment.client_name}</p>
+                                                <p className="mt-1 line-clamp-2 text-xs font-semibold text-gray-700">{appointment.service_name}</p>
+                                                <p className="mt-2 text-[11px] text-gray-500">
+                                                  {formatBulgarianPhoneForDisplay(appointment.client_phone)}
+                                                </p>
+                                              </button>
+                                            );
+                                          })
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
 		                            </div>
 		                          );
 		                        })}
@@ -1296,7 +1565,7 @@ export default function AdminCalendarPage() {
 		                              className="relative border-r border-gray-100 bg-white/70 last:border-r-0"
 		                              style={{ height: `${calendarHeight}px` }}
 		                            >
-		                              {(() => {
+		                              {showUnavailable && (() => {
 		                                const dayKey = getWorkingDayKey(currentDate);
 		                                const schedule = staffMember.working_hours?.[dayKey];
 		                                const staffExceptions = visibleExceptions.filter((exception) => exception.staff_id === staffMember.id);
@@ -1439,7 +1708,7 @@ export default function AdminCalendarPage() {
 		                                      setDraggedAppointmentId(null);
 		                                      setDropPreview(null);
 		                                    }}
-		                                    onClick={() => setSelectedRecordId(appointment.id)}
+		                                    onClick={() => focusRecord(appointment.id, appointment.start_at)}
 		                                    className={`absolute left-2 right-2 z-[2] rounded-2xl border p-3 text-left shadow-sm transition-transform hover:scale-[1.01] ${
 		                                      isSelected ? 'ring-2 ring-[var(--color-primary)]/25' : ''
 		                                    }`}
@@ -1490,7 +1759,7 @@ export default function AdminCalendarPage() {
 	                        >
 	                          <button
 	                            type="button"
-	                            onClick={() => setSelectedRecordId(appointment.id)}
+	                            onClick={() => focusRecord(appointment.id, appointment.start_at)}
 	                            className="flex w-full gap-4 text-left"
 	                          >
 	                            <div className="flex w-20 flex-shrink-0 flex-col items-center gap-2 rounded-[24px] border border-gray-100 bg-gray-50/80 px-3 py-4">
@@ -1548,58 +1817,6 @@ export default function AdminCalendarPage() {
 	            </div>
           </div>
 
-          <div className="mt-5 xl:hidden">
-            <div className="glass-panel rounded-[28px] border border-white/60 p-4 shadow-xl shadow-black/5">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Детайли</p>
-              {selectedAppointment || selectedInboxItem ? (
-                <div className="mt-3 space-y-4">
-                  <div>
-                    <h3 className="text-lg font-black text-gray-900">
-                      {detailedAppointment?.client_name || selectedInboxItem?.client_name}
-                    </h3>
-                    <p className="mt-1 text-sm text-gray-500">
-                      {detailedAppointment
-                        ? `${detailedAppointment.service_name} · ${detailedAppointment.staff_name}`
-                        : selectedInboxItem?.summary}
-                    </p>
-                  </div>
-
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Дата и час</p>
-                      <p className="mt-2 text-sm font-semibold text-gray-900">
-                        {formatAppointmentDay(detailedAppointment?.start_at || selectedInboxItem!.start_at)}
-                      </p>
-                    </div>
-                    <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Контакт</p>
-                      <p className="mt-2 text-sm font-semibold text-gray-900">
-                        {formatBulgarianPhoneForDisplay(
-                          detailedAppointment?.client_phone || selectedInboxItem!.client_phone,
-                        )}
-                      </p>
-                    </div>
-                  </div>
-
-                  {detailedAppointment && (
-                    <div>{renderPrimaryActions(detailedAppointment)}</div>
-                  )}
-
-                  {selectedInboxItem?.bucket === 'updates' && (
-                    <button
-                      type="button"
-                      onClick={() => handleOwnerAlertRead(selectedInboxItem.id)}
-                      className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-100"
-                    >
-                      Маркирай като видяно
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <p className="mt-3 text-sm text-gray-400">Изберете заявка или час, за да видите детайли.</p>
-              )}
-            </div>
-          </div>
         </section>
 
         <aside className="hidden xl:block">
@@ -1818,6 +2035,303 @@ export default function AdminCalendarPage() {
           </div>
         </aside>
       </div>
+
+      {selectedRecordId && !showMobileDetails && (
+        <button
+          type="button"
+          onClick={() => setShowMobileDetails(true)}
+          className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+96px)] right-4 z-30 rounded-full bg-gray-900 px-4 py-3 text-sm font-semibold text-white shadow-xl xl:hidden"
+        >
+          Отвори детайли
+        </button>
+      )}
+
+      {showMobileDetails && (selectedAppointment || selectedInboxItem) && (
+        <div className="fixed inset-0 z-40 bg-black/40 xl:hidden" onClick={() => setShowMobileDetails(false)}>
+          <div
+            className="absolute inset-x-0 bottom-0 max-h-[82vh] overflow-y-auto rounded-t-[32px] bg-white px-4 pb-[calc(env(safe-area-inset-bottom,0px)+24px)] pt-3 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mx-auto mb-3 h-1.5 w-14 rounded-full bg-gray-200" />
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Детайли</p>
+                <h3 className="mt-1 text-lg font-black text-gray-900">
+                  {detailedAppointment?.client_name || selectedInboxItem?.client_name}
+                </h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  {detailedAppointment
+                    ? `${detailedAppointment.service_name} · ${detailedAppointment.staff_name}`
+                    : selectedInboxItem?.summary}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMobileDetails(false)}
+                className="flex h-10 w-10 items-center justify-center rounded-2xl border border-gray-200 bg-white text-gray-600"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Дата и час</p>
+                  <p className="mt-2 text-sm font-semibold text-gray-900">
+                    {formatAppointmentDay(detailedAppointment?.start_at || selectedInboxItem!.start_at)}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Контакт</p>
+                  <p className="mt-2 text-sm font-semibold text-gray-900">
+                    {formatBulgarianPhoneForDisplay(
+                      detailedAppointment?.client_phone || selectedInboxItem!.client_phone,
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              {detailedAppointment && (
+                <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Статус</p>
+                      <span
+                        className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-[11px] font-bold ${
+                          getOwnerStatusPresentation(detailedAppointment).cls
+                        }`}
+                      >
+                        {getOwnerStatusPresentation(detailedAppointment).label}
+                      </span>
+                    </div>
+                    {detailedAppointment.price != null && (
+                      <div className="text-right">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Стойност</p>
+                        <p className="mt-2 text-sm font-semibold text-gray-900">{detailedAppointment.price} €</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {detailedAppointment && <div>{renderPrimaryActions(detailedAppointment)}</div>}
+
+              {selectedInboxItem?.bucket === 'updates' && (
+                <button
+                  type="button"
+                  onClick={() => handleOwnerAlertRead(selectedInboxItem.id)}
+                  className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-100"
+                >
+                  Маркирай като видяно
+                </button>
+              )}
+
+              <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Известия</p>
+                <div className="mt-3 space-y-2">
+                  {selectedContext?.notifications?.length ? (
+                    selectedContext.notifications.slice(0, 6).map((entry) => (
+                      <div key={entry.id} className="rounded-2xl border border-white bg-white px-3 py-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-gray-900">{getNotificationTypeLabel(entry.type)}</p>
+                            <p className="mt-1 text-xs text-gray-500">
+                              {getChannelLabel(entry.channel)} · {entry.sent_at ? formatAppointmentDay(entry.sent_at) : formatAppointmentDay(entry.created_at)}
+                            </p>
+                          </div>
+                          <span className={`rounded-full border px-2 py-1 text-[10px] font-bold ${getNotificationStatusClass(entry.status)}`}>
+                            {getNotificationStatusLabel(entry.status)}
+                          </span>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-gray-400">Няма лог за известия към този запис.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBlockEditor && (
+        <div className="fixed inset-0 z-50 bg-black/45 p-4">
+          <div className="mx-auto flex h-full max-w-4xl items-center justify-center">
+            <div className="w-full max-h-[92vh] overflow-y-auto rounded-[28px] border border-gray-100 bg-white shadow-2xl">
+              <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-gray-100 bg-white px-5 py-5">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Time blocks</p>
+                  <h3 className="mt-1 text-xl font-black text-gray-900">Блокирани интервали и почивки</h3>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Създавате реални блокове в `staff_exceptions`, които веднага се отразяват в календара и при drag/drop валидациите.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowBlockEditor(false)}
+                  className="flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="grid gap-5 p-5 lg:grid-cols-[360px_minmax(0,1fr)]">
+                <div className="space-y-4">
+                  <div className="rounded-[28px] border border-gray-100 bg-gray-50 p-4">
+                    <h4 className="text-sm font-black text-gray-900">Нов блок</h4>
+                    <div className="mt-4 space-y-3">
+                      <div>
+                        <label className="mb-1.5 block text-sm font-semibold text-gray-700">Специалист</label>
+                        <select
+                          value={blockDraft.staffId}
+                          onChange={(event) => setBlockDraft((current) => ({ ...current, staffId: event.target.value }))}
+                          className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-[var(--color-primary)]"
+                        >
+                          {calendarStaff.map((staffMember) => (
+                            <option key={staffMember.id} value={staffMember.id}>
+                              {staffMember.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="mb-1.5 block text-sm font-semibold text-gray-700">Дата</label>
+                        <input
+                          type="date"
+                          value={blockDraft.date}
+                          onChange={(event) => setBlockDraft((current) => ({ ...current, date: event.target.value }))}
+                          className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-[var(--color-primary)]"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="mb-1.5 block text-sm font-semibold text-gray-700">От</label>
+                          <input
+                            type="time"
+                            value={blockDraft.startTime}
+                            onChange={(event) => setBlockDraft((current) => ({ ...current, startTime: event.target.value }))}
+                            className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-[var(--color-primary)]"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1.5 block text-sm font-semibold text-gray-700">До</label>
+                          <input
+                            type="time"
+                            value={blockDraft.endTime}
+                            onChange={(event) => setBlockDraft((current) => ({ ...current, endTime: event.target.value }))}
+                            className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-[var(--color-primary)]"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="mb-1.5 block text-sm font-semibold text-gray-700">Тип</label>
+                        <select
+                          value={blockDraft.type}
+                          onChange={(event) => setBlockDraft((current) => ({ ...current, type: event.target.value }))}
+                          className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-[var(--color-primary)]"
+                        >
+                          <option value="blocked">Блокирано време</option>
+                          <option value="partial_day">Частичен блок</option>
+                          <option value="vacation">Отпуск</option>
+                          <option value="sick">Болничен</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="mb-1.5 block text-sm font-semibold text-gray-700">Бележка</label>
+                        <input
+                          type="text"
+                          value={blockDraft.note}
+                          onChange={(event) => setBlockDraft((current) => ({ ...current, note: event.target.value }))}
+                          placeholder="Пример: обедна почивка"
+                          className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-[var(--color-primary)]"
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => createBlockMutation.mutate()}
+                        disabled={
+                          createBlockMutation.isPending ||
+                          !blockDraft.staffId ||
+                          blockDraft.staffId === 'all' ||
+                          !blockDraft.date ||
+                          !blockDraft.startTime ||
+                          !blockDraft.endTime
+                        }
+                        className="w-full rounded-2xl bg-[var(--color-primary)] px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-[var(--color-primary)]/20 disabled:opacity-50"
+                      >
+                        {createBlockMutation.isPending ? 'Записване...' : 'Запази блока'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Видими блокове</p>
+                      <h4 className="mt-1 text-base font-black text-gray-900">
+                        {calendarView === 'week' ? 'Блокове за седмицата' : 'Блокове за деня'}
+                      </h4>
+                    </div>
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                      {visibleBlockList.length}
+                    </span>
+                  </div>
+
+                  {!visibleBlockList.length ? (
+                    <div className="rounded-[28px] border border-dashed border-gray-200 bg-gray-50 px-4 py-8 text-center text-sm text-gray-400">
+                      Няма блокирани интервали в текущия изглед.
+                    </div>
+                  ) : (
+                    visibleBlockList.map((block) => {
+                      const staffMember = calendarStaff.find((staff) => staff.id === block.staff_id);
+                      return (
+                        <div key={block.id} className="rounded-[28px] border border-gray-100 bg-white px-4 py-4 shadow-sm">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className="flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-black text-white"
+                                  style={{ backgroundColor: staffMember?.color || block.staff_color || 'var(--color-primary)' }}
+                                >
+                                  {getInitials(staffMember?.name || block.staff_name || 'S')}
+                                </span>
+                                <div>
+                                  <p className="text-sm font-black text-gray-900">{staffMember?.name || block.staff_name || 'Специалист'}</p>
+                                  <p className="text-xs text-gray-500">{getExceptionTypeLabel(block.type)}</p>
+                                </div>
+                              </div>
+                              <p className="mt-3 text-sm font-semibold text-gray-900">
+                                {formatAppointmentDay(block.start_at)} – {format(new Date(block.end_at), 'HH:mm')}
+                              </p>
+                              {block.note && <p className="mt-2 text-sm text-gray-500">{block.note}</p>}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => deleteBlockMutation.mutate(block.id)}
+                              className="flex h-10 w-10 items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                              aria-label="Изтрий блока"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <AdminBookingModal
         open={showBookingModal}

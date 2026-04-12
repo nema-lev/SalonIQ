@@ -493,7 +493,7 @@ export class TelegramWebhookController {
         a.start_at,
         a.end_at,
         a.price,
-        COALESCE(NULLIF(c.profile_data->>'salutation', ''), split_part(c.name, ' ', 1)) as client_name,
+        c.name as client_name,
         c.phone as client_phone,
         sv.name as service_name,
         s.name as staff_name

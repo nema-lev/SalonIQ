@@ -45,6 +45,12 @@ interface IntakeDataWithProposal {
   [key: string]: unknown;
 }
 
+interface ClientProfileData {
+  salutation?: string;
+  nameSource?: 'owner' | 'client_submitted';
+  originalClientName?: string;
+}
+
 @Injectable()
 export class AppointmentsService {
   private readonly logger = new Logger(AppointmentsService.name);
@@ -929,10 +935,13 @@ export class AppointmentsService {
   private async findOrCreateClient(schemaName: string, dto: CreateAppointmentDto): Promise<string> {
     const normalizedPhone = normalizeBulgarianPhone(dto.clientPhone);
     const phoneVariants = buildBulgarianPhoneVariants(normalizedPhone);
+    const submittedName = this.sanitizeClientSubmittedName(dto.clientName);
+    const fallbackName = submittedName || this.buildAutoClientName(normalizedPhone);
+    const fallbackSalutation = this.getDefaultSalutation(fallbackName);
 
-    const existing = await this.prisma.queryInSchema<{ id: string }[]>(
+    const existing = await this.prisma.queryInSchema<{ id: string; name: string; profile_data: unknown }[]>(
       schemaName,
-      `SELECT id
+      `SELECT id, name, profile_data
        FROM clients
        WHERE phone = ANY($1::text[])
        LIMIT 1`,
@@ -940,14 +949,42 @@ export class AppointmentsService {
     );
 
     if (existing.length) {
-      await this.prisma.queryInSchema(
-        schemaName,
-        `UPDATE clients
-         SET notifications_consent = true,
-             consent_given_at = COALESCE(consent_given_at, NOW())
-         WHERE id = $1::uuid`,
-        [existing[0].id],
-      );
+      const profileData = this.parseClientProfileData(existing[0].profile_data);
+      const currentName = existing[0].name?.trim() || '';
+      const isOwnerControlled = profileData.nameSource === 'owner';
+      const canRepairClientSubmittedName =
+        !isOwnerControlled &&
+        Boolean(submittedName) &&
+        this.isGenericOrGeneratedClientName(currentName, profileData.originalClientName);
+
+      if (canRepairClientSubmittedName) {
+        const repairedName = submittedName as string;
+        await this.prisma.queryInSchema(
+          schemaName,
+          `UPDATE clients
+           SET name = $1,
+               notifications_consent = true,
+               consent_given_at = COALESCE(consent_given_at, NOW()),
+               profile_data = COALESCE(profile_data, '{}'::jsonb) || jsonb_build_object(
+                 'salutation', $2::text,
+                 'nameSource', 'client_submitted',
+                 'originalClientName', $1::text
+               ),
+               updated_at = NOW()
+           WHERE id = $3::uuid`,
+          [repairedName, this.getDefaultSalutation(repairedName), existing[0].id],
+        );
+      } else {
+        await this.prisma.queryInSchema(
+          schemaName,
+          `UPDATE clients
+           SET notifications_consent = true,
+               consent_given_at = COALESCE(consent_given_at, NOW())
+           WHERE id = $1::uuid`,
+          [existing[0].id],
+        );
+      }
+
       return existing[0].id;
     }
 
@@ -956,14 +993,14 @@ export class AppointmentsService {
       `INSERT INTO clients (name, phone, email, notifications_consent, consent_given_at, profile_data)
        VALUES ($1, $2, $3, $4, NOW(), $5::jsonb) RETURNING id`,
       [
-        dto.clientName,
+        fallbackName,
         normalizedPhone,
         dto.clientEmail || null,
         true,
         JSON.stringify({
-          salutation: this.getDefaultSalutation(dto.clientName),
+          salutation: fallbackSalutation,
           nameSource: 'client_submitted',
-          originalClientName: dto.clientName.trim(),
+          originalClientName: submittedName || null,
         }),
       ],
     );
@@ -974,6 +1011,72 @@ export class AppointmentsService {
   private getDefaultSalutation(name: string) {
     const firstName = name.trim().split(/\s+/)[0] || '';
     return firstName || name.trim();
+  }
+
+  private sanitizeClientSubmittedName(name: string | undefined | null) {
+    const cleaned = (name || '').replace(/\s+/g, ' ').trim();
+    if (!cleaned) return null;
+
+    const normalized = cleaned.toLocaleLowerCase('bg-BG');
+    const genericLabels = new Set([
+      'пълно име',
+      'две имена',
+      'име',
+      'вашето име',
+      'твоето име',
+      'full name',
+      'name',
+      'your name',
+      'first and last name',
+    ]);
+
+    if (genericLabels.has(normalized)) {
+      return null;
+    }
+
+    return cleaned;
+  }
+
+  private buildAutoClientName(phone: string) {
+    return `Клиент ${phone.slice(-4)}`;
+  }
+
+  private parseClientProfileData(value: unknown): ClientProfileData {
+    if (!value) return {};
+    if (typeof value === 'string') {
+      try {
+        return JSON.parse(value || '{}') as ClientProfileData;
+      } catch {
+        return {};
+      }
+    }
+    if (typeof value === 'object') {
+      return value as ClientProfileData;
+    }
+    return {};
+  }
+
+  private isGenericOrGeneratedClientName(name: string, originalClientName?: string) {
+    const normalizedName = name.trim().toLocaleLowerCase('bg-BG');
+    const normalizedOriginal = (originalClientName || '').trim().toLocaleLowerCase('bg-BG');
+
+    if (!normalizedName) return true;
+    if (/^клиент\s+\d{4}$/.test(normalizedName)) return true;
+    if (/^\+359\d{9}$/.test(name.trim())) return true;
+
+    const genericLabels = new Set([
+      'пълно име',
+      'две имена',
+      'име',
+      'вашето име',
+      'твоето име',
+      'full name',
+      'name',
+      'your name',
+      'first and last name',
+    ]);
+
+    return genericLabels.has(normalizedName) || genericLabels.has(normalizedOriginal);
   }
 
   private async scheduleNotifications(

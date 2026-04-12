@@ -38,11 +38,11 @@ export function AdminHeader({ onOpenMenu }: { onOpenMenu: () => void }) {
     refetchInterval: 15000,
   });
   const pendingCount = upcoming?.length ?? 0;
-  const pendingReservationsCount = useMemo(
+  const inboxActionCount = useMemo(
     () => (upcoming ?? []).filter((item) => item.status === 'pending' || item.status === 'proposal_pending').length,
     [upcoming],
   );
-  const proposalResponsesCount = useMemo(
+  const inboxUpdateCount = useMemo(
     () => (upcoming ?? []).filter((item) => Boolean(item.owner_alert_state)).length,
     [upcoming],
   );
@@ -180,17 +180,17 @@ export function AdminHeader({ onOpenMenu }: { onOpenMenu: () => void }) {
                   width: '100%',
                   textAlign: 'left',
                   border: '1px solid #ede9fe',
-                  background: pendingReservationsCount > 0 ? 'rgba(124,58,237,0.06)' : '#f9fafb',
+                  background: inboxActionCount > 0 ? 'rgba(124,58,237,0.06)' : '#f9fafb',
                   borderRadius: 14,
                   padding: '12px 14px',
                   cursor: 'pointer',
                 }}
               >
                 <div style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>
-                  {pendingReservationsCount > 0 ? `${pendingReservationsCount} нови заявки` : 'Няма нови заявки'}
+                  {inboxActionCount > 0 ? `${inboxActionCount} заявки искат решение` : 'Няма чакащи решения'}
                 </div>
                 <div style={{ marginTop: 4, fontSize: 12, color: '#6b7280' }}>
-                  Отваря календара и чакащите потвърждение.
+                  Отваря action inbox-а с новите заявки и предложения.
                 </div>
               </button>
 
@@ -204,17 +204,17 @@ export function AdminHeader({ onOpenMenu }: { onOpenMenu: () => void }) {
                   width: '100%',
                   textAlign: 'left',
                   border: '1px solid #e5e7eb',
-                  background: proposalResponsesCount > 0 ? 'rgba(14,165,233,0.06)' : '#f9fafb',
+                  background: inboxUpdateCount > 0 ? 'rgba(14,165,233,0.06)' : '#f9fafb',
                   borderRadius: 14,
                   padding: '12px 14px',
                   cursor: 'pointer',
                 }}
               >
                 <div style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>
-                  {proposalResponsesCount > 0 ? `${proposalResponsesCount} нови клиентски действия` : 'Няма нови клиентски действия'}
+                  {inboxUpdateCount > 0 ? `${inboxUpdateCount} нови обновления` : 'Няма нови обновления'}
                 </div>
                 <div style={{ marginTop: 4, fontSize: 12, color: '#6b7280' }}>
-                  Отваря секцията с клиентски отговори и отмени.
+                  Клиентски отговори и отмени, които трябва да прегледате.
                 </div>
               </button>
             </div>

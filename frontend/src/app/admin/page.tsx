@@ -226,17 +226,18 @@ export default function AdminCalendarPage() {
       <div className="bg-white rounded-2xl border border-gray-100 p-4 mb-5">
         <div className="flex items-center justify-between gap-3 mb-3">
           <div>
-            <h2 className="text-sm font-bold text-gray-900">Отговори по предложения</h2>
-            <p className="text-xs text-gray-500 mt-1">Клиенти, които вече са приели или отказали предложен час.</p>
+            <h2 className="text-sm font-bold text-gray-900">Клиентски действия</h2>
+            <p className="text-xs text-gray-500 mt-1">Приети предложения, отказани предложения и клиентски отмени.</p>
           </div>
         </div>
 
         {!responseItems.length ? (
-          <p className="text-sm text-gray-400">Няма нови клиентски отговори.</p>
+          <p className="text-sm text-gray-400">Няма нови клиентски действия.</p>
         ) : (
           <div className="space-y-2">
             {responseItems.map((appt) => {
               const isAccepted = appt.owner_alert_state === 'proposal_accepted';
+              const isCancelled = appt.owner_alert_state === 'client_cancelled';
 
               return (
                 <div
@@ -247,7 +248,7 @@ export default function AdminCalendarPage() {
                     <div className="min-w-0">
                       <p className="text-sm font-semibold text-gray-900 truncate">{appt.client_name}</p>
                       <p className="text-xs text-gray-500 mt-1 truncate">
-                        {isAccepted ? 'Прието предложение' : 'Отказано предложение'} · {appt.service_name}
+                        {isCancelled ? 'Клиентът отмени часа' : isAccepted ? 'Прието предложение' : 'Отказано предложение'} · {appt.service_name}
                       </p>
                     </div>
                     <button
@@ -260,8 +261,8 @@ export default function AdminCalendarPage() {
                     </button>
                   </div>
                   <div className="mt-2 flex items-center justify-between gap-3">
-                    <p className={`text-sm font-semibold ${isAccepted ? 'text-green-700' : 'text-red-600'}`}>
-                      {isAccepted ? 'Клиентът прие часа' : 'Клиентът отказа часа'}
+                    <p className={`text-sm font-semibold ${isCancelled ? 'text-red-600' : isAccepted ? 'text-green-700' : 'text-red-600'}`}>
+                      {isCancelled ? 'Клиентът отмени потвърден час' : isAccepted ? 'Клиентът прие часа' : 'Клиентът отказа часа'}
                     </p>
                     <p className="text-xs text-gray-400">
                       {format(new Date(appt.start_at), 'd MMM, HH:mm', { locale: bg })}

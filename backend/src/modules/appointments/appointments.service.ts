@@ -41,6 +41,7 @@ interface ProposalMetadata {
 
 interface IntakeDataWithProposal {
   proposal?: ProposalMetadata;
+  ownerActionAlert?: '' | 'client_cancelled';
   [key: string]: unknown;
 }
 
@@ -99,7 +100,7 @@ export class AppointmentsService {
       mode === 'pending'
         ? `a.status IN ('pending', 'proposal_pending')`
         : mode === 'attention'
-          ? `(a.status IN ('pending', 'proposal_pending') OR COALESCE(a.intake_data->'proposal'->>'ownerAlertState', '') <> '')`
+          ? `(a.status IN ('pending', 'proposal_pending') OR COALESCE(NULLIF(a.intake_data->>'ownerActionAlert', ''), NULLIF(a.intake_data->'proposal'->>'ownerAlertState', ''), '') <> '')`
           : `a.start_at >= NOW()
         AND a.status NOT IN ('cancelled', 'completed', 'no_show')`;
 
@@ -112,7 +113,7 @@ export class AppointmentsService {
         a.end_at,
         a.status,
         a.price,
-        COALESCE(a.intake_data->'proposal'->>'ownerAlertState', '') as owner_alert_state,
+        COALESCE(NULLIF(a.intake_data->>'ownerActionAlert', ''), NULLIF(a.intake_data->'proposal'->>'ownerAlertState', ''), '') as owner_alert_state,
         COALESCE(a.intake_data->'proposal'->>'lastDecision', '') as proposal_decision,
         c.name as client_name,
         c.phone as client_phone,
@@ -808,7 +809,7 @@ export class AppointmentsService {
     }
 
     const intakeData = this.parseIntakeData(appointment.intake_data);
-    if (!intakeData.proposal?.ownerAlertState) {
+    if (!intakeData.proposal?.ownerAlertState && !intakeData.ownerActionAlert) {
       return { updated: true };
     }
 
@@ -823,6 +824,7 @@ export class AppointmentsService {
       [
         JSON.stringify({
           ...intakeData,
+          ownerActionAlert: '',
           proposal: {
             ...intakeData.proposal,
             ownerAlertState: '',
@@ -845,9 +847,9 @@ export class AppointmentsService {
     reason?: string,
     cancelledBy?: 'client' | 'owner',
   ) {
-    const appointments = await this.prisma.queryInSchema<{ id: string; client_id: string; status: string; start_at: Date }[]>(
+    const appointments = await this.prisma.queryInSchema<{ id: string; client_id: string; status: string; start_at: Date; intake_data: unknown }[]>(
       tenant.schemaName,
-      `SELECT id, client_id, status, start_at FROM appointments WHERE id = $1::uuid`,
+      `SELECT id, client_id, status, start_at, intake_data FROM appointments WHERE id = $1::uuid`,
       [appointmentId],
     );
 
@@ -874,16 +876,23 @@ export class AppointmentsService {
       );
     }
 
+    const intakeData = this.parseIntakeData(appointment.intake_data);
+    const nextIntakeData =
+      newStatus === AppointmentStatus.CANCELLED && cancelledBy === 'client'
+        ? { ...intakeData, ownerActionAlert: 'client_cancelled' as const }
+        : { ...intakeData, ownerActionAlert: '' as const };
+
     await this.prisma.queryInSchema(
       tenant.schemaName,
       `UPDATE appointments SET status = $1, cancellation_reason = $2, 
-       cancelled_by = $3, cancelled_at = $4::timestamptz, updated_at = NOW()
-       WHERE id = $5::uuid`,
+       cancelled_by = $3, cancelled_at = $4::timestamptz, intake_data = $5::jsonb, updated_at = NOW()
+       WHERE id = $6::uuid`,
       [
         newStatus,
         updateFields.cancellation_reason || null,
         updateFields.cancelled_by || null,
         updateFields.cancelled_at || null,
+        JSON.stringify(nextIntakeData),
         appointmentId,
       ],
     );

@@ -211,10 +211,10 @@ export function AdminHeader({ onOpenMenu }: { onOpenMenu: () => void }) {
                 }}
               >
                 <div style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>
-                  {proposalResponsesCount > 0 ? `${proposalResponsesCount} нови клиентски отговора` : 'Няма нови клиентски отговори'}
+                  {proposalResponsesCount > 0 ? `${proposalResponsesCount} нови клиентски действия` : 'Няма нови клиентски действия'}
                 </div>
                 <div style={{ marginTop: 4, fontSize: 12, color: '#6b7280' }}>
-                  Отваря секцията с отговори по предложения.
+                  Отваря секцията с клиентски отговори и отмени.
                 </div>
               </button>
             </div>

@@ -31,6 +31,7 @@ interface TenantWebhookRow {
   business_name: string;
   custom_domain?: string | null;
   telegram_chat_id?: string | null;
+  cancellation_hours?: number | null;
   address?: string | null;
   theme_config?: unknown;
 }
@@ -180,6 +181,36 @@ export class TelegramWebhookController {
     queryId: string,
   ) {
     const bookingUrl = tenant.custom_domain ? `https://${tenant.custom_domain}` : null;
+    const theme =
+      typeof tenant.theme_config === 'string'
+        ? JSON.parse(tenant.theme_config || '{}')
+        : (tenant.theme_config || {});
+    const allowClientCancellation = theme.allowClientCancellation ?? true;
+    const cancellationHours = Number(tenant.cancellation_hours ?? 0);
+    const details = await this.loadAppointmentDetailsForTelegram(tenant, appointmentId);
+
+    if (!allowClientCancellation || cancellationHours <= 0) {
+      await this.telegramService.answerCallbackQuery(
+        tenant.telegram_bot_token,
+        queryId,
+        '❌ Клиентската отмяна е изключена.',
+        true,
+      );
+      return;
+    }
+
+    if (details) {
+      const cutoffMs = cancellationHours * 60 * 60 * 1000;
+      if (details.startAt.getTime() - Date.now() < cutoffMs) {
+        await this.telegramService.answerCallbackQuery(
+          tenant.telegram_bot_token,
+          queryId,
+          `❌ Отмяната е позволена до ${cancellationHours} ч. предварително.`,
+          true,
+        );
+        return;
+      }
+    }
 
     await this.appointmentsService.updateStatus(
       this.toTenantContext(tenant) as Tenant,

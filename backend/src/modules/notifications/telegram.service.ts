@@ -262,6 +262,7 @@ export class TelegramService {
     const zonedStart = toZonedTime(appointment.startAt, TIMEZONE);
     const dateStr = format(zonedStart, "d.MM.yyyy", { locale: bg });
     const timeStr = format(zonedStart, 'HH:mm');
+    const isRequested = status === 'pending';
 
     const text = template
       ? renderNotificationTemplate(template, {
@@ -276,7 +277,7 @@ export class TelegramService {
           Адрес: appointment.address || '',
           Цена: appointment.price ? `${appointment.price} €` : '',
         })
-      : `🆕 *Нова резервация — ${businessName}*\n` +
+      : `🆕 *${isRequested ? 'Нова заявка' : 'Нова резервация'} — ${businessName}*\n` +
         `─────────────────\n\n` +
         `👤 *Клиент:* ${appointment.clientName}\n` +
         `📞 *Телефон:* ${appointment.clientPhone}\n` +
@@ -286,7 +287,7 @@ export class TelegramService {
         (appointment.price ? `💰 *Цена:* ${appointment.price} €\n` : '');
 
     const keyboard =
-      status === 'pending'
+      isRequested
         ? {
             inline_keyboard: [
               [
@@ -298,6 +299,29 @@ export class TelegramService {
         : undefined;
 
     return this.sendMessage(botToken, ownerChatId, text, keyboard, template ? undefined : 'Markdown');
+  }
+
+  async sendOwnerClientCancellation(
+    botToken: string,
+    ownerChatId: string,
+    appointment: AppointmentDetails,
+    businessName: string,
+    reason?: string,
+  ): Promise<SendMessageResult> {
+    const zonedStart = toZonedTime(appointment.startAt, TIMEZONE);
+    const dateStr = format(zonedStart, 'd.MM.yyyy', { locale: bg });
+    const timeStr = format(zonedStart, 'HH:mm');
+
+    const text =
+      `❌ *Клиентът отмени — ${businessName}*\n` +
+      `─────────────────\n\n` +
+      `👤 *Клиент:* ${appointment.clientName}\n` +
+      `📞 *Телефон:* ${appointment.clientPhone}\n` +
+      `🔧 *Услуга:* ${appointment.serviceName}\n` +
+      `📅 *Дата:* ${dateStr} в ${timeStr}\n` +
+      (reason ? `📝 *Причина:* ${reason}\n` : '');
+
+    return this.sendMessage(botToken, ownerChatId, text, undefined, 'Markdown');
   }
 
   async sendOwnerProposalResponse(

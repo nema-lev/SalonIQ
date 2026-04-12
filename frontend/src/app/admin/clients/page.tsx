@@ -26,6 +26,8 @@ interface Client {
   id: string;
   name: string;
   salutation: string;
+  name_source: 'owner' | 'client_submitted';
+  original_client_name: string;
   phone: string;
   email: string | null;
   no_show_count: number;
@@ -249,6 +251,9 @@ export default function AdminClientsPage() {
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-gray-900 text-sm truncate">{client.name}</p>
                     <p className="text-xs text-gray-500">{formatBulgarianPhoneForDisplay(client.phone)}</p>
+                    <p className="text-[11px] text-gray-400 mt-0.5">
+                      {client.name_source === 'client_submitted' ? 'Автоматично създаден контакт' : 'Ръчно име'}
+                    </p>
                   </div>
 
                   <div className="text-right flex-shrink-0">
@@ -400,6 +405,7 @@ function ClientDetail({
         ...client,
         name: name.trim(),
         salutation: salutation.trim(),
+        name_source: 'owner',
         email: email.trim() || null,
         is_blocked: isBlocked,
       };
@@ -442,6 +448,20 @@ function ClientDetail({
                     <Mail className="w-3.5 h-3.5" />
                     {client.email}
                   </a>
+                )}
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${
+                  client.name_source === 'client_submitted'
+                    ? 'bg-amber-50 text-amber-700'
+                    : 'bg-emerald-50 text-emerald-700'
+                }`}>
+                  {client.name_source === 'client_submitted' ? 'Автоматично име от резервация' : 'Ръчно зададено име'}
+                </span>
+                {client.name_source === 'client_submitted' && (
+                  <span className="text-xs text-gray-500">
+                    Първо въведено име: {client.original_client_name}
+                  </span>
                 )}
               </div>
               {client.is_blocked && (
@@ -495,6 +515,11 @@ function ClientDetail({
               <p className="mt-1 text-xs text-gray-500">
                 Обръщението се ползва в потвържденията и напомнянията вместо пълното име.
               </p>
+              {client.name_source === 'client_submitted' && (
+                <p className="mt-2 text-xs text-amber-700">
+                  Този контакт е създаден автоматично от резервация. След като смениш името, системата ще пази твоя вариант и няма да го подменя с това от формата.
+                </p>
+              )}
             </div>
             {client.is_blocked && (
               <span className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-600">

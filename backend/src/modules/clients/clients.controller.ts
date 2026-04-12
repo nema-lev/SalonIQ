@@ -96,10 +96,9 @@ export class ClientsController {
           SET name = $1,
               phone = $2,
               email = COALESCE($3, email),
-              profile_data = jsonb_set(
-                COALESCE(profile_data, '{}'::jsonb),
-                '{salutation}',
-                to_jsonb(COALESCE(NULLIF(profile_data->>'salutation', ''), $5::text))
+              profile_data = COALESCE(profile_data, '{}'::jsonb) || jsonb_build_object(
+                'salutation', COALESCE(NULLIF(profile_data->>'salutation', ''), $5::text),
+                'nameSource', 'owner'
               ),
               updated_at = NOW()
           WHERE id = $4::uuid
@@ -119,7 +118,7 @@ export class ClientsController {
         )
         VALUES ($1, $2, $3, true, false, NOW(), $4::jsonb)
         `,
-        [name, normalizedPhone, email, JSON.stringify({ salutation })],
+        [name, normalizedPhone, email, JSON.stringify({ salutation, nameSource: 'owner' })],
       );
       created += 1;
     }
@@ -146,7 +145,9 @@ export class ClientsController {
         tenant.schemaName,
         `SELECT id, name, phone, email, total_visits, total_spent,
                 no_show_count, is_blocked, last_visit_at, created_at,
-                COALESCE(NULLIF(profile_data->>'salutation', ''), split_part(name, ' ', 1)) as salutation
+                COALESCE(NULLIF(profile_data->>'salutation', ''), split_part(name, ' ', 1)) as salutation,
+                COALESCE(NULLIF(profile_data->>'nameSource', ''), 'owner') as name_source,
+                COALESCE(NULLIF(profile_data->>'originalClientName', ''), name) as original_client_name
          FROM clients
          WHERE name ILIKE $1 OR phone ILIKE ANY($2::text[])
          ORDER BY last_visit_at DESC NULLS LAST
@@ -158,7 +159,9 @@ export class ClientsController {
       tenant.schemaName,
       `SELECT id, name, phone, email, total_visits, total_spent,
               no_show_count, is_blocked, last_visit_at, created_at,
-              COALESCE(NULLIF(profile_data->>'salutation', ''), split_part(name, ' ', 1)) as salutation
+              COALESCE(NULLIF(profile_data->>'salutation', ''), split_part(name, ' ', 1)) as salutation,
+              COALESCE(NULLIF(profile_data->>'nameSource', ''), 'owner') as name_source,
+              COALESCE(NULLIF(profile_data->>'originalClientName', ''), name) as original_client_name
        FROM clients
        ORDER BY last_visit_at DESC NULLS LAST, created_at DESC
        LIMIT 100`,
@@ -181,10 +184,9 @@ export class ClientsController {
       SET name = $1,
           email = $2,
           is_blocked = COALESCE($3, is_blocked),
-          profile_data = jsonb_set(
-            COALESCE(profile_data, '{}'::jsonb),
-            '{salutation}',
-            to_jsonb($4::text)
+          profile_data = COALESCE(profile_data, '{}'::jsonb) || jsonb_build_object(
+            'salutation', $4::text,
+            'nameSource', 'owner'
           ),
           updated_at = NOW()
       WHERE id = $5::uuid

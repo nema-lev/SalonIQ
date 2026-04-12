@@ -39,6 +39,7 @@ export function StepConfirmation({ formData, onBack, onSuccess }: StepConfirmati
         clientEmail: tenant.collectClientEmail ? formData.clientEmail || undefined : undefined,
         notes: formData.notes || undefined,
         consentGiven: true,
+        publicBaseUrl: typeof window !== 'undefined' ? window.location.origin : undefined,
       }),
     onSuccess: (data) => {
       onSuccess(data);

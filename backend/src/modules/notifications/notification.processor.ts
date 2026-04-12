@@ -20,6 +20,7 @@ interface NotificationJobData {
   status?: string;
   reason?: string;
   newStatus?: string;
+  cancelledBy?: 'client' | 'owner';
 }
 
 interface TenantConfig {
@@ -30,6 +31,7 @@ interface TenantConfig {
   business_name: string;
   address: string;
   slug: string;
+  custom_domain?: string | null;
   reminder_hours: number[];
   theme_config: unknown;
 }
@@ -82,7 +84,7 @@ export class NotificationProcessor extends WorkerHost {
       `SELECT
         telegram_bot_token, telegram_chat_id,
         sms_api_key, sms_sender_id,
-        business_name, address, slug,
+        business_name, address, slug, custom_domain,
         reminder_hours, theme_config
        FROM tenants WHERE id = $1::uuid`,
       [tenantId],
@@ -149,7 +151,6 @@ export class NotificationProcessor extends WorkerHost {
       address: tenant.address,
     };
 
-    const bookingUrl = `https://${tenant.slug}.saloniq.bg`;
     let intakeData: Record<string, any> = {};
     if (typeof appt.intake_data === 'string') {
       try {
@@ -160,6 +161,10 @@ export class NotificationProcessor extends WorkerHost {
     } else if (appt.intake_data && typeof appt.intake_data === 'object') {
       intakeData = appt.intake_data as Record<string, any>;
     }
+    const bookingUrl: string | undefined =
+      (tenant.custom_domain ? `https://${tenant.custom_domain}` : null) ||
+      (typeof intakeData.publicBaseUrl === 'string' ? intakeData.publicBaseUrl.trim().replace(/\/$/, '') : null) ||
+      undefined;
     const proposal = intakeData?.proposal as
       | { publicBaseUrl?: string | null; acceptToken?: string; rejectToken?: string }
       | undefined;
@@ -184,6 +189,21 @@ export class NotificationProcessor extends WorkerHost {
         tenant.business_name,
         (job.data.status as 'confirmed' | 'pending') || 'confirmed',
         notificationTemplates.ownerNewBooking,
+      );
+    }
+
+    if (
+      hasTelegram &&
+      tenant.telegram_chat_id &&
+      job.data.newStatus === 'cancelled' &&
+      job.data.cancelledBy === 'client'
+    ) {
+      await this.telegramService.sendOwnerClientCancellation(
+        tenant.telegram_bot_token,
+        tenant.telegram_chat_id,
+        { ...appointmentDetails, clientName: appt.client_name },
+        tenant.business_name,
+        job.data.reason,
       );
     }
 

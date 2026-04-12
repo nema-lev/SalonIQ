@@ -453,6 +453,7 @@ export class AppointmentsService {
 
     const intakeData = {
       ...(dto.intakeData || {}),
+      ...(dto.publicBaseUrl ? { publicBaseUrl: dto.publicBaseUrl.trim().replace(/\/$/, '') } : {}),
       ...(options.askClient
         ? {
             proposal: this.buildProposalMetadata({
@@ -889,7 +890,11 @@ export class AppointmentsService {
 
     // Изпрати известие за промяната
     await this.processNotificationNow(
-      'status-changed',
+      newStatus === AppointmentStatus.CANCELLED
+        ? (cancelledBy === 'client'
+            ? NotificationJobType.BOOKING_CANCELLED_CLIENT
+            : NotificationJobType.BOOKING_CANCELLED_BUSINESS)
+        : 'status-changed',
       {
         tenantId: tenant.id,
         tenantSchemaName: tenant.schemaName,
@@ -897,6 +902,7 @@ export class AppointmentsService {
         clientId: appointment.client_id,
         newStatus,
         reason,
+        cancelledBy,
       },
       {
         tenantSlug: tenant.slug,
@@ -944,7 +950,11 @@ export class AppointmentsService {
         normalizedPhone,
         dto.clientEmail || null,
         true,
-        JSON.stringify({ salutation: this.getDefaultSalutation(dto.clientName) }),
+        JSON.stringify({
+          salutation: this.getDefaultSalutation(dto.clientName),
+          nameSource: 'client_submitted',
+          originalClientName: dto.clientName.trim(),
+        }),
       ],
     );
 

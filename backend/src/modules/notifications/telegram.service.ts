@@ -62,7 +62,7 @@ export class TelegramService {
     appointment: AppointmentDetails,
     businessName: string,
     status: 'confirmed' | 'pending',
-    allowClientCancellation = true,
+    cancellationHours = 0,
     template?: string,
   ): Promise<SendMessageResult> {
     const zonedStart = toZonedTime(appointment.startAt, TIMEZONE);
@@ -95,9 +95,14 @@ export class TelegramService {
         (appointment.address ? `📍 *Адрес:* ${appointment.address}\n` : '') +
         `\n${isPending ? 'Заявката е получена и очаква потвърждение.' : 'Часът е потвърден. Очакваме Ви!'}`;
 
+    const canCancel =
+      !isPending &&
+      cancellationHours > 0 &&
+      appointment.startAt.getTime() - Date.now() > cancellationHours * 60 * 60 * 1000;
+
     const keyboard = isPending
       ? undefined
-      : allowClientCancellation
+      : canCancel
         ? {
             inline_keyboard: [
               [{ text: '❌ Отменям', callback_data: `cancel_client_${appointment.id}` }],
@@ -117,7 +122,7 @@ export class TelegramService {
     appointment: AppointmentDetails,
     businessName: string,
     hoursUntil: 24 | 2,
-    allowClientCancellation = true,
+    cancellationHours = 0,
     template?: string,
   ): Promise<SendMessageResult> {
     const zonedStart = toZonedTime(appointment.startAt, TIMEZONE);
@@ -143,17 +148,16 @@ export class TelegramService {
         `👤 ${appointment.staffName}\n` +
         `🕐 ${dateStr} в ${timeStr}\n` +
         (appointment.address ? `📍 ${appointment.address}\n` : '') +
-        `\nМоля потвърдете присъствието си:`;
+        (cancellationHours > 0 && hoursUntil > cancellationHours
+          ? `\nАко се наложи, можете да отмените часа от бутона по-долу.`
+          : '');
 
     const keyboard =
-      hoursUntil === 24
+      cancellationHours > 0 && hoursUntil > cancellationHours
         ? {
             inline_keyboard: [
               [
-                { text: '✅ Потвърждавам', callback_data: `confirm_${appointment.id}` },
-                ...(allowClientCancellation
-                  ? [{ text: '❌ Отменям', callback_data: `cancel_client_${appointment.id}` }]
-                  : []),
+                { text: '❌ Отменям', callback_data: `cancel_client_${appointment.id}` },
               ],
             ],
           }

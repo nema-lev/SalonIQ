@@ -32,6 +32,7 @@ interface TenantConfig {
   address: string;
   slug: string;
   custom_domain?: string | null;
+  cancellation_hours?: number | null;
   reminder_hours: number[];
   theme_config: unknown;
 }
@@ -84,7 +85,7 @@ export class NotificationProcessor extends WorkerHost {
       `SELECT
         telegram_bot_token, telegram_chat_id,
         sms_api_key, sms_sender_id,
-        business_name, address, slug, custom_domain,
+        business_name, address, slug, custom_domain, cancellation_hours,
         reminder_hours, theme_config
        FROM tenants WHERE id = $1::uuid`,
       [tenantId],
@@ -100,6 +101,8 @@ export class NotificationProcessor extends WorkerHost {
         ? JSON.parse(tenant.theme_config || '{}')
         : (tenant.theme_config || {});
     const allowClientCancellation = themeConfig.allowClientCancellation ?? true;
+    const cancellationHours = Number(tenant.cancellation_hours ?? 0);
+    const canClientCancel = allowClientCancellation && cancellationHours > 0;
     const notificationTemplates = getNotificationTemplates(themeConfig);
     const telegramChannelEnabled = themeConfig.enableTelegramNotifications ?? true;
     const smsChannelEnabled = themeConfig.enableSmsNotifications ?? Boolean(tenant.sms_api_key && tenant.sms_sender_id);
@@ -260,7 +263,7 @@ export class NotificationProcessor extends WorkerHost {
             appointmentDetails,
             tenant.business_name,
             (job.data.status as 'confirmed' | 'pending') || 'confirmed',
-            allowClientCancellation,
+            cancellationHours,
             (job.data.status as 'confirmed' | 'pending') === 'pending'
               ? notificationTemplates.bookingPending
               : notificationTemplates.bookingConfirmed,
@@ -295,7 +298,7 @@ export class NotificationProcessor extends WorkerHost {
             appointmentDetails,
             tenant.business_name,
             24,
-            allowClientCancellation,
+            cancellationHours,
             notificationTemplates.reminder24h,
           );
         } else if (canNotifyClient && hasSms) {
@@ -333,7 +336,7 @@ export class NotificationProcessor extends WorkerHost {
             appointmentDetails,
             tenant.business_name,
             2,
-            allowClientCancellation,
+            cancellationHours,
             notificationTemplates.reminder2h,
           );
         } else if (canNotifyClient && hasSms) {
@@ -373,7 +376,7 @@ export class NotificationProcessor extends WorkerHost {
               appointmentDetails,
               tenant.business_name,
               'confirmed',
-              allowClientCancellation,
+              cancellationHours,
               notificationTemplates.bookingConfirmed,
             );
           } else if (canNotifyClient && hasSms) {

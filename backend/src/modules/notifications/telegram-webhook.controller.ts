@@ -35,6 +35,12 @@ interface TenantWebhookRow {
   theme_config?: unknown;
 }
 
+interface TenantContextLike {
+  id: string;
+  slug: string;
+  schemaName: string;
+}
+
 /**
  * TelegramWebhookController — приема webhook updates от Telegram.
  *
@@ -150,7 +156,7 @@ export class TelegramWebhookController {
       tenant.schema_name,
       `UPDATE appointments
        SET client_confirmed = true, client_confirmed_at = NOW()
-       WHERE id = $1 AND status = 'confirmed'`,
+       WHERE id = $1::uuid AND status = 'confirmed'`,
       [appointmentId],
     );
 
@@ -173,10 +179,10 @@ export class TelegramWebhookController {
     chatId: string,
     queryId: string,
   ) {
-    const bookingUrl = `https://${tenant.slug}.saloniq.bg`;
+    const bookingUrl = tenant.custom_domain ? `https://${tenant.custom_domain}` : null;
 
     await this.appointmentsService.updateStatus(
-      tenant,
+      this.toTenantContext(tenant) as Tenant,
       appointmentId,
       AppointmentStatus.CANCELLED,
       'Отменен от клиента чрез Telegram',
@@ -192,7 +198,9 @@ export class TelegramWebhookController {
     await this.telegramService.sendMessage(
       tenant.telegram_bot_token,
       chatId,
-      `❌ *Часът е отменен.*\n\nАко желаете да запишете нов час:\n${bookingUrl}`,
+      bookingUrl
+        ? `❌ *Часът е отменен.*\n\nАко желаете да запишете нов час:\n${bookingUrl}`
+        : `❌ *Часът е отменен.*\n\nАко желаете, можете да запишете нов час от клиентския портал.`,
     );
   }
 
@@ -203,7 +211,7 @@ export class TelegramWebhookController {
     queryId: string,
   ) {
     await this.appointmentsService.updateStatus(
-      tenant,
+      this.toTenantContext(tenant) as Tenant,
       appointmentId,
       AppointmentStatus.CONFIRMED,
     );
@@ -228,7 +236,7 @@ export class TelegramWebhookController {
     queryId: string,
   ) {
     await this.appointmentsService.updateStatus(
-      tenant,
+      this.toTenantContext(tenant) as Tenant,
       appointmentId,
       AppointmentStatus.CANCELLED,
       'Отменен от бизнеса',
@@ -255,7 +263,7 @@ export class TelegramWebhookController {
     queryId: string,
   ) {
     const details = await this.loadAppointmentDetailsForTelegram(tenant, appointmentId);
-    await this.appointmentsService.respondToProposal(tenant as unknown as Tenant, appointmentId, 'accept');
+    await this.appointmentsService.respondToProposal(this.toTenantContext(tenant) as Tenant, appointmentId, 'accept');
 
     await this.telegramService.answerCallbackQuery(
       tenant.telegram_bot_token,
@@ -287,7 +295,7 @@ export class TelegramWebhookController {
     queryId: string,
   ) {
     const details = await this.loadAppointmentDetailsForTelegram(tenant, appointmentId);
-    await this.appointmentsService.respondToProposal(tenant as unknown as Tenant, appointmentId, 'reject');
+    await this.appointmentsService.respondToProposal(this.toTenantContext(tenant) as Tenant, appointmentId, 'reject');
 
     await this.telegramService.answerCallbackQuery(
       tenant.telegram_bot_token,
@@ -474,6 +482,14 @@ export class TelegramWebhookController {
       endAt: new Date(row.end_at),
       price: row.price,
       address: tenant.address || undefined,
+    };
+  }
+
+  private toTenantContext(tenant: TenantWebhookRow): TenantContextLike {
+    return {
+      id: tenant.id,
+      slug: tenant.slug,
+      schemaName: tenant.schema_name,
     };
   }
 }

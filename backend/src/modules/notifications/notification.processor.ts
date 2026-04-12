@@ -344,35 +344,71 @@ export class NotificationProcessor extends WorkerHost {
       case NotificationJobType.STATUS_CHANGED:
       case NotificationJobType.BOOKING_CANCELLED_CLIENT:
       case NotificationJobType.BOOKING_CANCELLED_BUSINESS: {
-        const cancelledBy = job.data.newStatus === 'cancelled' ? 'owner' : 'client';
-        if (canNotifyClient && hasTelegram && appt.telegram_chat_id) {
-          resultChannel = NotificationChannel.TELEGRAM;
-          result = await this.telegramService.sendCancellation(
-            tenant.telegram_bot_token,
-            appt.telegram_chat_id,
-            appointmentDetails,
-            tenant.business_name,
-            cancelledBy as 'client' | 'owner',
-            job.data.reason,
-            bookingUrl,
-            notificationTemplates.cancellation,
-          );
-        } else if (canNotifyClient && hasSms) {
-          const zonedStart = toZonedTime(appointmentDetails.startAt, TIMEZONE);
-          const dateStr = format(zonedStart, "d MMMM yyyy 'г.'", { locale: bg });
-          const timeStr = format(zonedStart, 'HH:mm');
-          const smsResult = await this.smsService.sendCancellationSms({
-            phone: appointmentDetails.clientPhone,
-            clientName: appointmentDetails.clientName,
-            businessName: tenant.business_name,
-            dateStr,
-            timeStr,
-            reason: job.data.reason,
-            apiToken: tenant.sms_api_key!,
-            senderId: tenant.sms_sender_id!,
-          });
-          resultChannel = NotificationChannel.SMS;
-          result = { success: smsResult.success, error: smsResult.error };
+        if (job.data.newStatus === 'confirmed') {
+          if (canNotifyClient && hasTelegram && appt.telegram_chat_id) {
+            resultChannel = NotificationChannel.TELEGRAM;
+            result = await this.telegramService.sendBookingConfirmation(
+              tenant.telegram_bot_token,
+              appt.telegram_chat_id,
+              appointmentDetails,
+              tenant.business_name,
+              'confirmed',
+              allowClientCancellation,
+              notificationTemplates.bookingConfirmed,
+            );
+          } else if (canNotifyClient && hasSms) {
+            const zonedStart = toZonedTime(appointmentDetails.startAt, TIMEZONE);
+            const dateStr = format(zonedStart, "d MMMM yyyy 'г.'", { locale: bg });
+            const timeStr = format(zonedStart, 'HH:mm');
+            const smsResult = await this.smsService.sendBookingConfirmationSms({
+              phone: appointmentDetails.clientPhone,
+              clientName: appointmentDetails.clientName,
+              businessName: tenant.business_name,
+              serviceName: appointmentDetails.serviceName,
+              staffName: appointmentDetails.staffName,
+              dateStr,
+              timeStr,
+              address: appointmentDetails.address,
+              apiToken: tenant.sms_api_key!,
+              senderId: tenant.sms_sender_id!,
+            });
+            resultChannel = NotificationChannel.SMS;
+            result = { success: smsResult.success, error: smsResult.error };
+          }
+          break;
+        }
+
+        if (job.data.newStatus === 'cancelled') {
+          const cancelledBy = job.name === NotificationJobType.BOOKING_CANCELLED_CLIENT ? 'client' : 'owner';
+          if (canNotifyClient && hasTelegram && appt.telegram_chat_id) {
+            resultChannel = NotificationChannel.TELEGRAM;
+            result = await this.telegramService.sendCancellation(
+              tenant.telegram_bot_token,
+              appt.telegram_chat_id,
+              appointmentDetails,
+              tenant.business_name,
+              cancelledBy,
+              job.data.reason,
+              bookingUrl,
+              notificationTemplates.cancellation,
+            );
+          } else if (canNotifyClient && hasSms) {
+            const zonedStart = toZonedTime(appointmentDetails.startAt, TIMEZONE);
+            const dateStr = format(zonedStart, "d MMMM yyyy 'г.'", { locale: bg });
+            const timeStr = format(zonedStart, 'HH:mm');
+            const smsResult = await this.smsService.sendCancellationSms({
+              phone: appointmentDetails.clientPhone,
+              clientName: appointmentDetails.clientName,
+              businessName: tenant.business_name,
+              dateStr,
+              timeStr,
+              reason: job.data.reason,
+              apiToken: tenant.sms_api_key!,
+              senderId: tenant.sms_sender_id!,
+            });
+            resultChannel = NotificationChannel.SMS;
+            result = { success: smsResult.success, error: smsResult.error };
+          }
         }
         break;
       }

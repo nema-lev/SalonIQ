@@ -215,6 +215,38 @@ export class AppointmentsController {
     );
   }
 
+  @Patch(':id/visit-progress')
+  @UseGuards(JwtAuthGuard, TenantGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Обнови progress-а на посещението за потвърден час' })
+  async updateVisitProgress(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: { progress?: 'scheduled' | 'checked_in' | 'in_service' },
+    @CurrentTenant() tenant: Tenant,
+  ) {
+    if (!dto?.progress) {
+      throw new BadRequestException('Липсва progress стойност.');
+    }
+
+    return this.appointmentsService.updateVisitProgress(tenant, id, dto.progress);
+  }
+
+  @Post(':id/notifications/retry')
+  @UseGuards(JwtAuthGuard, TenantGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Retry на неуспешно известие от detail панела' })
+  async retryNotification(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: { type?: string },
+    @CurrentTenant() tenant: Tenant,
+  ) {
+    if (!dto?.type) {
+      throw new BadRequestException('Липсва notification type.');
+    }
+
+    return this.appointmentsService.retryNotification(tenant, id, dto.type);
+  }
+
   @Patch(':id/reschedule')
   @UseGuards(JwtAuthGuard, TenantGuard)
   @ApiBearerAuth()

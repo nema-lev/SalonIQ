@@ -40,9 +40,12 @@ interface Appointment {
   start_at: string;
   end_at: string;
   status: string;
+  intake_data?: unknown;
   cancelled_by?: 'client' | 'owner' | null;
   owner_view_state?: string;
   owner_view_label?: string;
+  visit_progress?: 'scheduled' | 'checked_in' | 'in_service' | 'completed' | 'no_show';
+  visit_progress_label?: string;
   service_id: string;
   staff_id: string;
   client_name: string;
@@ -58,6 +61,7 @@ interface Appointment {
 interface UpcomingAppointment {
   id: string;
   start_at: string;
+  intake_data?: unknown;
   client_name: string;
   client_phone: string;
   service_name: string;
@@ -68,6 +72,8 @@ interface UpcomingAppointment {
   owner_view_label?: string;
   owner_alert_state?: string;
   proposal_decision?: string;
+  visit_progress?: 'scheduled' | 'checked_in' | 'in_service' | 'completed' | 'no_show';
+  visit_progress_label?: string;
 }
 
 interface Service {
@@ -255,13 +261,23 @@ function sortByStartAt<T extends { start_at: string }>(items: T[] | undefined) {
 function getNotificationTypeLabel(type: string) {
   const labels: Record<string, string> = {
     booking_pending: 'Нова заявка',
+    'booking-pending': 'Нова заявка',
     booking_confirmed: 'Потвърден час',
+    'booking-confirmed': 'Потвърден час',
+    booking_approved: 'Потвърден час',
+    'booking-approved': 'Потвърден час',
     booking_cancelled_client: 'Клиентска отмяна',
+    'booking-cancelled-client': 'Клиентска отмяна',
     booking_cancelled_business: 'Отказ от салона',
+    'booking-cancelled-business': 'Отказ от салона',
     booking_proposal: 'Предложен нов час',
+    'booking-proposal': 'Предложен нов час',
     reminder_24h: 'Напомняне 24 ч.',
+    'reminder-24h': 'Напомняне 24 ч.',
     reminder_2h: 'Напомняне 2 ч.',
+    'reminder-2h': 'Напомняне 2 ч.',
     status_changed: 'Промяна на статус',
+    'status-changed': 'Промяна на статус',
   };
 
   return labels[type] || type;
@@ -310,6 +326,18 @@ function getOwnerStatusPresentation(item: { status?: string; owner_view_state?: 
     label: item.owner_view_label || config.label,
     cls: config.cls,
   };
+}
+
+function getVisitProgressClass(progress?: string) {
+  const styles: Record<string, string> = {
+    scheduled: 'border-slate-200 bg-slate-100 text-slate-700',
+    checked_in: 'border-sky-200 bg-sky-100 text-sky-700',
+    in_service: 'border-violet-200 bg-violet-100 text-violet-700',
+    completed: 'border-emerald-200 bg-emerald-100 text-emerald-700',
+    no_show: 'border-rose-200 bg-rose-100 text-rose-700',
+  };
+
+  return styles[progress || 'scheduled'] || styles.scheduled;
 }
 
 function getInitials(name: string) {
@@ -518,6 +546,32 @@ export default function AdminCalendarPage() {
     },
     onError: (error: any) => {
       toast.error(error?.message || 'Неуспешно изтриване на блока.');
+    },
+  });
+
+  const visitProgressMutation = useMutation({
+    mutationFn: ({ id, progress }: { id: string; progress: 'scheduled' | 'checked_in' | 'in_service' }) =>
+      apiClient.patch(`/appointments/${id}/visit-progress`, { progress }),
+    onSuccess: () => {
+      refetch();
+      qc.invalidateQueries({ queryKey: ['appointment-context'] });
+      qc.invalidateQueries({ queryKey: ['appointments-upcoming'] });
+      toast.success('Прогресът на посещението е обновен.');
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Неуспешно обновяване на прогреса.');
+    },
+  });
+
+  const retryNotificationMutation = useMutation({
+    mutationFn: ({ appointmentId, type }: { appointmentId: string; type: string }) =>
+      apiClient.post(`/appointments/${appointmentId}/notifications/retry`, { type }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['appointment-context'] });
+      toast.success('Известието е пуснато отново.');
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Retry на известието не мина.');
     },
   });
 
@@ -831,6 +885,41 @@ export default function AdminCalendarPage() {
     }
 
     return null;
+  };
+
+  const renderVisitProgressControls = (appointment: Appointment) => {
+    if (appointment.status !== 'confirmed') return null;
+
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Посещение</p>
+          <span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${getVisitProgressClass(appointment.visit_progress)}`}>
+            {appointment.visit_progress_label || 'Очаква се'}
+          </span>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          {[
+            { key: 'scheduled', label: 'Очаква се' },
+            { key: 'checked_in', label: 'Пристигнал' },
+            { key: 'in_service', label: 'В процес' },
+          ].map((option) => (
+            <button
+              key={option.key}
+              type="button"
+              onClick={() => visitProgressMutation.mutate({ id: appointment.id, progress: option.key as 'scheduled' | 'checked_in' | 'in_service' })}
+              className={`rounded-2xl px-3 py-2 text-xs font-semibold transition-colors ${
+                appointment.visit_progress === option.key
+                  ? 'bg-gray-900 text-white'
+                  : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -1493,14 +1582,19 @@ export default function AdminCalendarPage() {
                                                     {statusCfg.label}
                                                   </span>
                                                 </div>
-                                                <p className="mt-2 line-clamp-2 text-sm font-black text-gray-900">{appointment.client_name}</p>
-                                                <p className="mt-1 line-clamp-2 text-xs font-semibold text-gray-700">{appointment.service_name}</p>
-                                                <p className="mt-2 text-[11px] text-gray-500">
-                                                  {formatBulgarianPhoneForDisplay(appointment.client_phone)}
-                                                </p>
-                                              </button>
-                                            );
-                                          })
+	                                                <p className="mt-2 line-clamp-2 text-sm font-black text-gray-900">{appointment.client_name}</p>
+	                                                <p className="mt-1 line-clamp-2 text-xs font-semibold text-gray-700">{appointment.service_name}</p>
+	                                                <p className="mt-2 text-[11px] text-gray-500">
+	                                                  {formatBulgarianPhoneForDisplay(appointment.client_phone)}
+	                                                </p>
+                                                  {appointment.status === 'confirmed' && (
+                                                    <span className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${getVisitProgressClass(appointment.visit_progress)}`}>
+                                                      {appointment.visit_progress_label}
+                                                    </span>
+                                                  )}
+	                                              </button>
+	                                            );
+	                                          })
                                         )}
                                       </div>
                                     </div>
@@ -1730,10 +1824,15 @@ export default function AdminCalendarPage() {
 	                                    </div>
 	                                    <p className="mt-2 line-clamp-2 text-sm font-black text-gray-900">{appointment.client_name}</p>
 	                                    <p className="mt-1 line-clamp-2 text-xs font-semibold text-gray-700">{appointment.service_name}</p>
-	                                    <p className="mt-2 text-[11px] text-gray-500">{formatBulgarianPhoneForDisplay(appointment.client_phone)}</p>
-	                                  </button>
-	                                );
-	                              })}
+		                                    <p className="mt-2 text-[11px] text-gray-500">{formatBulgarianPhoneForDisplay(appointment.client_phone)}</p>
+                                      {appointment.status === 'confirmed' && (
+                                        <span className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${getVisitProgressClass(appointment.visit_progress)}`}>
+                                          {appointment.visit_progress_label}
+                                        </span>
+                                      )}
+		                                  </button>
+		                                );
+		                              })}
 	                            </div>
 	                          ))}
 	                        </div>
@@ -1781,7 +1880,7 @@ export default function AdminCalendarPage() {
 	                                    </span>
 	                                  </div>
 	                                  <p className="mt-1 text-sm font-semibold text-gray-700">{appointment.service_name}</p>
-	                                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-xs text-gray-500">
+		                                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-xs text-gray-500">
 	                                    <span className="flex items-center gap-1">
 	                                      <User className="w-3.5 h-3.5" />
 	                                      {appointment.staff_name}
@@ -1794,10 +1893,15 @@ export default function AdminCalendarPage() {
 	                                      <Clock className="w-3.5 h-3.5" />
 	                                      {startTime} – {endTime}
 	                                    </span>
-	                                    {appointment.price != null && (
-	                                      <span className="font-semibold text-gray-700">{appointment.price} €</span>
-	                                    )}
-	                                  </div>
+		                                    {appointment.price != null && (
+		                                      <span className="font-semibold text-gray-700">{appointment.price} €</span>
+		                                    )}
+                                        {appointment.status === 'confirmed' && (
+                                          <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${getVisitProgressClass(appointment.visit_progress)}`}>
+                                            {appointment.visit_progress_label}
+                                          </span>
+                                        )}
+		                                  </div>
 	                                </div>
 
 	                                <div className="max-w-sm text-xs text-gray-500 lg:text-right">
@@ -1928,17 +2032,18 @@ export default function AdminCalendarPage() {
 	                      </p>
 	                    </div>
 	                  </div>
-	                  {detailedAppointment && (
-	                    <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-	                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Резюме</p>
-	                      <div className="mt-2 space-y-2 text-sm text-gray-700">
-	                        <p><span className="font-semibold text-gray-900">Услуга:</span> {detailedAppointment.service_name}</p>
-	                        <p><span className="font-semibold text-gray-900">Специалист:</span> {detailedAppointment.staff_name}</p>
-	                        <p><span className="font-semibold text-gray-900">Статус:</span> {getOwnerStatusPresentation(detailedAppointment).label}</p>
-	                      </div>
-	                    </div>
-	                  )}
-	                  {selectedContext?.appointment && (
+		                  {detailedAppointment && (
+		                    <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
+		                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Резюме</p>
+		                      <div className="mt-2 space-y-2 text-sm text-gray-700">
+		                        <p><span className="font-semibold text-gray-900">Услуга:</span> {detailedAppointment.service_name}</p>
+		                        <p><span className="font-semibold text-gray-900">Специалист:</span> {detailedAppointment.staff_name}</p>
+		                        <p><span className="font-semibold text-gray-900">Статус:</span> {getOwnerStatusPresentation(detailedAppointment).label}</p>
+		                      </div>
+		                    </div>
+		                  )}
+                      {detailedAppointment && renderVisitProgressControls(detailedAppointment)}
+		                  {selectedContext?.appointment && (
 	                    <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
 	                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Име в клиентската база</p>
                       <p className="mt-2 text-sm font-semibold text-gray-900">
@@ -1991,8 +2096,8 @@ export default function AdminCalendarPage() {
 
                   <div className="mt-4 space-y-3">
                     {selectedContext?.notifications?.length ? (
-                      selectedContext.notifications.map((entry) => (
-                        <div key={entry.id} className="rounded-2xl border border-gray-100 bg-gray-50/80 px-3 py-3">
+	                      selectedContext.notifications.map((entry) => (
+	                        <div key={entry.id} className="rounded-2xl border border-gray-100 bg-gray-50/80 px-3 py-3">
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
                               <p className="text-sm font-semibold text-gray-900">
@@ -2006,11 +2111,25 @@ export default function AdminCalendarPage() {
                               {getNotificationStatusLabel(entry.status)}
                             </span>
                           </div>
-                          {entry.error_message && (
-                            <p className="mt-2 text-xs text-rose-600">{entry.error_message}</p>
-                          )}
-                        </div>
-                      ))
+	                          {entry.error_message && (
+	                            <p className="mt-2 text-xs text-rose-600">{entry.error_message}</p>
+	                          )}
+                            {entry.status === 'failed' && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  retryNotificationMutation.mutate({
+                                    appointmentId: detailedAppointment!.id,
+                                    type: entry.type,
+                                  })
+                                }
+                                className="mt-3 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100"
+                              >
+                                Retry
+                              </button>
+                            )}
+	                        </div>
+	                      ))
                     ) : (
                       <p className="text-sm text-gray-400">За този запис още няма лог на известия.</p>
                     )}
@@ -2115,7 +2234,8 @@ export default function AdminCalendarPage() {
                 </div>
               )}
 
-              {detailedAppointment && <div>{renderPrimaryActions(detailedAppointment)}</div>}
+	              {detailedAppointment && <div>{renderPrimaryActions(detailedAppointment)}</div>}
+                {detailedAppointment && renderVisitProgressControls(detailedAppointment)}
 
               {selectedInboxItem?.bucket === 'updates' && (
                 <button
@@ -2131,8 +2251,8 @@ export default function AdminCalendarPage() {
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Известия</p>
                 <div className="mt-3 space-y-2">
                   {selectedContext?.notifications?.length ? (
-                    selectedContext.notifications.slice(0, 6).map((entry) => (
-                      <div key={entry.id} className="rounded-2xl border border-white bg-white px-3 py-3">
+	                    selectedContext.notifications.slice(0, 6).map((entry) => (
+	                      <div key={entry.id} className="rounded-2xl border border-white bg-white px-3 py-3">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <p className="text-sm font-semibold text-gray-900">{getNotificationTypeLabel(entry.type)}</p>
@@ -2140,12 +2260,29 @@ export default function AdminCalendarPage() {
                               {getChannelLabel(entry.channel)} · {entry.sent_at ? formatAppointmentDay(entry.sent_at) : formatAppointmentDay(entry.created_at)}
                             </p>
                           </div>
-                          <span className={`rounded-full border px-2 py-1 text-[10px] font-bold ${getNotificationStatusClass(entry.status)}`}>
-                            {getNotificationStatusLabel(entry.status)}
-                          </span>
-                        </div>
-                      </div>
-                    ))
+	                          <span className={`rounded-full border px-2 py-1 text-[10px] font-bold ${getNotificationStatusClass(entry.status)}`}>
+	                            {getNotificationStatusLabel(entry.status)}
+	                          </span>
+	                        </div>
+                          {entry.error_message && (
+                            <p className="mt-2 text-xs text-rose-600">{entry.error_message}</p>
+                          )}
+                          {entry.status === 'failed' && detailedAppointment && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                retryNotificationMutation.mutate({
+                                  appointmentId: detailedAppointment.id,
+                                  type: entry.type,
+                                })
+                              }
+                              className="mt-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100"
+                            >
+                              Retry
+                            </button>
+                          )}
+	                      </div>
+	                    ))
                   ) : (
                     <p className="text-sm text-gray-400">Няма лог за известия към този запис.</p>
                   )}

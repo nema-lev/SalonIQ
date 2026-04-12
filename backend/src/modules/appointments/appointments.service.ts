@@ -25,6 +25,7 @@ type ProposalKind = 'admin_inquiry' | 'counter_offer';
 type ProposalDecision = 'accept' | 'reject';
 type UpcomingMode = 'all' | 'attention' | 'pending';
 type SlotResult = { start: string; end: string; remainingSpots?: number; capacity?: number };
+type VisitProgress = 'scheduled' | 'checked_in' | 'in_service' | 'completed' | 'no_show';
 
 interface ProposalMetadata {
   kind: ProposalKind;
@@ -43,6 +44,7 @@ interface IntakeDataWithProposal {
   proposal?: ProposalMetadata;
   ownerActionAlert?: '' | 'client_cancelled';
   stateMeta?: OwnerStateMeta;
+  visitProgress?: 'scheduled' | 'checked_in' | 'in_service';
   [key: string]: unknown;
 }
 
@@ -99,7 +101,7 @@ export class AppointmentsService {
     const dayStart = fromZonedTime(startOfDay(zonedDate), TIMEZONE);
     const dayEnd = fromZonedTime(endOfDay(zonedDate), TIMEZONE);
 
-    const rows = await this.prisma.queryInSchema(
+    const rows = await this.prisma.queryInSchema<any[]>(
       tenant.schemaName,
       `
       SELECT
@@ -119,7 +121,7 @@ export class AppointmentsService {
       staffId ? [dayStart, dayEnd, staffId] : [dayStart, dayEnd],
     );
 
-    return rows;
+    return rows.map((row: any) => this.decorateAppointmentPresentation(row));
   }
 
   async getCalendarBoard(tenant: Tenant, from: Date, to: Date, staffId?: string) {
@@ -191,7 +193,7 @@ export class AppointmentsService {
 
     return {
       staff: staffRows,
-      appointments,
+      appointments: appointments.map((row) => this.decorateAppointmentPresentation(row)),
       exceptions,
     };
   }
@@ -268,7 +270,7 @@ export class AppointmentsService {
           : `a.start_at >= NOW()
         AND a.status NOT IN ('cancelled', 'completed', 'no_show')`;
 
-    return this.prisma.queryInSchema(
+    const rows = await this.prisma.queryInSchema<any[]>(
       tenant.schemaName,
       `
       SELECT
@@ -277,6 +279,7 @@ export class AppointmentsService {
         a.end_at,
         a.status,
         a.price,
+        a.intake_data,
         a.cancelled_by,
         COALESCE(NULLIF(a.intake_data->>'ownerActionAlert', ''), NULLIF(a.intake_data->'proposal'->>'ownerAlertState', ''), '') as owner_alert_state,
         COALESCE(a.intake_data->'proposal'->>'lastDecision', '') as proposal_decision,
@@ -308,6 +311,8 @@ export class AppointmentsService {
       `,
       [limit],
     );
+
+    return rows.map((row: any) => this.decorateAppointmentPresentation(row));
   }
 
   async getAppointmentContext(tenant: Tenant, appointmentId: string) {
@@ -324,6 +329,7 @@ export class AppointmentsService {
         a.cancellation_reason,
         a.cancelled_by,
         a.created_at,
+        a.intake_data,
         COALESCE(NULLIF(a.intake_data->'stateMeta'->>'transitionKind', ''), a.status) as owner_view_state,
         CASE
           WHEN a.status = 'pending' THEN 'Заявка'
@@ -384,7 +390,7 @@ export class AppointmentsService {
     );
 
     return {
-      appointment,
+      appointment: this.decorateAppointmentPresentation(appointment),
       notifications,
     };
   }
@@ -1207,6 +1213,119 @@ export class AppointmentsService {
     return { id: appointmentId, status: newStatus };
   }
 
+  async updateVisitProgress(
+    tenant: Tenant,
+    appointmentId: string,
+    progress: 'scheduled' | 'checked_in' | 'in_service',
+  ) {
+    const [appointment] = await this.prisma.queryInSchema<{ id: string; status: string; intake_data: unknown }[]>(
+      tenant.schemaName,
+      `SELECT id, status, intake_data FROM appointments WHERE id = $1::uuid LIMIT 1`,
+      [appointmentId],
+    );
+
+    if (!appointment) {
+      throw new NotFoundException('Резервацията не е намерена.');
+    }
+
+    if (appointment.status !== AppointmentStatus.CONFIRMED) {
+      throw new BadRequestException('Visit progress може да се обновява само за потвърден час.');
+    }
+
+    const intakeData = this.parseIntakeData(appointment.intake_data);
+    await this.prisma.queryInSchema(
+      tenant.schemaName,
+      `
+      UPDATE appointments
+      SET intake_data = $1::jsonb,
+          updated_at = NOW()
+      WHERE id = $2::uuid
+      `,
+      [
+        JSON.stringify({
+          ...intakeData,
+          visitProgress: progress,
+        }),
+        appointmentId,
+      ],
+    );
+
+    return {
+      id: appointmentId,
+      progress,
+      label: this.getVisitProgressLabel(progress),
+    };
+  }
+
+  async retryNotification(tenant: Tenant, appointmentId: string, type: string) {
+    const [appointment] = await this.prisma.queryInSchema<{ id: string; client_id: string; status: string; cancelled_by: 'client' | 'owner' | null }[]>(
+      tenant.schemaName,
+      `SELECT id, client_id, status, cancelled_by FROM appointments WHERE id = $1::uuid LIMIT 1`,
+      [appointmentId],
+    );
+
+    if (!appointment) {
+      throw new NotFoundException('Резервацията не е намерена.');
+    }
+
+    const normalizedType = String(type || '').trim();
+    const retryKind = this.resolveRetryJobType(normalizedType);
+    if (!retryKind) {
+      throw new BadRequestException('Този тип известие не поддържа retry.');
+    }
+
+    const baseData = {
+      tenantId: tenant.id,
+      tenantSchemaName: tenant.schemaName,
+      appointmentId,
+      clientId: appointment.client_id,
+    };
+
+    let payload: Record<string, unknown> = { ...baseData };
+
+    if (retryKind === NotificationJobType.BOOKING_CONFIRMED) {
+      payload = {
+        ...baseData,
+        status: appointment.status === AppointmentStatus.PENDING ? 'pending' : 'confirmed',
+      };
+    } else if (retryKind === NotificationJobType.STATUS_CHANGED) {
+      payload = {
+        ...baseData,
+        newStatus: appointment.status,
+        cancelledBy: appointment.cancelled_by || undefined,
+      };
+    } else if (
+      retryKind === NotificationJobType.BOOKING_CANCELLED_CLIENT ||
+      retryKind === NotificationJobType.BOOKING_CANCELLED_BUSINESS
+    ) {
+      payload = {
+        ...baseData,
+        newStatus: AppointmentStatus.CANCELLED,
+        cancelledBy:
+          retryKind === NotificationJobType.BOOKING_CANCELLED_CLIENT ? 'client' : 'owner',
+      };
+    }
+
+    const retryOk = await this.processNotificationNow(
+      retryKind,
+      payload,
+      {
+        tenantSlug: tenant.slug,
+        appointmentId,
+        context: `retry-${normalizedType}`,
+      },
+    );
+
+    if (!retryOk) {
+      throw new ConflictException('Известието не можа да се изпрати отново.');
+    }
+
+    return {
+      id: appointmentId,
+      retriedType: retryKind,
+    };
+  }
+
   async rescheduleAppointment(
     tenant: Tenant,
     appointmentId: string,
@@ -1640,18 +1759,20 @@ export class AppointmentsService {
     name: string,
     data: unknown,
     meta: { tenantSlug: string; appointmentId: string; context: string; delay?: number; jobId?: string },
-  ) {
+  ): Promise<boolean> {
     try {
       await this.notificationProcessor.process({
         id: `inline-${name}-${Date.now()}`,
         name,
         data,
       } as any);
+      return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(
         `Immediate notification failed (${meta.context}) for appointment ${meta.appointmentId} in tenant ${meta.tenantSlug}: ${message}`,
       );
+      return false;
     }
   }
 
@@ -1751,6 +1872,64 @@ export class AppointmentsService {
     }
 
     return 'booked_direct';
+  }
+
+  private decorateAppointmentPresentation<T extends Record<string, any>>(row: T): T & {
+    visit_progress: VisitProgress;
+    visit_progress_label: string;
+  } {
+    const intakeData = this.parseIntakeData(row.intake_data);
+    const visitProgress = this.resolveVisitProgress(row.status as AppointmentStatus, intakeData);
+
+    return {
+      ...row,
+      visit_progress: visitProgress,
+      visit_progress_label: this.getVisitProgressLabel(visitProgress),
+    };
+  }
+
+  private resolveVisitProgress(
+    status: AppointmentStatus | string,
+    intakeData: IntakeDataWithProposal,
+  ): VisitProgress {
+    if (status === AppointmentStatus.COMPLETED) return 'completed';
+    if (status === AppointmentStatus.NO_SHOW) return 'no_show';
+
+    const raw = intakeData?.visitProgress;
+    if (raw === 'checked_in' || raw === 'in_service') {
+      return raw;
+    }
+
+    return 'scheduled';
+  }
+
+  private getVisitProgressLabel(progress: VisitProgress) {
+    const labels: Record<VisitProgress, string> = {
+      scheduled: 'Очаква се',
+      checked_in: 'Пристигнал',
+      in_service: 'В процес',
+      completed: 'Приключен',
+      no_show: 'Неявил се',
+    };
+
+    return labels[progress];
+  }
+
+  private resolveRetryJobType(type: string): NotificationJobType | null {
+    const normalized = type.replace(/_/g, '-');
+    const supported: Record<string, NotificationJobType> = {
+      'booking-confirmed': NotificationJobType.BOOKING_CONFIRMED,
+      'booking-pending': NotificationJobType.BOOKING_CONFIRMED,
+      'booking-approved': NotificationJobType.BOOKING_CONFIRMED,
+      'booking-proposal': NotificationJobType.BOOKING_PROPOSAL,
+      'reminder-24h': NotificationJobType.REMINDER_24H,
+      'reminder-2h': NotificationJobType.REMINDER_2H,
+      'booking-cancelled-client': NotificationJobType.BOOKING_CANCELLED_CLIENT,
+      'booking-cancelled-business': NotificationJobType.BOOKING_CANCELLED_BUSINESS,
+      'status-changed': NotificationJobType.STATUS_CHANGED,
+    };
+
+    return supported[normalized] || null;
   }
 
   private parseIntakeData(raw: unknown): IntakeDataWithProposal {

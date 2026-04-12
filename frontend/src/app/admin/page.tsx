@@ -34,6 +34,9 @@ interface Appointment {
   start_at: string;
   end_at: string;
   status: string;
+  cancelled_by?: 'client' | 'owner' | null;
+  owner_view_state?: string;
+  owner_view_label?: string;
   service_id: string;
   staff_id: string;
   client_name: string;
@@ -54,6 +57,9 @@ interface UpcomingAppointment {
   service_name: string;
   staff_name: string;
   status: string;
+  cancelled_by?: 'client' | 'owner' | null;
+  owner_view_state?: string;
+  owner_view_label?: string;
   owner_alert_state?: string;
   proposal_decision?: string;
 }
@@ -108,16 +114,27 @@ interface AppointmentContextResponse {
     cancellation_reason: string | null;
     cancelled_by: 'client' | 'owner' | null;
     created_at: string;
+    owner_view_state: string;
+    owner_view_label: string;
   };
   notifications: NotificationLogEntry[];
 }
 
 const STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
   pending: { label: 'Заявка', cls: 'bg-amber-100 text-amber-800 border-amber-200' },
+  requested: { label: 'Заявка', cls: 'bg-amber-100 text-amber-800 border-amber-200' },
   proposal_pending: { label: 'Предложен час', cls: 'bg-violet-100 text-violet-800 border-violet-200' },
+  proposal_sent: { label: 'Предложен час', cls: 'bg-violet-100 text-violet-800 border-violet-200' },
   confirmed: { label: 'Запазен час', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+  approved: { label: 'Запазен час', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+  booked_direct: { label: 'Запазен час', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+  proposal_accepted: { label: 'Запазен час', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
   completed: { label: 'Приключен', cls: 'bg-sky-100 text-sky-800 border-sky-200' },
   cancelled: { label: 'Отменен', cls: 'bg-rose-100 text-rose-800 border-rose-200' },
+  rejected: { label: 'Отказан', cls: 'bg-rose-100 text-rose-800 border-rose-200' },
+  proposal_rejected: { label: 'Отказан', cls: 'bg-rose-100 text-rose-800 border-rose-200' },
+  cancelled_by_owner: { label: 'Отменен от салона', cls: 'bg-rose-100 text-rose-800 border-rose-200' },
+  cancelled_by_client: { label: 'Отменен от клиент', cls: 'bg-rose-100 text-rose-800 border-rose-200' },
   no_show: { label: 'Неявил се', cls: 'bg-slate-100 text-slate-700 border-slate-200' },
 };
 
@@ -251,6 +268,17 @@ function getChannelLabel(channel: string) {
   return labels[channel] || channel;
 }
 
+function getOwnerStatusPresentation(item: { status?: string; owner_view_state?: string; owner_view_label?: string }) {
+  const key = item.owner_view_state || item.status || 'pending';
+  const fallback = STATUS_CONFIG[item.status || 'pending'] ?? STATUS_CONFIG.pending;
+  const config = STATUS_CONFIG[key] ?? fallback;
+
+  return {
+    label: item.owner_view_label || config.label,
+    cls: config.cls,
+  };
+}
+
 export default function AdminCalendarPage() {
   const qc = useQueryClient();
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -291,6 +319,7 @@ export default function AdminCalendarPage() {
       refetch();
       qc.invalidateQueries({ queryKey: ['appointments-upcoming'] });
       qc.invalidateQueries({ queryKey: ['admin-header-upcoming'] });
+      qc.invalidateQueries({ queryKey: ['appointment-context', id] });
     } catch {
       toast.error('Грешка при смяна на статуса');
     }
@@ -301,6 +330,7 @@ export default function AdminCalendarPage() {
       await apiClient.patch(`/appointments/${id}/owner-alert-read`, {});
       qc.invalidateQueries({ queryKey: ['appointments-upcoming'] });
       qc.invalidateQueries({ queryKey: ['admin-header-upcoming'] });
+      qc.invalidateQueries({ queryKey: ['appointment-context', id] });
     } catch {
       toast.error('Грешка при обновяване на известието.');
     }
@@ -313,6 +343,7 @@ export default function AdminCalendarPage() {
     qc.invalidateQueries({ queryKey: ['appointments'] });
     qc.invalidateQueries({ queryKey: ['appointments-upcoming'] });
     qc.invalidateQueries({ queryKey: ['admin-header-upcoming'] });
+    qc.invalidateQueries({ queryKey: ['appointment-context'] });
   };
 
   const dayAppointments = useMemo(() => sortByStartAt(appointments), [appointments]);
@@ -782,7 +813,7 @@ export default function AdminCalendarPage() {
                   {dayAppointments.map((appointment) => {
                     const startTime = format(new Date(appointment.start_at), 'HH:mm');
                     const endTime = format(new Date(appointment.end_at), 'HH:mm');
-                    const statusCfg = STATUS_CONFIG[appointment.status] ?? STATUS_CONFIG.pending;
+                    const statusCfg = getOwnerStatusPresentation(appointment);
                     const isSelected = selectedRecordId === appointment.id;
 
                     return (
@@ -923,10 +954,10 @@ export default function AdminCalendarPage() {
                     {detailedAppointment && (
                       <span
                         className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${
-                          (STATUS_CONFIG[detailedAppointment?.status || 'pending'] ?? STATUS_CONFIG.pending).cls
+                          getOwnerStatusPresentation(detailedAppointment).cls
                         }`}
                       >
-                        {(STATUS_CONFIG[detailedAppointment?.status || 'pending'] ?? STATUS_CONFIG.pending).label}
+                        {getOwnerStatusPresentation(detailedAppointment).label}
                       </span>
                     )}
                   </div>

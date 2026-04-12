@@ -42,6 +42,7 @@ interface ProposalMetadata {
 interface IntakeDataWithProposal {
   proposal?: ProposalMetadata;
   ownerActionAlert?: '' | 'client_cancelled';
+  stateMeta?: OwnerStateMeta;
   [key: string]: unknown;
 }
 
@@ -49,6 +50,26 @@ interface ClientProfileData {
   salutation?: string;
   nameSource?: 'owner' | 'client_submitted';
   originalClientName?: string;
+}
+
+type OwnerStateKind =
+  | 'requested'
+  | 'proposal_sent'
+  | 'approved'
+  | 'booked_direct'
+  | 'proposal_accepted'
+  | 'rejected'
+  | 'proposal_rejected'
+  | 'cancelled_by_owner'
+  | 'cancelled_by_client'
+  | 'completed'
+  | 'no_show';
+
+interface OwnerStateMeta {
+  transitionKind: OwnerStateKind;
+  fromStatus: string | null;
+  toStatus: string;
+  updatedAt: string;
 }
 
 @Injectable()
@@ -119,8 +140,22 @@ export class AppointmentsService {
         a.end_at,
         a.status,
         a.price,
+        a.cancelled_by,
         COALESCE(NULLIF(a.intake_data->>'ownerActionAlert', ''), NULLIF(a.intake_data->'proposal'->>'ownerAlertState', ''), '') as owner_alert_state,
         COALESCE(a.intake_data->'proposal'->>'lastDecision', '') as proposal_decision,
+        COALESCE(NULLIF(a.intake_data->'stateMeta'->>'transitionKind', ''), a.status) as owner_view_state,
+        CASE
+          WHEN a.status = 'pending' THEN 'Заявка'
+          WHEN a.status = 'proposal_pending' THEN 'Предложен час'
+          WHEN a.status = 'confirmed' THEN 'Запазен час'
+          WHEN a.status = 'completed' THEN 'Приключен'
+          WHEN a.status = 'no_show' THEN 'Неявил се'
+          WHEN a.status = 'cancelled' AND COALESCE(NULLIF(a.intake_data->'stateMeta'->>'transitionKind', ''), '') IN ('rejected', 'proposal_rejected') THEN 'Отказан'
+          WHEN a.status = 'cancelled' AND a.cancelled_by = 'client' THEN 'Отменен от клиент'
+          WHEN a.status = 'cancelled' AND a.cancelled_by = 'owner' THEN 'Отменен от салона'
+          WHEN a.status = 'cancelled' THEN 'Отменен'
+          ELSE a.status
+        END as owner_view_label,
         c.name as client_name,
         c.phone as client_phone,
         s.name as staff_name,
@@ -152,6 +187,19 @@ export class AppointmentsService {
         a.cancellation_reason,
         a.cancelled_by,
         a.created_at,
+        COALESCE(NULLIF(a.intake_data->'stateMeta'->>'transitionKind', ''), a.status) as owner_view_state,
+        CASE
+          WHEN a.status = 'pending' THEN 'Заявка'
+          WHEN a.status = 'proposal_pending' THEN 'Предложен час'
+          WHEN a.status = 'confirmed' THEN 'Запазен час'
+          WHEN a.status = 'completed' THEN 'Приключен'
+          WHEN a.status = 'no_show' THEN 'Неявил се'
+          WHEN a.status = 'cancelled' AND COALESCE(NULLIF(a.intake_data->'stateMeta'->>'transitionKind', ''), '') IN ('rejected', 'proposal_rejected') THEN 'Отказан'
+          WHEN a.status = 'cancelled' AND a.cancelled_by = 'client' THEN 'Отменен от клиент'
+          WHEN a.status = 'cancelled' AND a.cancelled_by = 'owner' THEN 'Отменен от салона'
+          WHEN a.status = 'cancelled' THEN 'Отменен'
+          ELSE a.status
+        END as owner_view_label,
         sv.name as service_name,
         sv.color as service_color,
         s.name as staff_name,
@@ -527,6 +575,15 @@ export class AppointmentsService {
     const intakeData = {
       ...(dto.intakeData || {}),
       ...(dto.publicBaseUrl ? { publicBaseUrl: dto.publicBaseUrl.trim().replace(/\/$/, '') } : {}),
+      stateMeta: this.buildOwnerStateMeta(
+        null,
+        status,
+        options.askClient
+          ? 'proposal_sent'
+          : status === AppointmentStatus.PENDING
+            ? 'requested'
+            : 'booked_direct',
+      ),
       ...(options.askClient
         ? {
             proposal: this.buildProposalMetadata({
@@ -674,7 +731,11 @@ export class AppointmentsService {
         startAt.toISOString(),
         endAt.toISOString(),
         AppointmentStatus.PROPOSAL_PENDING,
-        JSON.stringify({ ...intakeData, proposal }),
+        JSON.stringify({
+          ...intakeData,
+          proposal,
+          stateMeta: this.buildOwnerStateMeta(appointment.status, AppointmentStatus.PROPOSAL_PENDING, 'proposal_sent'),
+        }),
         appointment.id,
       ],
     );
@@ -738,6 +799,7 @@ export class AppointmentsService {
           ownerAlertState: 'proposal_accepted' as const,
           lastDecision: 'accept' as const,
         },
+        stateMeta: this.buildOwnerStateMeta(appointment.status, AppointmentStatus.CONFIRMED, 'proposal_accepted'),
       };
 
       await this.prisma.queryInSchema(
@@ -791,6 +853,11 @@ export class AppointmentsService {
         ownerAlertState: 'proposal_rejected' as const,
         lastDecision: 'reject' as const,
       },
+      stateMeta: this.buildOwnerStateMeta(
+        appointment.status,
+        revertStatus,
+        revertStatus === AppointmentStatus.CANCELLED ? 'proposal_rejected' : 'proposal_sent',
+      ),
     };
 
     await this.prisma.queryInSchema(
@@ -951,6 +1018,15 @@ export class AppointmentsService {
       newStatus === AppointmentStatus.CANCELLED && cancelledBy === 'client'
         ? { ...intakeData, ownerActionAlert: 'client_cancelled' as const }
         : { ...intakeData, ownerActionAlert: '' as const };
+    const transitionKind = this.resolveOwnerStateKind(
+      appointment.status as AppointmentStatus,
+      newStatus,
+      cancelledBy,
+    );
+    const resolvedIntakeData = {
+      ...nextIntakeData,
+      stateMeta: this.buildOwnerStateMeta(appointment.status, newStatus, transitionKind),
+    };
 
     await this.prisma.queryInSchema(
       tenant.schemaName,
@@ -962,7 +1038,7 @@ export class AppointmentsService {
         updateFields.cancellation_reason || null,
         updateFields.cancelled_by || null,
         updateFields.cancelled_at || null,
-        JSON.stringify(nextIntakeData),
+        JSON.stringify(resolvedIntakeData),
         appointmentId,
       ],
     );
@@ -1313,6 +1389,62 @@ export class AppointmentsService {
       requestedAt: new Date().toISOString(),
       ownerAlertState: '',
     };
+  }
+
+  private buildOwnerStateMeta(
+    fromStatus: string | null,
+    toStatus: string,
+    transitionKind: OwnerStateKind,
+  ): OwnerStateMeta {
+    return {
+      transitionKind,
+      fromStatus,
+      toStatus,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  private resolveOwnerStateKind(
+    current: AppointmentStatus,
+    next: AppointmentStatus,
+    cancelledBy?: 'client' | 'owner',
+  ): OwnerStateKind {
+    if (next === AppointmentStatus.CONFIRMED && current === AppointmentStatus.PROPOSAL_PENDING) {
+      return 'proposal_accepted';
+    }
+
+    if (next === AppointmentStatus.CONFIRMED) {
+      return 'approved';
+    }
+
+    if (next === AppointmentStatus.CANCELLED && cancelledBy === 'client') {
+      return 'cancelled_by_client';
+    }
+
+    if (next === AppointmentStatus.CANCELLED && cancelledBy === 'owner') {
+      if (current === AppointmentStatus.PENDING || current === AppointmentStatus.PROPOSAL_PENDING) {
+        return 'rejected';
+      }
+      return 'cancelled_by_owner';
+    }
+
+    if (next === AppointmentStatus.COMPLETED) {
+      return 'completed';
+    }
+
+    if (next === AppointmentStatus.NO_SHOW) {
+      return 'no_show';
+    }
+
+    if (next === AppointmentStatus.PROPOSAL_PENDING) {
+      return 'proposal_sent';
+    }
+
+    if (next === AppointmentStatus.PENDING) {
+      return 'requested';
+    }
+
+    return 'booked_direct';
   }
 
   private parseIntakeData(raw: unknown): IntakeDataWithProposal {

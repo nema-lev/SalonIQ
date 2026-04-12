@@ -876,7 +876,7 @@ export class AppointmentsService {
     await this.prisma.queryInSchema(
       tenant.schemaName,
       `UPDATE appointments SET status = $1, cancellation_reason = $2, 
-       cancelled_by = $3, cancelled_at = $4, updated_at = NOW()
+       cancelled_by = $3, cancelled_at = $4::timestamptz, updated_at = NOW()
        WHERE id = $5::uuid`,
       [
         newStatus,

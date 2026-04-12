@@ -97,16 +97,13 @@ export class TelegramService {
 
     const keyboard = isPending
       ? undefined
-      : {
-          inline_keyboard: [
-            [
-              { text: '✅ Потвърждавам присъствие', callback_data: `confirm_${appointment.id}` },
+      : allowClientCancellation
+        ? {
+            inline_keyboard: [
+              [{ text: '❌ Отменям', callback_data: `cancel_client_${appointment.id}` }],
             ],
-            ...(allowClientCancellation
-              ? [[{ text: '❌ Отменям', callback_data: `cancel_client_${appointment.id}` }]]
-              : []),
-          ],
-        };
+          }
+        : undefined;
 
     return this.sendMessage(botToken, chatId, text, keyboard, template ? undefined : 'Markdown');
   }

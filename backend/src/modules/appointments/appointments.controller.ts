@@ -139,6 +139,17 @@ export class AppointmentsController {
     return this.appointmentsService.clearOwnerAlert(tenant, id);
   }
 
+  @Get(':id/context')
+  @UseGuards(JwtAuthGuard, TenantGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Детайлен контекст за резервация и история на известията' })
+  async getAppointmentContext(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentTenant() tenant: Tenant,
+  ) {
+    return this.appointmentsService.getAppointmentContext(tenant, id);
+  }
+
   /**
    * Смяна на статус (потвърждение/отмяна/no-show)
    */

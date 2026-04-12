@@ -86,6 +86,32 @@ interface ClientSuggestion {
   total_visits: number;
 }
 
+interface NotificationLogEntry {
+  id: string;
+  channel: string;
+  type: string;
+  status: string;
+  external_id: string | null;
+  error_message: string | null;
+  sent_at: string | null;
+  delivered_at: string | null;
+  created_at: string;
+}
+
+interface AppointmentContextResponse {
+  appointment: Appointment & {
+    client_id: string;
+    client_email: string | null;
+    client_salutation: string;
+    client_name_source: 'owner' | 'client_submitted';
+    original_client_name: string;
+    cancellation_reason: string | null;
+    cancelled_by: 'client' | 'owner' | null;
+    created_at: string;
+  };
+  notifications: NotificationLogEntry[];
+}
+
 const STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
   pending: { label: 'Заявка', cls: 'bg-amber-100 text-amber-800 border-amber-200' },
   proposal_pending: { label: 'Предложен час', cls: 'bg-violet-100 text-violet-800 border-violet-200' },
@@ -176,6 +202,55 @@ function sortByStartAt<T extends { start_at: string }>(items: T[] | undefined) {
   );
 }
 
+function getNotificationTypeLabel(type: string) {
+  const labels: Record<string, string> = {
+    booking_pending: 'Нова заявка',
+    booking_confirmed: 'Потвърден час',
+    booking_cancelled_client: 'Клиентска отмяна',
+    booking_cancelled_business: 'Отказ от салона',
+    booking_proposal: 'Предложен нов час',
+    reminder_24h: 'Напомняне 24 ч.',
+    reminder_2h: 'Напомняне 2 ч.',
+    status_changed: 'Промяна на статус',
+  };
+
+  return labels[type] || type;
+}
+
+function getNotificationStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    sent: 'Изпратено',
+    delivered: 'Доставено',
+    failed: 'Грешка',
+    pending: 'Чака',
+    read: 'Прочетено',
+  };
+
+  return labels[status] || status;
+}
+
+function getNotificationStatusClass(status: string) {
+  const styles: Record<string, string> = {
+    sent: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    delivered: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    failed: 'border-rose-200 bg-rose-50 text-rose-700',
+    pending: 'border-amber-200 bg-amber-50 text-amber-700',
+    read: 'border-sky-200 bg-sky-50 text-sky-700',
+  };
+
+  return styles[status] || 'border-gray-200 bg-gray-50 text-gray-600';
+}
+
+function getChannelLabel(channel: string) {
+  const labels: Record<string, string> = {
+    telegram: 'Telegram',
+    sms: 'SMS',
+    email: 'Email',
+  };
+
+  return labels[channel] || channel;
+}
+
 export default function AdminCalendarPage() {
   const qc = useQueryClient();
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -201,6 +276,13 @@ export default function AdminCalendarPage() {
       }),
     staleTime: 30 * 1000,
     refetchInterval: 15000,
+  });
+
+  const { data: selectedContext, isLoading: contextLoading } = useQuery({
+    queryKey: ['appointment-context', selectedRecordId],
+    queryFn: () => apiClient.get<AppointmentContextResponse>(`/appointments/${selectedRecordId}/context`),
+    enabled: Boolean(selectedRecordId),
+    staleTime: 15 * 1000,
   });
 
   const handleStatusChange = async (id: string, status: string) => {
@@ -251,6 +333,7 @@ export default function AdminCalendarPage() {
     () => inboxItems.find((appointment) => appointment.id === selectedRecordId) ?? null,
     [inboxItems, selectedRecordId],
   );
+  const detailedAppointment = selectedContext?.appointment ?? selectedAppointment;
 
   const totalRevenue = useMemo(
     () =>
@@ -777,11 +860,11 @@ export default function AdminCalendarPage() {
                 <div className="mt-3 space-y-4">
                   <div>
                     <h3 className="text-lg font-black text-gray-900">
-                      {selectedAppointment?.client_name || selectedInboxItem?.client_name}
+                      {detailedAppointment?.client_name || selectedInboxItem?.client_name}
                     </h3>
                     <p className="mt-1 text-sm text-gray-500">
-                      {selectedAppointment
-                        ? `${selectedAppointment.service_name} · ${selectedAppointment.staff_name}`
+                      {detailedAppointment
+                        ? `${detailedAppointment.service_name} · ${detailedAppointment.staff_name}`
                         : selectedInboxItem?.summary}
                     </p>
                   </div>
@@ -790,21 +873,21 @@ export default function AdminCalendarPage() {
                     <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Дата и час</p>
                       <p className="mt-2 text-sm font-semibold text-gray-900">
-                        {formatAppointmentDay(selectedAppointment?.start_at || selectedInboxItem!.start_at)}
+                        {formatAppointmentDay(detailedAppointment?.start_at || selectedInboxItem!.start_at)}
                       </p>
                     </div>
                     <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Контакт</p>
                       <p className="mt-2 text-sm font-semibold text-gray-900">
                         {formatBulgarianPhoneForDisplay(
-                          selectedAppointment?.client_phone || selectedInboxItem!.client_phone,
+                          detailedAppointment?.client_phone || selectedInboxItem!.client_phone,
                         )}
                       </p>
                     </div>
                   </div>
 
-                  {selectedAppointment && (
-                    <div>{renderPrimaryActions(selectedAppointment)}</div>
+                  {detailedAppointment && (
+                    <div>{renderPrimaryActions(detailedAppointment)}</div>
                   )}
 
                   {selectedInboxItem?.bucket === 'updates' && (
@@ -837,22 +920,22 @@ export default function AdminCalendarPage() {
                         {selectedInboxItem.detailLabel}
                       </span>
                     )}
-                    {selectedAppointment && (
+                    {detailedAppointment && (
                       <span
                         className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${
-                          (STATUS_CONFIG[selectedAppointment.status] ?? STATUS_CONFIG.pending).cls
+                          (STATUS_CONFIG[detailedAppointment?.status || 'pending'] ?? STATUS_CONFIG.pending).cls
                         }`}
                       >
-                        {(STATUS_CONFIG[selectedAppointment.status] ?? STATUS_CONFIG.pending).label}
+                        {(STATUS_CONFIG[detailedAppointment?.status || 'pending'] ?? STATUS_CONFIG.pending).label}
                       </span>
                     )}
                   </div>
                   <h3 className="mt-3 text-xl font-black text-gray-900">
-                    {selectedAppointment?.client_name || selectedInboxItem?.client_name}
+                    {detailedAppointment?.client_name || selectedInboxItem?.client_name}
                   </h3>
                   <p className="mt-1 text-sm text-gray-500">
-                    {selectedAppointment
-                      ? `${selectedAppointment.service_name} при ${selectedAppointment.staff_name}`
+                    {detailedAppointment
+                      ? `${detailedAppointment.service_name} при ${detailedAppointment.staff_name}`
                       : selectedInboxItem?.summary}
                   </p>
                 </div>
@@ -861,17 +944,33 @@ export default function AdminCalendarPage() {
                   <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
                     <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Дата и слот</p>
                     <p className="mt-2 text-sm font-semibold text-gray-900">
-                      {formatAppointmentDay(selectedAppointment?.start_at || selectedInboxItem!.start_at)}
+                      {formatAppointmentDay(detailedAppointment?.start_at || selectedInboxItem!.start_at)}
                     </p>
                   </div>
                   <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
                     <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Телефон</p>
                     <p className="mt-2 text-sm font-semibold text-gray-900">
                       {formatBulgarianPhoneForDisplay(
-                        selectedAppointment?.client_phone || selectedInboxItem!.client_phone,
+                        detailedAppointment?.client_phone || selectedInboxItem!.client_phone,
                       )}
                     </p>
                   </div>
+                  {selectedContext?.appointment && (
+                    <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Име в клиентската база</p>
+                      <p className="mt-2 text-sm font-semibold text-gray-900">
+                        {selectedContext.appointment.client_name_source === 'owner'
+                          ? 'Ръчно име от собственика'
+                          : 'Име от първата клиентска заявка'}
+                      </p>
+                      {selectedContext.appointment.original_client_name &&
+                        selectedContext.appointment.original_client_name !== selectedContext.appointment.client_name && (
+                          <p className="mt-2 text-xs text-gray-500">
+                            Първо въведено име: {selectedContext.appointment.original_client_name}
+                          </p>
+                        )}
+                    </div>
+                  )}
                   <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
                     <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Следваща стъпка</p>
                     <p className="mt-2 text-sm font-semibold text-gray-900">
@@ -879,20 +978,63 @@ export default function AdminCalendarPage() {
                         ? 'Вземете решение оттук или директно от Telegram.'
                         : selectedInboxItem?.bucket === 'updates'
                           ? 'Прегледайте обновлението и маркирайте като видяно.'
-                          : selectedAppointment?.status === 'confirmed'
+                          : detailedAppointment?.status === 'confirmed'
                             ? 'Часът е активен. Можете да го приключите, маркирате като no-show или отмените.'
                             : 'Прегледайте детайлите на записа.'}
                     </p>
                   </div>
-                  {selectedAppointment?.internal_notes && (
+                  {detailedAppointment?.internal_notes && (
                     <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Бележка</p>
-                      <p className="mt-2 text-sm text-gray-700">{selectedAppointment.internal_notes}</p>
+                      <p className="mt-2 text-sm text-gray-700">{detailedAppointment.internal_notes}</p>
+                    </div>
+                  )}
+                  {selectedContext?.appointment?.cancellation_reason && (
+                    <div className="rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-rose-500">Причина за отмяна</p>
+                      <p className="mt-2 text-sm text-rose-700">{selectedContext.appointment.cancellation_reason}</p>
                     </div>
                   )}
                 </div>
 
-                {selectedAppointment && <div>{renderPrimaryActions(selectedAppointment)}</div>}
+                {detailedAppointment && <div>{renderPrimaryActions(detailedAppointment)}</div>}
+
+                <div className="rounded-3xl border border-gray-100 bg-white/80 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Notification center</p>
+                      <h4 className="mt-1 text-sm font-black text-gray-900">История на известията</h4>
+                    </div>
+                    {contextLoading && <Loader2 className="h-4 w-4 animate-spin text-[var(--color-primary)]" />}
+                  </div>
+
+                  <div className="mt-4 space-y-3">
+                    {selectedContext?.notifications?.length ? (
+                      selectedContext.notifications.map((entry) => (
+                        <div key={entry.id} className="rounded-2xl border border-gray-100 bg-gray-50/80 px-3 py-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-gray-900">
+                                {getNotificationTypeLabel(entry.type)}
+                              </p>
+                              <p className="mt-1 text-xs text-gray-500">
+                                {getChannelLabel(entry.channel)} · {entry.sent_at ? formatAppointmentDay(entry.sent_at) : formatAppointmentDay(entry.created_at)}
+                              </p>
+                            </div>
+                            <span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${getNotificationStatusClass(entry.status)}`}>
+                              {getNotificationStatusLabel(entry.status)}
+                            </span>
+                          </div>
+                          {entry.error_message && (
+                            <p className="mt-2 text-xs text-rose-600">{entry.error_message}</p>
+                          )}
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-gray-400">За този запис още няма лог на известия.</p>
+                    )}
+                  </div>
+                </div>
 
                 {selectedInboxItem?.bucket === 'updates' && (
                   <button

@@ -138,6 +138,72 @@ export class AppointmentsService {
     );
   }
 
+  async getAppointmentContext(tenant: Tenant, appointmentId: string) {
+    const [appointment] = await this.prisma.queryInSchema<any[]>(
+      tenant.schemaName,
+      `
+      SELECT
+        a.id,
+        a.start_at,
+        a.end_at,
+        a.status,
+        a.price,
+        a.internal_notes,
+        a.cancellation_reason,
+        a.cancelled_by,
+        a.created_at,
+        sv.name as service_name,
+        sv.color as service_color,
+        s.name as staff_name,
+        s.color as staff_color,
+        c.id as client_id,
+        c.name as client_name,
+        c.phone as client_phone,
+        c.email as client_email,
+        COALESCE(NULLIF(c.profile_data->>'salutation', ''), split_part(c.name, ' ', 1)) as client_salutation,
+        COALESCE(NULLIF(c.profile_data->>'nameSource', ''), 'owner') as client_name_source,
+        COALESCE(NULLIF(c.profile_data->>'originalClientName', ''), c.name) as original_client_name
+      FROM appointments a
+      JOIN clients c ON c.id = a.client_id
+      JOIN services sv ON sv.id = a.service_id
+      JOIN staff s ON s.id = a.staff_id
+      WHERE a.id = $1::uuid
+      LIMIT 1
+      `,
+      [appointmentId],
+    );
+
+    if (!appointment) {
+      throw new NotFoundException('Резервацията не е намерена.');
+    }
+
+    const notifications = await this.prisma.queryInSchema<any[]>(
+      tenant.schemaName,
+      `
+      SELECT
+        id,
+        channel,
+        type,
+        status,
+        external_id,
+        error_message,
+        sent_at,
+        delivered_at,
+        created_at
+      FROM notifications_log
+      WHERE appointment_id = $1::uuid
+      ORDER BY COALESCE(sent_at, created_at) DESC
+      LIMIT 20
+      `,
+      [appointmentId],
+    );
+
+    return {
+      appointment,
+      notifications,
+    };
+  }
+
   /**
    * Получава свободните слотове за конкретна дата, услуга и служител
    */
@@ -679,8 +745,6 @@ export class AppointmentsService {
         `
         UPDATE appointments
         SET status = $1,
-            client_confirmed = true,
-            client_confirmed_at = NOW(),
             intake_data = $2::jsonb,
             updated_at = NOW()
         WHERE id = $3::uuid

@@ -152,25 +152,16 @@ export class TelegramWebhookController {
     chatId: string,
     queryId: string,
   ) {
-    // Потвърждение на присъствие от клиента
-    await this.prisma.queryInSchema(
-      tenant.schema_name,
-      `UPDATE appointments
-       SET client_confirmed = true, client_confirmed_at = NOW()
-       WHERE id = $1::uuid AND status = 'confirmed'`,
-      [appointmentId],
-    );
-
     await this.telegramService.answerCallbackQuery(
       tenant.telegram_bot_token,
       queryId,
-      '✅ Благодарим! Очакваме Ви.',
+      '✅ Часът вече е потвърден от салона.',
     );
 
     await this.telegramService.sendMessage(
       tenant.telegram_bot_token,
       chatId,
-      `✅ *Потвърждението е записано!*\n\nБлагодарим Ви. Очакваме Ви на уречения час.`,
+      `✅ *Часът вече е потвърден.*\n\nНе е нужно допълнително потвърждение от Ваша страна.`,
     );
   }
 

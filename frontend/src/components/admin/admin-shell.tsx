@@ -22,27 +22,32 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         <>{children}</>
       ) : (
         <div
-          className="min-h-screen bg-gray-50 flex"
-          style={{ minHeight: '100vh', background: '#f5f6fb', display: 'flex', width: '100%', overflowX: 'clip' }}
+          className="min-h-screen bg-gray-50"
+          style={{ minHeight: '100vh', background: '#f5f6fb', width: '100%', overflowX: 'clip' }}
         >
           <AdminSidebar mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
           <div
-            className="flex-1 flex flex-col min-w-0"
-            style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}
+            className="min-h-screen min-w-0 lg:pl-[280px]"
+            style={{ minHeight: '100vh', minWidth: 0, paddingLeft: '0px' }}
           >
-            <AdminHeader onOpenMenu={() => setMobileNavOpen(true)} />
-            <main
-              className="flex-1 overflow-auto"
-              style={{
-                flex: 1,
-                padding: '20px 16px calc(env(safe-area-inset-bottom, 0px) + 104px)',
-                overflow: 'auto',
-                overflowX: 'clip',
-                overscrollBehaviorX: 'none',
-              }}
+            <div
+              className="flex min-h-screen min-w-0 flex-col"
+              style={{ display: 'flex', minHeight: '100vh', minWidth: 0 }}
             >
-              {children}
-            </main>
+              <AdminHeader onOpenMenu={() => setMobileNavOpen(true)} />
+              <main
+                className="flex-1 overflow-y-auto overflow-x-hidden"
+                style={{
+                  flex: 1,
+                  padding: '20px 16px calc(env(safe-area-inset-bottom, 0px) + 104px)',
+                  overflowY: 'auto',
+                  overflowX: 'clip',
+                  overscrollBehaviorX: 'none',
+                }}
+              >
+                {children}
+              </main>
+            </div>
           </div>
         </div>
       )}

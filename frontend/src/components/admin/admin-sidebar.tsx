@@ -169,9 +169,12 @@ export function AdminSidebar({ mobileOpen = false, onClose }: AdminSidebarProps)
           background: '#fff',
           borderRight: '1px solid #e5e7eb',
           flexDirection: 'column',
-          height: '100dvh',
-          position: 'sticky',
+          height: '100vh',
+          position: 'fixed',
+          left: 0,
           top: 0,
+          bottom: 0,
+          zIndex: 30,
         }}
       >
         <SidebarBody />

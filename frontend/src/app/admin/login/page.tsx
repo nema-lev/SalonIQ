@@ -25,7 +25,10 @@ export default function LoginPage() {
 
   const mutation = useMutation({
     mutationFn: (data: FormValues) =>
-      apiClient.post<{ accessToken: string; owner: { name: string; tenantSlug?: string } }>('/auth/login', data),
+      apiClient.post<{ accessToken: string; owner: { name: string; tenantSlug?: string } }>('/auth/login', {
+        email: data.email.trim().toLowerCase(),
+        password: data.password,
+      }),
     onSuccess: (data) => {
       setAuthToken(data.accessToken);
       if (data.owner.tenantSlug) {
@@ -81,6 +84,9 @@ export default function LoginPage() {
                 {...register('email')}
                 type="email"
                 autoComplete="email"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 placeholder="owner@business.com"
                 className="w-full pl-10 pr-4 py-3 rounded-xl border-2 border-gray-200 focus:border-[var(--color-primary)] outline-none transition-colors"
                 style={{ width: '100%', boxSizing: 'border-box', padding: '14px 16px 14px 42px', borderRadius: 14, border: '1px solid #d1d5db', fontSize: 16 }}
@@ -97,6 +103,9 @@ export default function LoginPage() {
                 {...register('password')}
                 type="password"
                 autoComplete="current-password"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 placeholder="••••••••"
                 className="w-full pl-10 pr-4 py-3 rounded-xl border-2 border-gray-200 focus:border-[var(--color-primary)] outline-none transition-colors"
                 style={{ width: '100%', boxSizing: 'border-box', padding: '14px 16px 14px 42px', borderRadius: 14, border: '1px solid #d1d5db', fontSize: 16 }}

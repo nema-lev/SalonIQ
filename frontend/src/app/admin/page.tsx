@@ -177,6 +177,14 @@ const STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
   no_show: { label: 'Неявил се', cls: 'bg-slate-100 text-slate-700 border-slate-200' },
 };
 
+const STATUS_FILTER_OPTIONS = [
+  { key: 'all', label: 'Всички статуси' },
+  { key: 'requests', label: 'Заявки' },
+  { key: 'booked', label: 'Запазени' },
+  { key: 'cancelled', label: 'Отказани / отменени' },
+  { key: 'completed', label: 'Приключени' },
+] as const;
+
 type InboxBucket = 'actions' | 'updates';
 
 interface InboxItemView extends UpcomingAppointment {
@@ -326,6 +334,14 @@ function getOwnerStatusPresentation(item: { status?: string; owner_view_state?: 
     label: item.owner_view_label || config.label,
     cls: config.cls,
   };
+}
+
+function formatEuroAmount(value: number | string | null | undefined) {
+  const amount = Number(value || 0);
+  return `${new Intl.NumberFormat('bg-BG', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(amount) ? amount : 0)} €`;
 }
 
 function getVisitProgressClass(progress?: string) {
@@ -668,15 +684,6 @@ export default function AdminCalendarPage() {
   );
   const detailedAppointment = selectedContext?.appointment ?? selectedAppointment;
 
-  const totalRevenue = useMemo(
-    () =>
-      dayAppointments.reduce((sum, appointment) => {
-        if (!['confirmed', 'completed'].includes(appointment.status)) return sum;
-        return sum + (appointment.price ?? 0);
-      }, 0),
-    [dayAppointments],
-  );
-
   const attentionCount = actionItems.length;
   const updateCount = updateItems.length;
   const filteredDayAppointments = useMemo(
@@ -701,12 +708,33 @@ export default function AdminCalendarPage() {
         : filteredDayAppointments,
     [appointments, calendarView, filteredDayAppointments, staffFilter, statusFilter],
   );
+  const totalRevenue = useMemo(
+    () =>
+      appointmentsInView.reduce((sum, appointment) => {
+        const ownerState = appointment.owner_view_state || appointment.status;
+        if (!['confirmed', 'approved', 'booked_direct', 'proposal_accepted', 'completed'].includes(ownerState)) {
+          return sum;
+        }
+        return sum + Number(appointment.price ?? 0);
+      }, 0),
+    [appointmentsInView],
+  );
   const confirmedInView = useMemo(
-    () => appointmentsInView.filter((appointment) => appointment.status === 'confirmed').length,
+    () =>
+      appointmentsInView.filter((appointment) =>
+        ['confirmed', 'approved', 'booked_direct', 'proposal_accepted'].includes(
+          appointment.owner_view_state || appointment.status,
+        ),
+      ).length,
     [appointmentsInView],
   );
   const pendingInView = useMemo(
-    () => appointmentsInView.filter((appointment) => appointment.status === 'pending').length,
+    () =>
+      appointmentsInView.filter((appointment) =>
+        ['pending', 'requested', 'proposal_pending', 'proposal_sent'].includes(
+          appointment.owner_view_state || appointment.status,
+        ),
+      ).length,
     [appointmentsInView],
   );
   const weekDays = useMemo(
@@ -782,6 +810,28 @@ export default function AdminCalendarPage() {
 
     return 'Седмичен изглед по дни и специалисти';
   }, [calendarView, currentDate]);
+
+  const calendarEmptyState = useMemo(() => {
+    if (appointmentsInView.length || visibleExceptions.length) {
+      return null;
+    }
+
+    const hasFilter = staffFilter !== 'all' || statusFilter !== 'all';
+    if (hasFilter) {
+      return {
+        title: 'Няма резултати за текущите филтри',
+        description: 'Сменете статуса или специалиста, за да видите други записи, без да напускате календара.',
+      };
+    }
+
+    return {
+      title:
+        calendarView === 'week'
+          ? 'Няма записани часове за тази седмица'
+          : 'Няма записани часове за този ден',
+      description: 'Изберете друга дата или добавете ръчна резервация.',
+    };
+  }, [appointmentsInView.length, calendarView, staffFilter, statusFilter, visibleExceptions.length]);
 
   useEffect(() => {
     if (selectedRecordId) return;
@@ -922,44 +972,233 @@ export default function AdminCalendarPage() {
     );
   };
 
-  return (
-    <div className="space-y-5">
-      <div className="glass-panel rounded-[28px] border border-white/60 p-4 sm:p-5">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/70 bg-white/80 px-3 py-1 text-xs font-semibold text-gray-500">
-              <ClipboardList className="h-3.5 w-3.5" />
-              Action Inbox + календар за деня
-            </div>
-            <div>
-              <h2 className="text-lg font-black text-gray-900 sm:text-xl">Оперативен изглед за днешната работа</h2>
-              <p className="mt-1 max-w-2xl text-sm text-gray-500">
-                Календарът остава в центъра. Заявките и клиентските действия са отделени в inbox, вместо да бутат целия екран надолу.
-              </p>
+  const renderCalendarEmptyState = () => (
+    <div className="rounded-[28px] border border-dashed border-gray-200 bg-white/80 px-6 py-14 text-center">
+      <p className="text-lg font-semibold text-gray-500">{calendarEmptyState?.title}</p>
+      <p className="mt-2 text-sm text-gray-400">{calendarEmptyState?.description}</p>
+    </div>
+  );
+
+  const renderDesktopDetailsPanel = () => {
+    if (!(selectedAppointment || selectedInboxItem)) {
+      return (
+        <div className="mt-4 rounded-3xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-400">
+          Изберете заявка, клиентско действие или запис от календара.
+        </div>
+      );
+    }
+
+    return (
+      <div className="mt-4 space-y-4">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            {selectedInboxItem && (
+              <span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${selectedInboxItem.toneClass}`}>
+                {selectedInboxItem.detailLabel}
+              </span>
+            )}
+            {detailedAppointment && (
+              <span
+                className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${
+                  getOwnerStatusPresentation(detailedAppointment).cls
+                }`}
+              >
+                {getOwnerStatusPresentation(detailedAppointment).label}
+              </span>
+            )}
+          </div>
+          <h3 className="mt-3 text-xl font-black text-gray-900">
+            {detailedAppointment?.client_name || selectedInboxItem?.client_name}
+          </h3>
+          <p className="mt-1 text-sm text-gray-500">
+            {detailedAppointment
+              ? `${detailedAppointment.service_name} при ${detailedAppointment.staff_name}`
+              : selectedInboxItem?.summary}
+          </p>
+        </div>
+
+        {detailedAppointment && (
+          <div className="grid gap-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Бързи действия</p>
+            <div className="grid grid-cols-2 gap-2">
+              {detailedAppointment.status !== 'proposal_pending' &&
+                ['pending', 'confirmed'].includes(detailedAppointment.status) && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleStatusChange(
+                        detailedAppointment.id,
+                        detailedAppointment.status === 'pending' ? 'confirmed' : 'completed',
+                      )
+                    }
+                    className="rounded-2xl bg-emerald-600 px-3 py-3 text-sm font-semibold text-white hover:opacity-90"
+                  >
+                    {detailedAppointment.status === 'pending' ? 'Потвърди' : 'Приключи'}
+                  </button>
+                )}
+              {['pending', 'proposal_pending'].includes(detailedAppointment.status) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProposalTarget(detailedAppointment);
+                    setShowBookingModal(true);
+                  }}
+                  className="rounded-2xl border border-violet-200 bg-violet-50 px-3 py-3 text-sm font-semibold text-violet-700 hover:bg-violet-100"
+                >
+                  Нов час
+                </button>
+              )}
+              {detailedAppointment.status === 'confirmed' && (
+                <button
+                  type="button"
+                  onClick={() => handleStatusChange(detailedAppointment.id, 'no_show')}
+                  className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                >
+                  Неявил се
+                </button>
+              )}
+              {!['completed', 'cancelled', 'no_show'].includes(detailedAppointment.status) && (
+                <button
+                  type="button"
+                  onClick={() => handleStatusChange(detailedAppointment.id, 'cancelled')}
+                  className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-3 text-sm font-semibold text-rose-700 hover:bg-rose-100"
+                >
+                  {detailedAppointment.status === 'confirmed' ? 'Отмени' : 'Откажи'}
+                </button>
+              )}
             </div>
           </div>
+        )}
 
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:min-w-[520px]">
-            <div className="rounded-2xl border border-white/70 bg-white/90 px-4 py-3 shadow-sm">
-              <div className="text-2xl font-black text-gray-900">{attentionCount}</div>
-              <div className="mt-1 text-xs text-gray-500">Изискват действие</div>
+        <div className="grid gap-3 sm:grid-cols-2 min-[1600px]:grid-cols-1">
+          <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Дата и слот</p>
+            <p className="mt-2 text-sm font-semibold text-gray-900">
+              {formatAppointmentDay(detailedAppointment?.start_at || selectedInboxItem!.start_at)}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Телефон</p>
+            <p className="mt-2 text-sm font-semibold text-gray-900">
+              {formatBulgarianPhoneForDisplay(
+                detailedAppointment?.client_phone || selectedInboxItem!.client_phone,
+              )}
+            </p>
+          </div>
+          <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Стойност</p>
+            <p className="mt-2 text-sm font-semibold text-gray-900">
+              {detailedAppointment?.price != null ? formatEuroAmount(detailedAppointment.price) : 'Няма цена'}
+            </p>
+          </div>
+          {detailedAppointment && (
+            <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Резюме</p>
+              <div className="mt-2 space-y-1.5 text-sm text-gray-700">
+                <p><span className="font-semibold text-gray-900">Услуга:</span> {detailedAppointment.service_name}</p>
+                <p><span className="font-semibold text-gray-900">Специалист:</span> {detailedAppointment.staff_name}</p>
+                <p><span className="font-semibold text-gray-900">Статус:</span> {getOwnerStatusPresentation(detailedAppointment).label}</p>
+              </div>
             </div>
-            <div className="rounded-2xl border border-white/70 bg-white/90 px-4 py-3 shadow-sm">
-              <div className="text-2xl font-black text-sky-700">{updateCount}</div>
-              <div className="mt-1 text-xs text-gray-500">Обновления</div>
+          )}
+        </div>
+
+        {detailedAppointment && renderVisitProgressControls(detailedAppointment)}
+
+        {selectedContext?.appointment && (
+          <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Име в клиентската база</p>
+            <p className="mt-2 text-sm font-semibold text-gray-900">{selectedContext.appointment.client_name}</p>
+            <p className="mt-1 text-xs text-gray-500">
+              {selectedContext.appointment.client_name_source === 'owner'
+                ? 'Ръчно име от собственика'
+                : 'Име от първата клиентска заявка'}
+            </p>
+            {selectedContext.appointment.original_client_name &&
+              selectedContext.appointment.original_client_name !== selectedContext.appointment.client_name && (
+                <p className="mt-2 text-xs text-gray-500">
+                  Първо въведено име: {selectedContext.appointment.original_client_name}
+                </p>
+              )}
+          </div>
+        )}
+
+        {detailedAppointment?.internal_notes && (
+          <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Бележка</p>
+            <p className="mt-2 text-sm text-gray-700">{detailedAppointment.internal_notes}</p>
+          </div>
+        )}
+
+        {selectedContext?.appointment?.cancellation_reason && (
+          <div className="rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-rose-500">Причина за отмяна</p>
+            <p className="mt-2 text-sm text-rose-700">{selectedContext.appointment.cancellation_reason}</p>
+          </div>
+        )}
+
+        <div className="rounded-3xl border border-gray-100 bg-white/80 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Notification center</p>
+              <h4 className="mt-1 text-sm font-black text-gray-900">История на известията</h4>
             </div>
-            <div className="rounded-2xl border border-white/70 bg-white/90 px-4 py-3 shadow-sm">
-	              <div className="text-2xl font-black text-emerald-700">{appointmentsInView.length}</div>
-              <div className="mt-1 text-xs text-gray-500">Часа за деня</div>
-            </div>
-            <div className="rounded-2xl border border-white/70 bg-white/90 px-4 py-3 shadow-sm">
-              <div className="text-2xl font-black text-[var(--color-primary)]">{totalRevenue} €</div>
-              <div className="mt-1 text-xs text-gray-500">Очакван оборот</div>
-            </div>
+            {contextLoading && <Loader2 className="h-4 w-4 animate-spin text-[var(--color-primary)]" />}
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {selectedContext?.notifications?.length ? (
+              selectedContext.notifications.map((entry) => (
+                <div key={entry.id} className="rounded-2xl border border-gray-100 bg-gray-50/80 px-3 py-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-900">{getNotificationTypeLabel(entry.type)}</p>
+                      <p className="mt-1 text-xs text-gray-500">
+                        {getChannelLabel(entry.channel)} · {entry.sent_at ? formatAppointmentDay(entry.sent_at) : formatAppointmentDay(entry.created_at)}
+                      </p>
+                    </div>
+                    <span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${getNotificationStatusClass(entry.status)}`}>
+                      {getNotificationStatusLabel(entry.status)}
+                    </span>
+                  </div>
+                  {entry.error_message && <p className="mt-2 text-xs text-rose-600">{entry.error_message}</p>}
+                  {entry.status === 'failed' && detailedAppointment && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        retryNotificationMutation.mutate({
+                          appointmentId: detailedAppointment.id,
+                          type: entry.type,
+                        })
+                      }
+                      className="mt-3 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100"
+                    >
+                      Retry
+                    </button>
+                  )}
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-gray-400">За този запис още няма лог на известия.</p>
+            )}
           </div>
         </div>
-      </div>
 
+        {selectedInboxItem?.bucket === 'updates' && (
+          <button
+            type="button"
+            onClick={() => handleOwnerAlertRead(selectedInboxItem.id)}
+            className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-100"
+          >
+            Маркирай като видяно
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-5">
       <div className="sticky top-0 z-20 -mx-1 rounded-3xl border border-white/70 bg-white/80 px-2 py-2 shadow-lg shadow-black/5 backdrop-blur xl:hidden">
         <div className="grid grid-cols-2 gap-2">
           <button
@@ -987,16 +1226,16 @@ export default function AdminCalendarPage() {
         </div>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)_340px]">
+      <div className="grid gap-5 xl:grid-cols-[300px_minmax(0,1fr)] min-[1600px]:grid-cols-[300px_minmax(0,1fr)_340px]">
         <aside
           className={`min-h-0 ${mobileWorkspace === 'inbox' ? 'block' : 'hidden'} xl:block`}
         >
-          <div className="glass-panel rounded-[28px] border border-white/60 p-4 shadow-xl shadow-black/5 xl:sticky xl:top-0">
+          <div className="glass-panel flex max-h-[calc(100vh-120px)] flex-col rounded-[28px] border border-white/60 p-4 shadow-xl shadow-black/5 xl:sticky xl:top-5">
             <div className="flex items-start justify-between gap-3 border-b border-gray-100 pb-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Action inbox</p>
                 <h3 className="mt-1 text-lg font-black text-gray-900">Какво чака решение</h3>
-                <p className="mt-1 text-sm text-gray-500">Всичко, което иска внимание, е тук. Календарът остава отделно.</p>
+                <p className="mt-1 text-sm text-gray-500">Всичко, което иска внимание, е тук. Календарът остава отделно и не изчезва при филтриране.</p>
               </div>
               <button
                 type="button"
@@ -1012,7 +1251,7 @@ export default function AdminCalendarPage() {
               </button>
             </div>
 
-            <div className="mt-4 space-y-5">
+            <div className="mt-4 min-h-0 space-y-5 overflow-y-auto pr-1">
               <div>
                 <div className="mb-3 flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -1064,7 +1303,7 @@ export default function AdminCalendarPage() {
                           </div>
                         </button>
 
-                        <div className="mt-3 flex flex-wrap gap-2">
+                        <div className="mt-3 grid grid-cols-2 gap-2">
                           {item.status !== 'proposal_pending' && (
                             <button
                               type="button"
@@ -1087,7 +1326,7 @@ export default function AdminCalendarPage() {
                             }}
                             className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-100"
                           >
-                            Предложи нов час
+                            Нов час
                           </button>
                           <button
                             type="button"
@@ -1276,7 +1515,7 @@ export default function AdminCalendarPage() {
               <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                 <div className="rounded-2xl border border-white/70 bg-white/90 px-4 py-3 shadow-sm">
                   <div className="text-xl font-black text-gray-900">{appointmentsInView.length}</div>
-                  <div className="mt-1 text-xs text-gray-500">{calendarView === 'week' ? 'Записи за седмицата' : 'Всички записи'}</div>
+                  <div className="mt-1 text-xs text-gray-500">{calendarView === 'week' ? 'Записи в седмицата' : 'Записи за деня'}</div>
                 </div>
                 <div className="rounded-2xl border border-white/70 bg-white/90 px-4 py-3 shadow-sm">
                   <div className="text-xl font-black text-emerald-700">{confirmedInView}</div>
@@ -1287,7 +1526,7 @@ export default function AdminCalendarPage() {
                   <div className="mt-1 text-xs text-gray-500">Нови заявки</div>
                 </div>
                 <div className="rounded-2xl border border-white/70 bg-white/90 px-4 py-3 shadow-sm">
-                  <div className="text-xl font-black text-[var(--color-primary)]">{totalRevenue} €</div>
+                  <div className="text-xl font-black text-[var(--color-primary)]">{formatEuroAmount(totalRevenue)}</div>
                   <div className="mt-1 text-xs text-gray-500">Потвърден оборот</div>
                 </div>
               </div>
@@ -1298,11 +1537,6 @@ export default function AdminCalendarPage() {
 	                <div className="flex justify-center py-20">
 	                  <Loader2 className="w-8 h-8 animate-spin text-[var(--color-primary)]" />
 	                </div>
-	              ) : !appointmentsInView.length && !visibleExceptions.length ? (
-	                <div className="rounded-[28px] border border-dashed border-gray-200 bg-white/80 px-6 py-16 text-center">
-	                  <p className="text-lg font-semibold text-gray-400">Няма записани часове за този ден</p>
-	                  <p className="mt-2 text-sm text-gray-300">Можете да изберете друга дата или да добавите ръчна резервация.</p>
-	                </div>
 	              ) : (
 	                <div className="space-y-4">
 	                  <div className="flex flex-col gap-3 rounded-[28px] border border-white/70 bg-white/80 p-4 shadow-sm">
@@ -1312,12 +1546,12 @@ export default function AdminCalendarPage() {
 		                          {calendarView === 'week' ? 'Week board' : 'Day board'}
 		                        </p>
 		                        <h4 className="mt-1 text-base font-black text-gray-900">
-		                          {calendarView === 'week' ? 'Седмичен преглед по дни' : 'Разпределение по специалисти'}
+		                          {calendarView === 'week' ? 'Седмичен преглед' : 'Дневен график'}
 		                        </h4>
 		                        <p className="mt-1 text-sm text-gray-500">
 		                          {calendarView === 'week'
-		                            ? 'Виждате натоварването за цялата седмица, без да губите action inbox-а и detail rail-а.'
-		                            : 'Календарът е разделен по специалисти и часове, вместо само като последователен списък.'}
+		                            ? 'Седмичен изглед по дни и специалисти.'
+		                            : 'Разпределение по специалисти и часове.'}
 		                        </p>
 	                      </div>
 	                      <div className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-600">
@@ -1371,13 +1605,7 @@ export default function AdminCalendarPage() {
 
                       <div className="flex flex-col gap-3 rounded-2xl border border-dashed border-gray-200 bg-gray-50/80 p-3 lg:flex-row lg:items-center lg:justify-between">
                         <div className="flex flex-wrap gap-2">
-                          {[
-                            { key: 'all', label: 'Всички статуси' },
-                            { key: 'requests', label: 'Заявки' },
-                            { key: 'booked', label: 'Запазени' },
-                            { key: 'cancelled', label: 'Отказани / отменени' },
-                            { key: 'completed', label: 'Приключени' },
-                          ].map((option) => (
+                          {STATUS_FILTER_OPTIONS.map((option) => (
                             <button
                               key={option.key}
                               type="button"
@@ -1416,8 +1644,9 @@ export default function AdminCalendarPage() {
                         </div>
                       </div>
 	                  </div>
-
-		                  {calendarView === 'week' ? (
+                      {calendarEmptyState ? (
+                        renderCalendarEmptyState()
+                      ) : calendarView === 'week' ? (
 		                    <div className="overflow-x-auto rounded-[28px] border border-white/70 bg-white/90 shadow-sm">
 		                      <div className="grid min-w-[1180px] grid-cols-7 gap-0">
 		                        {weekDays.map((day) => {

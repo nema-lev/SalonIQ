@@ -34,6 +34,7 @@ import {
   normalizeBulgarianPhone,
 } from '@/lib/phone';
 import { useTenant } from '@/lib/tenant-context';
+import { ResponsiveSheet } from '@/components/admin/ResponsiveSheet';
 
 interface Appointment {
   id: string;
@@ -452,6 +453,7 @@ export default function AdminCalendarPage() {
   const [showBlockEditor, setShowBlockEditor] = useState(false);
   const [proposalTarget, setProposalTarget] = useState<Appointment | null>(null);
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const [showInboxSheet, setShowInboxSheet] = useState(false);
   const [mobileWorkspace, setMobileWorkspace] = useState<'calendar' | 'inbox'>('calendar');
   const [showMobileDetails, setShowMobileDetails] = useState(false);
   const [calendarView, setCalendarView] = useState<'grid' | 'list' | 'week'>('grid');
@@ -1203,9 +1205,9 @@ export default function AdminCalendarPage() {
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
-            onClick={() => setMobileWorkspace('calendar')}
+            onClick={() => setShowInboxSheet(false)}
             className={`rounded-2xl px-4 py-3 text-sm font-semibold transition-colors ${
-              mobileWorkspace === 'calendar'
+              !showInboxSheet
                 ? 'bg-[var(--color-primary)] text-white shadow-lg shadow-[var(--color-primary)]/25'
                 : 'bg-white text-gray-600'
             }`}
@@ -1214,9 +1216,9 @@ export default function AdminCalendarPage() {
           </button>
           <button
             type="button"
-            onClick={() => setMobileWorkspace('inbox')}
+            onClick={() => setShowInboxSheet(true)}
             className={`rounded-2xl px-4 py-3 text-sm font-semibold transition-colors ${
-              mobileWorkspace === 'inbox'
+              showInboxSheet
                 ? 'bg-[var(--color-primary)] text-white shadow-lg shadow-[var(--color-primary)]/25'
                 : 'bg-white text-gray-600'
             }`}
@@ -1226,11 +1228,14 @@ export default function AdminCalendarPage() {
         </div>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[300px_minmax(0,1fr)] min-[1600px]:grid-cols-[300px_minmax(0,1fr)_340px]">
-        <aside
-          className={`min-h-0 ${mobileWorkspace === 'inbox' ? 'block' : 'hidden'} xl:block`}
+      <div className="flex flex-1 min-w-0">
+        <ResponsiveSheet
+          side="left"
+          isOpen={showInboxSheet}
+          onClose={() => setShowInboxSheet(false)}
+          title="Action inbox"
         >
-          <div className="glass-panel flex max-h-[calc(100vh-120px)] flex-col rounded-[28px] border border-white/60 p-4 shadow-xl shadow-black/5 xl:sticky xl:top-5">
+          <div className="flex h-full flex-col">
             <div className="flex items-start justify-between gap-3 border-b border-gray-100 pb-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Action inbox</p>
@@ -1402,9 +1407,9 @@ export default function AdminCalendarPage() {
               </div>
             </div>
           </div>
-        </aside>
+        </ResponsiveSheet>
 
-        <section className={`${mobileWorkspace === 'calendar' ? 'block' : 'hidden'} xl:block`}>
+        <section className="block w-full min-w-0">
           <div className="glass-panel rounded-[32px] border border-white/60 p-4 shadow-xl shadow-black/5 sm:p-5">
             <div className="flex flex-col gap-4 border-b border-gray-100 pb-5">
 	              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -1419,6 +1424,20 @@ export default function AdminCalendarPage() {
                 </div>
 
 	                <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowInboxSheet(true)}
+                      className="hidden xl:inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:ring-offset-2"
+                    >
+                      <ClipboardList className="h-4 w-4" />
+                      Заявки
+                      {(attentionCount + updateCount) > 0 && (
+                        <span className="ml-1 inline-flex h-5 items-center justify-center rounded-full bg-rose-100 px-2 text-xs font-bold text-rose-600">
+                          {attentionCount + updateCount}
+                        </span>
+                      )}
+                    </button>
+
 	                  <div className="hidden items-center rounded-2xl border border-gray-200 bg-white p-1 lg:flex">
 	                    <button
 	                      type="button"
@@ -2152,375 +2171,125 @@ export default function AdminCalendarPage() {
 
         </section>
 
-        <aside className="hidden xl:block">
-          <div className="glass-panel rounded-[28px] border border-white/60 p-5 shadow-xl shadow-black/5 xl:sticky xl:top-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Детайлен панел</p>
-
-	            {selectedAppointment || selectedInboxItem ? (
-	              <div className="mt-4 space-y-5">
-	                <div>
-                  <div className="flex items-center gap-2">
-                    {selectedInboxItem && (
-                      <span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${selectedInboxItem.toneClass}`}>
-                        {selectedInboxItem.detailLabel}
-                      </span>
-                    )}
-                    {detailedAppointment && (
-                      <span
-                        className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${
-                          getOwnerStatusPresentation(detailedAppointment).cls
-                        }`}
-                      >
-                        {getOwnerStatusPresentation(detailedAppointment).label}
-                      </span>
-                    )}
-                  </div>
-                  <h3 className="mt-3 text-xl font-black text-gray-900">
-                    {detailedAppointment?.client_name || selectedInboxItem?.client_name}
-                  </h3>
-	                  <p className="mt-1 text-sm text-gray-500">
-	                    {detailedAppointment
-	                      ? `${detailedAppointment.service_name} при ${detailedAppointment.staff_name}`
-	                      : selectedInboxItem?.summary}
-	                  </p>
-	                </div>
-
-	                {detailedAppointment && (
-	                  <div className="grid gap-2">
-	                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Бързи действия</p>
-	                    <div className="grid grid-cols-2 gap-2">
-	                      {detailedAppointment.status !== 'proposal_pending' &&
-	                        ['pending', 'confirmed'].includes(detailedAppointment.status) && (
-	                          <button
-	                            type="button"
-	                            onClick={() =>
-	                              handleStatusChange(
-	                                detailedAppointment.id,
-	                                detailedAppointment.status === 'pending' ? 'confirmed' : 'completed',
-	                              )
-	                            }
-	                            className="rounded-2xl bg-emerald-600 px-3 py-3 text-sm font-semibold text-white hover:opacity-90"
-	                          >
-	                            {detailedAppointment.status === 'pending' ? 'Потвърди' : 'Приключи'}
-	                          </button>
-	                        )}
-	                      {['pending', 'proposal_pending'].includes(detailedAppointment.status) && (
-	                        <button
-	                          type="button"
-	                          onClick={() => {
-	                            setProposalTarget(detailedAppointment);
-	                            setShowBookingModal(true);
-	                          }}
-	                          className="rounded-2xl border border-violet-200 bg-violet-50 px-3 py-3 text-sm font-semibold text-violet-700 hover:bg-violet-100"
-	                        >
-	                          Предложи нов час
-	                        </button>
-	                      )}
-	                      {detailedAppointment.status === 'confirmed' && (
-	                        <button
-	                          type="button"
-	                          onClick={() => handleStatusChange(detailedAppointment.id, 'no_show')}
-	                          className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-	                        >
-	                          Неявил се
-	                        </button>
-	                      )}
-	                      {!['completed', 'cancelled', 'no_show'].includes(detailedAppointment.status) && (
-	                        <button
-	                          type="button"
-	                          onClick={() => handleStatusChange(detailedAppointment.id, 'cancelled')}
-	                          className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-3 text-sm font-semibold text-rose-700 hover:bg-rose-100"
-	                        >
-	                          {detailedAppointment.status === 'confirmed' ? 'Отмени' : 'Откажи'}
-	                        </button>
-	                      )}
-	                    </div>
-	                  </div>
-	                )}
-
-	                <div className="grid gap-3">
-	                  <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-	                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Дата и слот</p>
-	                    <p className="mt-2 text-sm font-semibold text-gray-900">
-	                      {formatAppointmentDay(detailedAppointment?.start_at || selectedInboxItem!.start_at)}
-	                    </p>
-	                  </div>
-	                  <div className="grid grid-cols-2 gap-3">
-	                    <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-	                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Телефон</p>
-	                      <p className="mt-2 text-sm font-semibold text-gray-900">
-	                        {formatBulgarianPhoneForDisplay(
-	                          detailedAppointment?.client_phone || selectedInboxItem!.client_phone,
-	                        )}
-	                      </p>
-	                    </div>
-	                    <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-	                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Стойност</p>
-	                      <p className="mt-2 text-sm font-semibold text-gray-900">
-	                        {detailedAppointment?.price != null ? `${detailedAppointment.price} €` : 'Няма цена'}
-	                      </p>
-	                    </div>
-	                  </div>
-		                  {detailedAppointment && (
-		                    <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-		                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Резюме</p>
-		                      <div className="mt-2 space-y-2 text-sm text-gray-700">
-		                        <p><span className="font-semibold text-gray-900">Услуга:</span> {detailedAppointment.service_name}</p>
-		                        <p><span className="font-semibold text-gray-900">Специалист:</span> {detailedAppointment.staff_name}</p>
-		                        <p><span className="font-semibold text-gray-900">Статус:</span> {getOwnerStatusPresentation(detailedAppointment).label}</p>
-		                      </div>
-		                    </div>
-		                  )}
-                      {detailedAppointment && renderVisitProgressControls(detailedAppointment)}
-		                  {selectedContext?.appointment && (
-	                    <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-	                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Име в клиентската база</p>
-                      <p className="mt-2 text-sm font-semibold text-gray-900">
-                        {selectedContext.appointment.client_name_source === 'owner'
-                          ? 'Ръчно име от собственика'
-                          : 'Име от първата клиентска заявка'}
-                      </p>
-                      {selectedContext.appointment.original_client_name &&
-                        selectedContext.appointment.original_client_name !== selectedContext.appointment.client_name && (
-                          <p className="mt-2 text-xs text-gray-500">
-                            Първо въведено име: {selectedContext.appointment.original_client_name}
-                          </p>
-                        )}
-                    </div>
-                  )}
-                  <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Следваща стъпка</p>
-                    <p className="mt-2 text-sm font-semibold text-gray-900">
-                      {selectedInboxItem?.bucket === 'actions'
-                        ? 'Вземете решение оттук или директно от Telegram.'
-                        : selectedInboxItem?.bucket === 'updates'
-                          ? 'Прегледайте обновлението и маркирайте като видяно.'
-                          : detailedAppointment?.status === 'confirmed'
-                            ? 'Часът е активен. Можете да го приключите, маркирате като no-show или отмените.'
-                            : 'Прегледайте детайлите на записа.'}
-                    </p>
-                  </div>
-                  {detailedAppointment?.internal_notes && (
-                    <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Бележка</p>
-                      <p className="mt-2 text-sm text-gray-700">{detailedAppointment.internal_notes}</p>
-                    </div>
-                  )}
-                  {selectedContext?.appointment?.cancellation_reason && (
-                    <div className="rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-rose-500">Причина за отмяна</p>
-                      <p className="mt-2 text-sm text-rose-700">{selectedContext.appointment.cancellation_reason}</p>
-                    </div>
-                  )}
-                </div>
-
-	                <div className="rounded-3xl border border-gray-100 bg-white/80 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Notification center</p>
-                      <h4 className="mt-1 text-sm font-black text-gray-900">История на известията</h4>
-                    </div>
-                    {contextLoading && <Loader2 className="h-4 w-4 animate-spin text-[var(--color-primary)]" />}
-                  </div>
-
-                  <div className="mt-4 space-y-3">
-                    {selectedContext?.notifications?.length ? (
-	                      selectedContext.notifications.map((entry) => (
-	                        <div key={entry.id} className="rounded-2xl border border-gray-100 bg-gray-50/80 px-3 py-3">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="text-sm font-semibold text-gray-900">
-                                {getNotificationTypeLabel(entry.type)}
-                              </p>
-                              <p className="mt-1 text-xs text-gray-500">
-                                {getChannelLabel(entry.channel)} · {entry.sent_at ? formatAppointmentDay(entry.sent_at) : formatAppointmentDay(entry.created_at)}
-                              </p>
-                            </div>
-                            <span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${getNotificationStatusClass(entry.status)}`}>
-                              {getNotificationStatusLabel(entry.status)}
-                            </span>
-                          </div>
-	                          {entry.error_message && (
-	                            <p className="mt-2 text-xs text-rose-600">{entry.error_message}</p>
-	                          )}
-                            {entry.status === 'failed' && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  retryNotificationMutation.mutate({
-                                    appointmentId: detailedAppointment!.id,
-                                    type: entry.type,
-                                  })
-                                }
-                                className="mt-3 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100"
-                              >
-                                Retry
-                              </button>
-                            )}
-	                        </div>
-	                      ))
-                    ) : (
-                      <p className="text-sm text-gray-400">За този запис още няма лог на известия.</p>
-                    )}
-                  </div>
-                </div>
-
-                {selectedInboxItem?.bucket === 'updates' && (
-                  <button
-                    type="button"
-                    onClick={() => handleOwnerAlertRead(selectedInboxItem.id)}
-                    className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-100"
-                  >
-                    Маркирай като видяно
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="mt-4 rounded-3xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-400">
-                Изберете заявка, клиентско действие или запис от календара.
-              </div>
-            )}
-          </div>
-        </aside>
       </div>
 
-      {selectedRecordId && !showMobileDetails && (
-        <button
-          type="button"
-          onClick={() => setShowMobileDetails(true)}
-          className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+96px)] right-4 z-30 rounded-full bg-gray-900 px-4 py-3 text-sm font-semibold text-white shadow-xl xl:hidden"
-        >
-          Отвори детайли
-        </button>
-      )}
+      <ResponsiveSheet
+        side="right"
+        isOpen={!!selectedRecordId && (!!selectedAppointment || !!selectedInboxItem)}
+        onClose={() => {
+          setSelectedRecordId(null);
+          setShowMobileDetails(false);
+        }}
+        title="Детайли"
+      >
+        <div className="flex flex-col gap-3">
+          <div className="mb-2">
+            <h3 className="mt-1 text-xl font-black text-gray-900">
+              {detailedAppointment?.client_name || selectedInboxItem?.client_name}
+            </h3>
+            <p className="mt-1 text-sm text-gray-500">
+              {detailedAppointment
+                ? `${detailedAppointment.service_name} · ${detailedAppointment.staff_name}`
+                : selectedInboxItem?.summary}
+            </p>
+          </div>
 
-      {showMobileDetails && (selectedAppointment || selectedInboxItem) && (
-        <div className="fixed inset-0 z-40 bg-black/40 xl:hidden" onClick={() => setShowMobileDetails(false)}>
-          <div
-            className="absolute inset-x-0 bottom-0 max-h-[82vh] overflow-y-auto rounded-t-[32px] bg-white px-4 pb-[calc(env(safe-area-inset-bottom,0px)+24px)] pt-3 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="mx-auto mb-3 h-1.5 w-14 rounded-full bg-gray-200" />
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Детайли</p>
-                <h3 className="mt-1 text-lg font-black text-gray-900">
-                  {detailedAppointment?.client_name || selectedInboxItem?.client_name}
-                </h3>
-                <p className="mt-1 text-sm text-gray-500">
-                  {detailedAppointment
-                    ? `${detailedAppointment.service_name} · ${detailedAppointment.staff_name}`
-                    : selectedInboxItem?.summary}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowMobileDetails(false)}
-                className="flex h-10 w-10 items-center justify-center rounded-2xl border border-gray-200 bg-white text-gray-600"
-              >
-                <X className="h-4 w-4" />
-              </button>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Дата и час</p>
+              <p className="mt-2 text-sm font-semibold text-gray-900">
+                {formatAppointmentDay(detailedAppointment?.start_at || selectedInboxItem!.start_at)}
+              </p>
             </div>
+            <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Контакт</p>
+              <p className="mt-2 text-sm font-semibold text-gray-900">
+                {formatBulgarianPhoneForDisplay(
+                  detailedAppointment?.client_phone || selectedInboxItem!.client_phone,
+                )}
+              </p>
+            </div>
+          </div>
 
-            <div className="mt-4 grid gap-3">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Дата и час</p>
-                  <p className="mt-2 text-sm font-semibold text-gray-900">
-                    {formatAppointmentDay(detailedAppointment?.start_at || selectedInboxItem!.start_at)}
-                  </p>
+          {detailedAppointment && (
+            <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Статус</p>
+                  <span
+                    className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-[11px] font-bold ${
+                      getOwnerStatusPresentation(detailedAppointment).cls
+                    }`}
+                  >
+                    {getOwnerStatusPresentation(detailedAppointment).label}
+                  </span>
                 </div>
-                <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Контакт</p>
-                  <p className="mt-2 text-sm font-semibold text-gray-900">
-                    {formatBulgarianPhoneForDisplay(
-                      detailedAppointment?.client_phone || selectedInboxItem!.client_phone,
-                    )}
-                  </p>
-                </div>
+                {detailedAppointment.price != null && (
+                  <div className="text-right">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Стойност</p>
+                    <p className="mt-2 text-sm font-semibold text-gray-900">{detailedAppointment.price} €</p>
+                  </div>
+                )}
               </div>
+            </div>
+          )}
 
-              {detailedAppointment && (
-                <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Статус</p>
-                      <span
-                        className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-[11px] font-bold ${
-                          getOwnerStatusPresentation(detailedAppointment).cls
-                        }`}
-                      >
-                        {getOwnerStatusPresentation(detailedAppointment).label}
+          {detailedAppointment && <div>{renderPrimaryActions(detailedAppointment)}</div>}
+          {detailedAppointment && renderVisitProgressControls(detailedAppointment)}
+
+          {selectedInboxItem?.bucket === 'updates' && (
+            <button
+              type="button"
+              onClick={() => handleOwnerAlertRead(selectedInboxItem.id)}
+              className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-100"
+            >
+              Маркирай като видяно
+            </button>
+          )}
+
+          <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Известия</p>
+            <div className="mt-3 space-y-2">
+              {selectedContext?.notifications?.length ? (
+                selectedContext.notifications.slice(0, 6).map((entry) => (
+                  <div key={entry.id} className="rounded-2xl border border-white bg-white px-3 py-3 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-gray-900">{getNotificationTypeLabel(entry.type)}</p>
+                        <p className="mt-1 text-xs text-gray-500">
+                          {getChannelLabel(entry.channel)} · {entry.sent_at ? formatAppointmentDay(entry.sent_at) : formatAppointmentDay(entry.created_at)}
+                        </p>
+                      </div>
+                      <span className={`rounded-full border px-2 py-1 text-[10px] font-bold ${getNotificationStatusClass(entry.status)}`}>
+                        {getNotificationStatusLabel(entry.status)}
                       </span>
                     </div>
-                    {detailedAppointment.price != null && (
-                      <div className="text-right">
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Стойност</p>
-                        <p className="mt-2 text-sm font-semibold text-gray-900">{detailedAppointment.price} €</p>
-                      </div>
+                    {entry.error_message && (
+                      <p className="mt-2 text-xs text-rose-600">{entry.error_message}</p>
+                    )}
+                    {entry.status === 'failed' && detailedAppointment && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          retryNotificationMutation.mutate({
+                            appointmentId: detailedAppointment.id,
+                            type: entry.type,
+                          })
+                        }
+                        className="mt-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100"
+                      >
+                        Retry
+                      </button>
                     )}
                   </div>
-                </div>
+                ))
+              ) : (
+                <p className="text-sm text-gray-400">Няма лог за известия към този запис.</p>
               )}
-
-	              {detailedAppointment && <div>{renderPrimaryActions(detailedAppointment)}</div>}
-                {detailedAppointment && renderVisitProgressControls(detailedAppointment)}
-
-              {selectedInboxItem?.bucket === 'updates' && (
-                <button
-                  type="button"
-                  onClick={() => handleOwnerAlertRead(selectedInboxItem.id)}
-                  className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-100"
-                >
-                  Маркирай като видяно
-                </button>
-              )}
-
-              <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Известия</p>
-                <div className="mt-3 space-y-2">
-                  {selectedContext?.notifications?.length ? (
-	                    selectedContext.notifications.slice(0, 6).map((entry) => (
-	                      <div key={entry.id} className="rounded-2xl border border-white bg-white px-3 py-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-gray-900">{getNotificationTypeLabel(entry.type)}</p>
-                            <p className="mt-1 text-xs text-gray-500">
-                              {getChannelLabel(entry.channel)} · {entry.sent_at ? formatAppointmentDay(entry.sent_at) : formatAppointmentDay(entry.created_at)}
-                            </p>
-                          </div>
-	                          <span className={`rounded-full border px-2 py-1 text-[10px] font-bold ${getNotificationStatusClass(entry.status)}`}>
-	                            {getNotificationStatusLabel(entry.status)}
-	                          </span>
-	                        </div>
-                          {entry.error_message && (
-                            <p className="mt-2 text-xs text-rose-600">{entry.error_message}</p>
-                          )}
-                          {entry.status === 'failed' && detailedAppointment && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                retryNotificationMutation.mutate({
-                                  appointmentId: detailedAppointment.id,
-                                  type: entry.type,
-                                })
-                              }
-                              className="mt-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100"
-                            >
-                              Retry
-                            </button>
-                          )}
-	                      </div>
-	                    ))
-                  ) : (
-                    <p className="text-sm text-gray-400">Няма лог за известия към този запис.</p>
-                  )}
-                </div>
-              </div>
             </div>
           </div>
         </div>
-      )}
+      </ResponsiveSheet>
 
       {showBlockEditor && (
         <div className="fixed inset-0 z-50 bg-black/45 p-4">

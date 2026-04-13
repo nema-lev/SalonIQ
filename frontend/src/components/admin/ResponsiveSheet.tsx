@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 
 interface ResponsiveSheetProps {
@@ -17,9 +17,21 @@ export function ResponsiveSheet({
   children,
 }: ResponsiveSheetProps) {
   const contentRef = useRef<HTMLDivElement>(null);
+  const [shouldRender, setShouldRender] = useState(isOpen);
 
   useEffect(() => {
     if (isOpen) {
+      setShouldRender(true);
+    } else {
+      const timer = setTimeout(() => {
+        setShouldRender(false);
+      }, 300); // match transition duration
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen && window.innerWidth < 1280) {
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'auto';
@@ -40,25 +52,31 @@ export function ResponsiveSheet({
     return () => document.removeEventListener('keydown', handleEscape);
   }, [isOpen, onClose]);
 
-  if (!isOpen) return null;
+  if (!shouldRender) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex pointer-events-none">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/40 xl:bg-transparent transition-opacity" />
+      <div
+        className={`absolute inset-0 bg-black/40 xl:bg-transparent transition-opacity duration-300 pointer-events-auto xl:pointer-events-none ${isOpen ? 'opacity-100' : 'opacity-0'}`}
+        onClick={onClose}
+      />
 
       {/* Sheet Content */}
       <div
         ref={contentRef}
         onClick={(e) => e.stopPropagation()}
-        className={`absolute bg-white shadow-2xl transition-transform duration-300 ease-in-out
+        className={`absolute bg-white shadow-2xl transition-transform duration-300 ease-in-out pointer-events-auto
           flex flex-col
           /* Mobile: Bottom sheet */
-          inset-x-0 bottom-0 max-h-[85vh] rounded-t-[32px] translate-y-0
+          inset-x-0 bottom-0 max-h-[85vh] rounded-t-[32px]
           /* Desktop: Side sheet */
           xl:top-0 xl:bottom-0 xl:max-h-none xl:w-[400px] xl:rounded-none
           ${side === 'left' ? 'xl:left-0' : 'xl:right-0'}
-          ${isOpen ? 'translate-x-0 translate-y-0' : side === 'left' ? '-translate-x-full' : 'translate-x-full'}
+          ${isOpen
+            ? 'translate-y-0 xl:translate-x-0'
+            : `translate-y-full xl:translate-y-0 ${side === 'left' ? 'xl:-translate-x-full' : 'xl:translate-x-full'}`
+          }
         `}
       >
         <div className="flex-1 overflow-y-auto px-4 pb-[calc(env(safe-area-inset-bottom,0px)+24px)] pt-3 xl:px-6 xl:py-6">

@@ -454,7 +454,6 @@ export default function AdminCalendarPage() {
   const [proposalTarget, setProposalTarget] = useState<Appointment | null>(null);
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const [showInboxSheet, setShowInboxSheet] = useState(false);
-  const [mobileWorkspace, setMobileWorkspace] = useState<'calendar' | 'inbox'>('calendar');
   const [showMobileDetails, setShowMobileDetails] = useState(false);
   const [calendarView, setCalendarView] = useState<'grid' | 'list' | 'week'>('grid');
   const [staffFilter, setStaffFilter] = useState<string>('all');

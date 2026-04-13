@@ -257,7 +257,8 @@ function buildInboxItem(appointment: UpcomingAppointment): InboxItemView {
   };
 }
 
-function formatAppointmentDay(value: string) {
+function formatAppointmentDay(value?: string) {
+  if (!value) return "";
   return format(new Date(value), "d MMM yyyy '·' HH:mm", { locale: bg });
 }
 
@@ -1075,14 +1076,14 @@ export default function AdminCalendarPage() {
           <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Дата и слот</p>
             <p className="mt-2 text-sm font-semibold text-gray-900">
-              {formatAppointmentDay(detailedAppointment?.start_at || selectedInboxItem!.start_at)}
+              {formatAppointmentDay(detailedAppointment?.start_at || selectedInboxItem?.start_at || "")}
             </p>
           </div>
           <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Телефон</p>
             <p className="mt-2 text-sm font-semibold text-gray-900">
               {formatBulgarianPhoneForDisplay(
-                detailedAppointment?.client_phone || selectedInboxItem!.client_phone,
+                detailedAppointment?.client_phone || selectedInboxItem?.client_phone || "",
               )}
             </p>
           </div>
@@ -2197,14 +2198,14 @@ export default function AdminCalendarPage() {
             <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Дата и час</p>
               <p className="mt-2 text-sm font-semibold text-gray-900">
-                {formatAppointmentDay(detailedAppointment?.start_at || selectedInboxItem!.start_at)}
+                {formatAppointmentDay(detailedAppointment?.start_at || selectedInboxItem?.start_at || "")}
               </p>
             </div>
             <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Контакт</p>
               <p className="mt-2 text-sm font-semibold text-gray-900">
                 {formatBulgarianPhoneForDisplay(
-                  detailedAppointment?.client_phone || selectedInboxItem!.client_phone,
+                  detailedAppointment?.client_phone || selectedInboxItem?.client_phone || "",
                 )}
               </p>
             </div>

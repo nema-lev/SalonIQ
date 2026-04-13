@@ -261,6 +261,61 @@ export class AppointmentsService {
     return deleted;
   }
 
+  async updateStaffException(
+    tenant: Tenant,
+    exceptionId: string,
+    staffId: string,
+    startAtIso: string,
+    endAtIso: string,
+    type = 'blocked',
+    note?: string | null,
+  ) {
+    const startAt = new Date(startAtIso);
+    const endAt = new Date(endAtIso);
+    if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime())) {
+      throw new BadRequestException('Невалиден период за блокирания интервал.');
+    }
+    if (!isBefore(startAt, endAt)) {
+      throw new BadRequestException('Краят трябва да е след началото.');
+    }
+
+    const normalizedType = ['vacation', 'sick', 'blocked', 'partial_day'].includes(type) ? type : 'blocked';
+    const [staff] = await this.prisma.queryInSchema<any[]>(
+      tenant.schemaName,
+      `SELECT id, name, color FROM staff WHERE id = $1::uuid LIMIT 1`,
+      [staffId],
+    );
+
+    if (!staff) {
+      throw new NotFoundException('Специалистът не е намерен.');
+    }
+
+    const [updated] = await this.prisma.queryInSchema<any[]>(
+      tenant.schemaName,
+      `
+      UPDATE staff_exceptions
+      SET staff_id = $2::uuid,
+          type = $3,
+          start_at = $4::timestamptz,
+          end_at = $5::timestamptz,
+          note = $6
+      WHERE id = $1::uuid
+      RETURNING id, staff_id, type, start_at, end_at, note, created_at
+      `,
+      [exceptionId, staffId, normalizedType, startAt.toISOString(), endAt.toISOString(), note?.trim() || null],
+    );
+
+    if (!updated) {
+      throw new NotFoundException('Блокираният интервал не е намерен.');
+    }
+
+    return {
+      ...updated,
+      staff_name: staff.name,
+      staff_color: staff.color,
+    };
+  }
+
   async findUpcoming(tenant: Tenant, limit = 10, mode: UpcomingMode = 'all') {
     const whereClause =
       mode === 'pending'

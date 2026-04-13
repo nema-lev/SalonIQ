@@ -460,6 +460,7 @@ export default function AdminCalendarPage() {
   const [showUnavailable, setShowUnavailable] = useState(true);
   const [draggedAppointmentId, setDraggedAppointmentId] = useState<string | null>(null);
   const [dropPreview, setDropPreview] = useState<{ staffId: string; startAt: string } | null>(null);
+  const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const dateInputRef = useRef<HTMLInputElement | null>(null);
   const [blockDraft, setBlockDraft] = useState({
     staffId: 'all',
@@ -536,21 +537,28 @@ export default function AdminCalendarPage() {
       const [endHour, endMinute] = blockDraft.endTime.split(':').map(Number);
       const startAt = new Date(year, month - 1, day, startHour, startMinute, 0, 0).toISOString();
       const endAt = new Date(year, month - 1, day, endHour, endMinute, 0, 0).toISOString();
-      return apiClient.post('/appointments/staff-blocks', {
+      const payload = {
         staffId: blockDraft.staffId,
         startAt,
         endAt,
         type: blockDraft.type,
         note: blockDraft.note.trim() || undefined,
-      });
+      };
+
+      if (editingBlockId) {
+        return apiClient.patch(`/appointments/staff-blocks/${editingBlockId}`, payload);
+      }
+
+      return apiClient.post('/appointments/staff-blocks', payload);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['appointments-calendar-board'] });
-      toast.success('Интервалът е блокиран.');
+      toast.success(editingBlockId ? 'Интервалът е обновен.' : 'Интервалът е блокиран.');
+      setEditingBlockId(null);
       setBlockDraft((current) => ({ ...current, note: '' }));
     },
     onError: (error: any) => {
-      toast.error(error?.message || 'Неуспешно блокиране на интервала.');
+      toast.error(error?.message || 'Неуспешно запазване на интервала.');
     },
   });
 
@@ -558,6 +566,9 @@ export default function AdminCalendarPage() {
     mutationFn: (id: string) => apiClient.delete(`/appointments/staff-blocks/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['appointments-calendar-board'] });
+      if (editingBlockId) {
+        setEditingBlockId(null);
+      }
       toast.success('Блокираният интервал е изтрит.');
     },
     onError: (error: any) => {
@@ -872,6 +883,31 @@ export default function AdminCalendarPage() {
   }, [calendarStaff, dateKey, staffFilter]);
 
   const goToday = () => setCurrentDate(new Date());
+
+  const openBlockEditorForBlock = (block: StaffException) => {
+    setEditingBlockId(block.id);
+    setBlockDraft({
+      staffId: block.staff_id,
+      date: format(new Date(block.start_at), 'yyyy-MM-dd'),
+      startTime: format(new Date(block.start_at), 'HH:mm'),
+      endTime: format(new Date(block.end_at), 'HH:mm'),
+      type: block.type,
+      note: block.note || '',
+    });
+    setShowBlockEditor(true);
+  };
+
+  const resetBlockDraft = () => {
+    setEditingBlockId(null);
+    setBlockDraft({
+      staffId: staffFilter === 'all' ? calendarStaff[0]?.id || 'all' : staffFilter,
+      date: dateKey,
+      startTime: '12:00',
+      endTime: '13:00',
+      type: 'blocked',
+      note: '',
+    });
+  };
 
   const focusRecord = (id: string, startAt: string, workspace: 'calendar' | 'inbox' = 'calendar') => {
     setSelectedRecordId(id);
@@ -1542,8 +1578,8 @@ export default function AdminCalendarPage() {
 	                  <div className="flex flex-col gap-3 rounded-[28px] border border-white/70 bg-white/80 p-4 shadow-sm">
 	                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
 	                      <div>
-		                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
-		                          {calendarView === 'week' ? 'Week board' : 'Day board'}
+	                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
+		                          {calendarView === 'week' ? 'Седмичен борд' : 'Дневен борд'}
 		                        </p>
 		                        <h4 className="mt-1 text-base font-black text-gray-900">
 		                          {calendarView === 'week' ? 'Седмичен преглед' : 'Дневен график'}
@@ -1595,7 +1631,7 @@ export default function AdminCalendarPage() {
 	                              </span>
 	                              <span className="min-w-0">
 	                                <span className="block truncate text-sm font-semibold text-gray-900">{staffMember.name}</span>
-	                                <span className="block text-xs text-gray-500">{staffMember.appointments.length} часа</span>
+	                                <span className="block text-xs text-gray-500">{staffMember.appointments.length} записа</span>
 	                              </span>
 	                            </button>
 	                          );
@@ -1635,7 +1671,10 @@ export default function AdminCalendarPage() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => setShowBlockEditor(true)}
+                            onClick={() => {
+                              resetBlockDraft();
+                              setShowBlockEditor(true);
+                            }}
                             className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"
                           >
                             <Ban className="h-4 w-4" />
@@ -1764,7 +1803,7 @@ export default function AdminCalendarPage() {
                                             <button
                                               key={block.id}
                                               type="button"
-                                              onClick={() => setShowBlockEditor(true)}
+                                              onClick={() => openBlockEditorForBlock(block)}
                                               className="rounded-2xl border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold text-slate-600"
                                             >
                                               {format(new Date(block.start_at), 'HH:mm')}–{format(new Date(block.end_at), 'HH:mm')} · {getExceptionTypeLabel(block.type)}
@@ -1776,7 +1815,7 @@ export default function AdminCalendarPage() {
                                       <div className="mt-3 space-y-2">
                                         {!staffItems.length ? (
                                           <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-3 py-4 text-center text-xs text-gray-400">
-                                            Пуснете запис тук. Ще запази същия начален час.
+                                            Пуснете запис тук.
                                           </div>
                                         ) : (
                                           staffItems.map((appointment) => {
@@ -2123,7 +2162,7 @@ export default function AdminCalendarPage() {
 	                                      {startTime} – {endTime}
 	                                    </span>
 		                                    {appointment.price != null && (
-		                                      <span className="font-semibold text-gray-700">{appointment.price} €</span>
+		                                      <span className="font-semibold text-gray-700">{formatEuroAmount(appointment.price)}</span>
 		                                    )}
                                         {appointment.status === 'confirmed' && (
                                           <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${getVisitProgressClass(appointment.visit_progress)}`}>
@@ -2152,237 +2191,20 @@ export default function AdminCalendarPage() {
 
         </section>
 
-        <aside className="hidden xl:block">
-          <div className="glass-panel rounded-[28px] border border-white/60 p-5 shadow-xl shadow-black/5 xl:sticky xl:top-0">
+        <aside className="hidden min-[1600px]:block">
+          <div className="glass-panel rounded-[28px] border border-white/60 p-5 shadow-xl shadow-black/5 min-[1600px]:sticky min-[1600px]:top-5">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Детайлен панел</p>
-
-	            {selectedAppointment || selectedInboxItem ? (
-	              <div className="mt-4 space-y-5">
-	                <div>
-                  <div className="flex items-center gap-2">
-                    {selectedInboxItem && (
-                      <span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${selectedInboxItem.toneClass}`}>
-                        {selectedInboxItem.detailLabel}
-                      </span>
-                    )}
-                    {detailedAppointment && (
-                      <span
-                        className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${
-                          getOwnerStatusPresentation(detailedAppointment).cls
-                        }`}
-                      >
-                        {getOwnerStatusPresentation(detailedAppointment).label}
-                      </span>
-                    )}
-                  </div>
-                  <h3 className="mt-3 text-xl font-black text-gray-900">
-                    {detailedAppointment?.client_name || selectedInboxItem?.client_name}
-                  </h3>
-	                  <p className="mt-1 text-sm text-gray-500">
-	                    {detailedAppointment
-	                      ? `${detailedAppointment.service_name} при ${detailedAppointment.staff_name}`
-	                      : selectedInboxItem?.summary}
-	                  </p>
-	                </div>
-
-	                {detailedAppointment && (
-	                  <div className="grid gap-2">
-	                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Бързи действия</p>
-	                    <div className="grid grid-cols-2 gap-2">
-	                      {detailedAppointment.status !== 'proposal_pending' &&
-	                        ['pending', 'confirmed'].includes(detailedAppointment.status) && (
-	                          <button
-	                            type="button"
-	                            onClick={() =>
-	                              handleStatusChange(
-	                                detailedAppointment.id,
-	                                detailedAppointment.status === 'pending' ? 'confirmed' : 'completed',
-	                              )
-	                            }
-	                            className="rounded-2xl bg-emerald-600 px-3 py-3 text-sm font-semibold text-white hover:opacity-90"
-	                          >
-	                            {detailedAppointment.status === 'pending' ? 'Потвърди' : 'Приключи'}
-	                          </button>
-	                        )}
-	                      {['pending', 'proposal_pending'].includes(detailedAppointment.status) && (
-	                        <button
-	                          type="button"
-	                          onClick={() => {
-	                            setProposalTarget(detailedAppointment);
-	                            setShowBookingModal(true);
-	                          }}
-	                          className="rounded-2xl border border-violet-200 bg-violet-50 px-3 py-3 text-sm font-semibold text-violet-700 hover:bg-violet-100"
-	                        >
-	                          Предложи нов час
-	                        </button>
-	                      )}
-	                      {detailedAppointment.status === 'confirmed' && (
-	                        <button
-	                          type="button"
-	                          onClick={() => handleStatusChange(detailedAppointment.id, 'no_show')}
-	                          className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-	                        >
-	                          Неявил се
-	                        </button>
-	                      )}
-	                      {!['completed', 'cancelled', 'no_show'].includes(detailedAppointment.status) && (
-	                        <button
-	                          type="button"
-	                          onClick={() => handleStatusChange(detailedAppointment.id, 'cancelled')}
-	                          className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-3 text-sm font-semibold text-rose-700 hover:bg-rose-100"
-	                        >
-	                          {detailedAppointment.status === 'confirmed' ? 'Отмени' : 'Откажи'}
-	                        </button>
-	                      )}
-	                    </div>
-	                  </div>
-	                )}
-
-	                <div className="grid gap-3">
-	                  <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-	                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Дата и слот</p>
-	                    <p className="mt-2 text-sm font-semibold text-gray-900">
-	                      {formatAppointmentDay(detailedAppointment?.start_at || selectedInboxItem!.start_at)}
-	                    </p>
-	                  </div>
-	                  <div className="grid grid-cols-2 gap-3">
-	                    <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-	                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Телефон</p>
-	                      <p className="mt-2 text-sm font-semibold text-gray-900">
-	                        {formatBulgarianPhoneForDisplay(
-	                          detailedAppointment?.client_phone || selectedInboxItem!.client_phone,
-	                        )}
-	                      </p>
-	                    </div>
-	                    <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-	                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Стойност</p>
-	                      <p className="mt-2 text-sm font-semibold text-gray-900">
-	                        {detailedAppointment?.price != null ? `${detailedAppointment.price} €` : 'Няма цена'}
-	                      </p>
-	                    </div>
-	                  </div>
-		                  {detailedAppointment && (
-		                    <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-		                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Резюме</p>
-		                      <div className="mt-2 space-y-2 text-sm text-gray-700">
-		                        <p><span className="font-semibold text-gray-900">Услуга:</span> {detailedAppointment.service_name}</p>
-		                        <p><span className="font-semibold text-gray-900">Специалист:</span> {detailedAppointment.staff_name}</p>
-		                        <p><span className="font-semibold text-gray-900">Статус:</span> {getOwnerStatusPresentation(detailedAppointment).label}</p>
-		                      </div>
-		                    </div>
-		                  )}
-                      {detailedAppointment && renderVisitProgressControls(detailedAppointment)}
-		                  {selectedContext?.appointment && (
-	                    <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-	                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Име в клиентската база</p>
-                      <p className="mt-2 text-sm font-semibold text-gray-900">
-                        {selectedContext.appointment.client_name_source === 'owner'
-                          ? 'Ръчно име от собственика'
-                          : 'Име от първата клиентска заявка'}
-                      </p>
-                      {selectedContext.appointment.original_client_name &&
-                        selectedContext.appointment.original_client_name !== selectedContext.appointment.client_name && (
-                          <p className="mt-2 text-xs text-gray-500">
-                            Първо въведено име: {selectedContext.appointment.original_client_name}
-                          </p>
-                        )}
-                    </div>
-                  )}
-                  <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Следваща стъпка</p>
-                    <p className="mt-2 text-sm font-semibold text-gray-900">
-                      {selectedInboxItem?.bucket === 'actions'
-                        ? 'Вземете решение оттук или директно от Telegram.'
-                        : selectedInboxItem?.bucket === 'updates'
-                          ? 'Прегледайте обновлението и маркирайте като видяно.'
-                          : detailedAppointment?.status === 'confirmed'
-                            ? 'Часът е активен. Можете да го приключите, маркирате като no-show или отмените.'
-                            : 'Прегледайте детайлите на записа.'}
-                    </p>
-                  </div>
-                  {detailedAppointment?.internal_notes && (
-                    <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Бележка</p>
-                      <p className="mt-2 text-sm text-gray-700">{detailedAppointment.internal_notes}</p>
-                    </div>
-                  )}
-                  {selectedContext?.appointment?.cancellation_reason && (
-                    <div className="rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3">
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-rose-500">Причина за отмяна</p>
-                      <p className="mt-2 text-sm text-rose-700">{selectedContext.appointment.cancellation_reason}</p>
-                    </div>
-                  )}
-                </div>
-
-	                <div className="rounded-3xl border border-gray-100 bg-white/80 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Notification center</p>
-                      <h4 className="mt-1 text-sm font-black text-gray-900">История на известията</h4>
-                    </div>
-                    {contextLoading && <Loader2 className="h-4 w-4 animate-spin text-[var(--color-primary)]" />}
-                  </div>
-
-                  <div className="mt-4 space-y-3">
-                    {selectedContext?.notifications?.length ? (
-	                      selectedContext.notifications.map((entry) => (
-	                        <div key={entry.id} className="rounded-2xl border border-gray-100 bg-gray-50/80 px-3 py-3">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="text-sm font-semibold text-gray-900">
-                                {getNotificationTypeLabel(entry.type)}
-                              </p>
-                              <p className="mt-1 text-xs text-gray-500">
-                                {getChannelLabel(entry.channel)} · {entry.sent_at ? formatAppointmentDay(entry.sent_at) : formatAppointmentDay(entry.created_at)}
-                              </p>
-                            </div>
-                            <span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${getNotificationStatusClass(entry.status)}`}>
-                              {getNotificationStatusLabel(entry.status)}
-                            </span>
-                          </div>
-	                          {entry.error_message && (
-	                            <p className="mt-2 text-xs text-rose-600">{entry.error_message}</p>
-	                          )}
-                            {entry.status === 'failed' && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  retryNotificationMutation.mutate({
-                                    appointmentId: detailedAppointment!.id,
-                                    type: entry.type,
-                                  })
-                                }
-                                className="mt-3 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100"
-                              >
-                                Retry
-                              </button>
-                            )}
-	                        </div>
-	                      ))
-                    ) : (
-                      <p className="text-sm text-gray-400">За този запис още няма лог на известия.</p>
-                    )}
-                  </div>
-                </div>
-
-                {selectedInboxItem?.bucket === 'updates' && (
-                  <button
-                    type="button"
-                    onClick={() => handleOwnerAlertRead(selectedInboxItem.id)}
-                    className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-100"
-                  >
-                    Маркирай като видяно
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="mt-4 rounded-3xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-sm text-gray-400">
-                Изберете заявка, клиентско действие или запис от календара.
-              </div>
-            )}
+            {renderDesktopDetailsPanel()}
           </div>
         </aside>
       </div>
+
+      <section className="hidden xl:block min-[1600px]:hidden">
+        <div className="glass-panel rounded-[28px] border border-white/60 p-5 shadow-xl shadow-black/5">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Детайлен панел</p>
+          {renderDesktopDetailsPanel()}
+        </div>
+      </section>
 
       {selectedRecordId && !showMobileDetails && (
         <button
@@ -2456,7 +2278,7 @@ export default function AdminCalendarPage() {
                     {detailedAppointment.price != null && (
                       <div className="text-right">
                         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Стойност</p>
-                        <p className="mt-2 text-sm font-semibold text-gray-900">{detailedAppointment.price} €</p>
+                        <p className="mt-2 text-sm font-semibold text-gray-900">{formatEuroAmount(detailedAppointment.price)}</p>
                       </div>
                     )}
                   </div>
@@ -2536,7 +2358,10 @@ export default function AdminCalendarPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setShowBlockEditor(false)}
+                  onClick={() => {
+                    resetBlockDraft();
+                    setShowBlockEditor(false);
+                  }}
                   className="flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200"
                 >
                   <X className="h-4 w-4" />
@@ -2546,7 +2371,7 @@ export default function AdminCalendarPage() {
               <div className="grid gap-5 p-5 lg:grid-cols-[360px_minmax(0,1fr)]">
                 <div className="space-y-4">
                   <div className="rounded-[28px] border border-gray-100 bg-gray-50 p-4">
-                    <h4 className="text-sm font-black text-gray-900">Нов блок</h4>
+                    <h4 className="text-sm font-black text-gray-900">{editingBlockId ? 'Редакция на блок' : 'Нов блок'}</h4>
                     <div className="mt-4 space-y-3">
                       <div>
                         <label className="mb-1.5 block text-sm font-semibold text-gray-700">Специалист</label>
@@ -2632,8 +2457,17 @@ export default function AdminCalendarPage() {
                         }
                         className="w-full rounded-2xl bg-[var(--color-primary)] px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-[var(--color-primary)]/20 disabled:opacity-50"
                       >
-                        {createBlockMutation.isPending ? 'Записване...' : 'Запази блока'}
+                        {createBlockMutation.isPending ? 'Записване...' : editingBlockId ? 'Обнови блока' : 'Запази блока'}
                       </button>
+                      {editingBlockId && (
+                        <button
+                          type="button"
+                          onClick={resetBlockDraft}
+                          className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+                        >
+                          Откажи редакцията
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2679,14 +2513,23 @@ export default function AdminCalendarPage() {
                               </p>
                               {block.note && <p className="mt-2 text-sm text-gray-500">{block.note}</p>}
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => deleteBlockMutation.mutate(block.id)}
-                              className="flex h-10 w-10 items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
-                              aria-label="Изтрий блока"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => openBlockEditorForBlock(block)}
+                                className="rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100"
+                              >
+                                Редактирай
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => deleteBlockMutation.mutate(block.id)}
+                                className="flex h-10 w-10 items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                                aria-label="Изтрий блока"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
                           </div>
                         </div>
                       );

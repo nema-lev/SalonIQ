@@ -159,6 +159,30 @@ export class AppointmentsController {
     return this.appointmentsService.deleteStaffException(tenant, id);
   }
 
+  @Patch('staff-blocks/:id')
+  @UseGuards(JwtAuthGuard, TenantGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Редактирай блокиран интервал за специалист' })
+  async updateStaffBlock(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: { staffId?: string; startAt?: string; endAt?: string; type?: string; note?: string },
+    @CurrentTenant() tenant: Tenant,
+  ) {
+    if (!dto?.staffId || !dto?.startAt || !dto?.endAt) {
+      throw new BadRequestException('Липсват данни за блокирания интервал.');
+    }
+
+    return this.appointmentsService.updateStaffException(
+      tenant,
+      id,
+      dto.staffId,
+      dto.startAt,
+      dto.endAt,
+      dto.type,
+      dto.note,
+    );
+  }
+
   @Get('upcoming')
   @UseGuards(JwtAuthGuard, TenantGuard)
   @ApiBearerAuth()

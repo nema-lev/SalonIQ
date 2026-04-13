@@ -24,6 +24,7 @@ export class AuthService {
   ) {}
 
   async login(email: string, password: string) {
+    const normalizedEmail = email.trim().toLowerCase();
     const owners = await this.prisma.$queryRaw<
       {
         id: string;
@@ -43,7 +44,7 @@ export class AuthService {
              t.schema_name, t.business_name, t.slug, t.is_active, t.plan_status, t.plan_renews_at
       FROM public.tenant_owners o
       JOIN public.tenants t ON t.id = o.tenant_id
-      WHERE o.email = ${email}
+      WHERE lower(o.email) = ${normalizedEmail}
       LIMIT 1
     `;
 

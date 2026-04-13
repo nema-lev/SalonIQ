@@ -876,7 +876,6 @@ export default function AdminCalendarPage() {
   const focusRecord = (id: string, startAt: string, workspace_unused?: string) => {
     setSelectedRecordId(id);
     setCurrentDate(new Date(startAt));
-    setMobileWorkspace(workspace);
   };
 
   const renderPrimaryActions = (appointment: Appointment) => {

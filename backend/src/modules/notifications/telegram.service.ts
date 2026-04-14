@@ -362,6 +362,38 @@ export class TelegramService {
     return this.sendMessage(botToken, ownerChatId, text);
   }
 
+  async sendWaitlistAvailable(
+    botToken: string,
+    chatId: string,
+    appointment: AppointmentDetails,
+    businessName: string,
+    bookingUrl?: string,
+  ): Promise<SendMessageResult> {
+    const zonedStart = toZonedTime(appointment.startAt, TIMEZONE);
+    const dateStr = format(zonedStart, "EEEE, d MMMM yyyy 'г.'", { locale: bg });
+    const timeStr = format(zonedStart, 'HH:mm');
+
+    const text =
+      `📣 *${businessName} — свободен час*\n` +
+      `─────────────────\n\n` +
+      `*${appointment.clientName}*, освободи се място от чакащите:\n\n` +
+      `🔧 *${appointment.serviceName}*\n` +
+      `👤 *${appointment.staffName}*\n` +
+      `📅 *${dateStr}*\n` +
+      `🕐 *${timeStr}*\n` +
+      (appointment.address ? `📍 *${appointment.address}*\n` : '') +
+      `\nАко още Ви устройва, запишете часа от бутона по-долу.`;
+
+    const keyboard =
+      bookingUrl
+        ? {
+            inline_keyboard: [[{ text: '📅 Запиши часа', url: bookingUrl }]],
+          }
+        : undefined;
+
+    return this.sendMessage(botToken, chatId, text, keyboard);
+  }
+
   async sendOwnerPasswordRecovery(
     botToken: string,
     ownerChatId: string,

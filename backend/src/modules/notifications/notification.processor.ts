@@ -15,8 +15,12 @@ const TIMEZONE = 'Europe/Sofia';
 interface NotificationJobData {
   tenantId: string;
   tenantSchemaName: string;
-  appointmentId: string;
-  clientId: string;
+  appointmentId?: string;
+  clientId?: string;
+  waitlistEntryId?: string;
+  slotStartAt?: string;
+  slotStaffId?: string;
+  publicBaseUrl?: string;
   status?: string;
   reason?: string;
   newStatus?: string;
@@ -52,6 +56,19 @@ interface AppointmentRow {
   intake_data: unknown;
   service_name: string;
   staff_name: string;
+}
+
+interface WaitlistNotificationRow {
+  waitlist_id: string;
+  client_id: string;
+  client_name: string;
+  client_salutation: string;
+  client_phone: string;
+  telegram_chat_id: string | null;
+  notifications_consent: boolean;
+  service_name: string;
+  service_duration_minutes: number;
+  staff_name: string | null;
 }
 
 /**
@@ -113,6 +130,129 @@ export class NotificationProcessor extends WorkerHost {
 
     if (!hasTelegram && !hasSms) {
       this.logger.warn(`Tenant ${tenantId} has no Telegram or SMS configuration — skipping`);
+      return;
+    }
+
+    if (job.name === NotificationJobType.WAITLIST_AVAILABLE) {
+      const waitlistEntryId = job.data.waitlistEntryId;
+      if (!waitlistEntryId) {
+        this.logger.warn(`Waitlist notification without waitlistEntryId for tenant ${tenantId}`);
+        return;
+      }
+
+      const waitlistRows = await this.prisma.queryInSchema<WaitlistNotificationRow[]>(
+        tenantSchemaName,
+        `
+        SELECT
+          w.id as waitlist_id,
+          c.id as client_id,
+          c.name as client_name,
+          COALESCE(NULLIF(c.profile_data->>'salutation', ''), split_part(c.name, ' ', 1)) as client_salutation,
+          c.phone as client_phone,
+          c.telegram_chat_id,
+          c.notifications_consent,
+          sv.name as service_name,
+          sv.duration_minutes as service_duration_minutes,
+          s.name as staff_name
+        FROM waitlist w
+        JOIN clients c ON c.id = w.client_id
+        JOIN services sv ON sv.id = w.service_id
+        LEFT JOIN staff s ON s.id = COALESCE($2::uuid, w.staff_id)
+        WHERE w.id = $1::uuid
+        LIMIT 1
+        `,
+        [waitlistEntryId, job.data.slotStaffId || null],
+      );
+
+      if (!waitlistRows.length) {
+        this.logger.warn(`Waitlist entry ${waitlistEntryId} not found`);
+        return;
+      }
+
+      const waitlist = waitlistRows[0];
+      const slotStartAt = job.data.slotStartAt ? new Date(job.data.slotStartAt) : null;
+      if (!slotStartAt || Number.isNaN(slotStartAt.getTime())) {
+        this.logger.warn(`Waitlist notification ${waitlistEntryId} missing slotStartAt`);
+        return;
+      }
+
+      const slotEndAt = new Date(slotStartAt.getTime() + waitlist.service_duration_minutes * 60 * 1000);
+      const waitlistDetails: AppointmentDetails = {
+        id: waitlist.waitlist_id,
+        clientName: waitlist.client_salutation || waitlist.client_name,
+        clientPhone: waitlist.client_phone,
+        serviceName: waitlist.service_name,
+        staffName: waitlist.staff_name || 'Първи свободен специалист',
+        startAt: slotStartAt,
+        endAt: slotEndAt,
+        address: tenant.address,
+      };
+      const bookingUrl: string | undefined =
+        (tenant.custom_domain ? `https://${tenant.custom_domain}` : null) ||
+        (typeof job.data.publicBaseUrl === 'string' ? job.data.publicBaseUrl.trim().replace(/\/$/, '') : null) ||
+        undefined;
+
+      let waitlistResult: { success: boolean; messageId?: number; error?: string } | null = null;
+      let waitlistChannel: NotificationChannel = NotificationChannel.TELEGRAM;
+
+      if (waitlist.notifications_consent && hasTelegram && waitlist.telegram_chat_id) {
+        waitlistChannel = NotificationChannel.TELEGRAM;
+        waitlistResult = await this.telegramService.sendWaitlistAvailable(
+          tenant.telegram_bot_token,
+          waitlist.telegram_chat_id,
+          waitlistDetails,
+          tenant.business_name,
+          bookingUrl,
+        );
+      } else if (waitlist.notifications_consent && hasSms) {
+        const zonedStart = toZonedTime(waitlistDetails.startAt, TIMEZONE);
+        waitlistChannel = NotificationChannel.SMS;
+        const smsResult = await this.smsService.sendWaitlistAvailableSms({
+          phone: waitlistDetails.clientPhone,
+          clientName: waitlistDetails.clientName,
+          businessName: tenant.business_name,
+          serviceName: waitlistDetails.serviceName,
+          staffName: waitlistDetails.staffName,
+          dateStr: format(zonedStart, "d MMMM yyyy 'г.'", { locale: bg }),
+          timeStr: format(zonedStart, 'HH:mm'),
+          bookingUrl,
+          apiToken: tenant.sms_api_key!,
+          senderId: tenant.sms_sender_id!,
+        });
+        waitlistResult = {
+          success: smsResult.success,
+          error: smsResult.error,
+        };
+      }
+
+      if (!waitlistResult) {
+        this.logger.debug(
+          `No eligible waitlist channel for entry ${waitlistEntryId} (consent=${waitlist.notifications_consent}, telegram=${Boolean(waitlist.telegram_chat_id)}, hasTelegram=${hasTelegram}, hasSms=${hasSms})`,
+        );
+        return;
+      }
+
+      await this.prisma.queryInSchema(
+        tenantSchemaName,
+        `INSERT INTO notifications_log (
+          appointment_id, client_id, channel, type, status,
+          external_id, error_message, sent_at
+        ) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, NOW())`,
+        [
+          appointmentId || null,
+          waitlist.client_id,
+          waitlistChannel,
+          NotificationJobType.WAITLIST_AVAILABLE,
+          waitlistResult.success ? NotificationStatus.SENT : NotificationStatus.FAILED,
+          waitlistResult.messageId?.toString() || null,
+          waitlistResult.error || null,
+        ],
+      );
+
+      if (!waitlistResult.success) {
+        throw new Error(`Notification failed: ${waitlistResult.error}`);
+      }
+
       return;
     }
 

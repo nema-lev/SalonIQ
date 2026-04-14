@@ -26,6 +26,7 @@ type ProposalDecision = 'accept' | 'reject';
 type UpcomingMode = 'all' | 'attention' | 'pending';
 type SlotResult = { start: string; end: string; remainingSpots?: number; capacity?: number };
 type VisitProgress = 'scheduled' | 'checked_in' | 'in_service' | 'completed' | 'no_show';
+type WaitlistStatus = 'waiting' | 'notified' | 'booked' | 'cancelled';
 
 interface ProposalMetadata {
   kind: ProposalKind;
@@ -52,6 +53,37 @@ interface ClientProfileData {
   salutation?: string;
   nameSource?: 'owner' | 'client_submitted';
   originalClientName?: string;
+}
+
+interface ClientContactInput {
+  clientName: string;
+  clientPhone: string;
+  clientEmail?: string | null;
+}
+
+export interface WaitlistRow {
+  id: string;
+  status: WaitlistStatus;
+  desired_date: string | null;
+  desired_from: string | null;
+  desired_to: string | null;
+  notified_at: string | null;
+  expires_at: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string | null;
+  booked_appointment_id: string | null;
+  last_notified_slot_start_at: string | null;
+  client_id: string;
+  client_name: string;
+  client_phone: string;
+  client_telegram_chat_id?: string | null;
+  client_notifications_consent?: boolean;
+  service_id: string;
+  service_name: string;
+  staff_id: string | null;
+  staff_name: string | null;
+  staff_color: string | null;
 }
 
 type OwnerStateKind =
@@ -128,6 +160,8 @@ export class AppointmentsService {
     const fromUtc = new Date(from);
     const toUtc = new Date(to);
 
+    await this.prisma.ensureWaitlistTable(tenant.schemaName);
+
     const staffRows = await this.prisma.queryInSchema<any[]>(
       tenant.schemaName,
       `
@@ -191,10 +225,55 @@ export class AppointmentsService {
       staffId ? [fromUtc.toISOString(), toUtc.toISOString(), staffId] : [fromUtc.toISOString(), toUtc.toISOString()],
     );
 
+    const waitlist = await this.prisma.queryInSchema<WaitlistRow[]>(
+      tenant.schemaName,
+      `
+      SELECT
+        w.id,
+        w.status,
+        w.desired_date::text,
+        w.desired_from::text,
+        w.desired_to::text,
+        w.notified_at::text,
+        w.expires_at::text,
+        w.notes,
+        w.created_at::text,
+        w.updated_at::text,
+        w.booked_appointment_id::text,
+        w.last_notified_slot_start_at::text,
+        c.id as client_id,
+        c.name as client_name,
+        c.phone as client_phone,
+        c.telegram_chat_id as client_telegram_chat_id,
+        c.notifications_consent as client_notifications_consent,
+        sv.id as service_id,
+        sv.name as service_name,
+        s.id as staff_id,
+        s.name as staff_name,
+        s.color as staff_color
+      FROM waitlist w
+      JOIN clients c ON c.id = w.client_id
+      JOIN services sv ON sv.id = w.service_id
+      LEFT JOIN staff s ON s.id = w.staff_id
+      WHERE w.status IN ('waiting', 'notified')
+        AND (
+          w.desired_date IS NULL
+          OR (w.desired_date >= $1::date AND w.desired_date < $2::date)
+        )
+        ${staffId ? 'AND (w.staff_id = $3::uuid OR w.staff_id IS NULL)' : ''}
+      ORDER BY w.desired_date NULLS LAST, w.desired_from NULLS LAST, w.created_at ASC
+      LIMIT 60
+      `,
+      staffId
+        ? [fromUtc.toISOString().slice(0, 10), toUtc.toISOString().slice(0, 10), staffId]
+        : [fromUtc.toISOString().slice(0, 10), toUtc.toISOString().slice(0, 10)],
+    );
+
     return {
       staff: staffRows,
       appointments: appointments.map((row) => this.decorateAppointmentPresentation(row)),
       exceptions,
+      waitlist,
     };
   }
 
@@ -371,6 +450,8 @@ export class AppointmentsService {
   }
 
   async getAppointmentContext(tenant: Tenant, appointmentId: string) {
+    await this.prisma.ensureWaitlistTable(tenant.schemaName);
+
     const [appointment] = await this.prisma.queryInSchema<any[]>(
       tenant.schemaName,
       `
@@ -384,6 +465,8 @@ export class AppointmentsService {
         a.cancellation_reason,
         a.cancelled_by,
         a.created_at,
+        a.service_id,
+        a.staff_id,
         a.intake_data,
         COALESCE(NULLIF(a.intake_data->'stateMeta'->>'transitionKind', ''), a.status) as owner_view_state,
         CASE
@@ -406,6 +489,8 @@ export class AppointmentsService {
         c.name as client_name,
         c.phone as client_phone,
         c.email as client_email,
+        c.telegram_chat_id as client_telegram_chat_id,
+        c.notifications_consent as client_notifications_consent,
         COALESCE(NULLIF(c.profile_data->>'salutation', ''), split_part(c.name, ' ', 1)) as client_salutation,
         COALESCE(NULLIF(c.profile_data->>'nameSource', ''), 'owner') as client_name_source,
         COALESCE(NULLIF(c.profile_data->>'originalClientName', ''), c.name) as original_client_name
@@ -444,9 +529,104 @@ export class AppointmentsService {
       [appointmentId],
     );
 
+    const [notificationSummary] = await this.prisma.queryInSchema<any[]>(
+      tenant.schemaName,
+      `
+      SELECT
+        COUNT(*)::int as total,
+        COUNT(*) FILTER (WHERE status = 'failed')::int as failed,
+        COUNT(*) FILTER (WHERE status IN ('sent', 'delivered'))::int as sent,
+        MAX(COALESCE(sent_at, created_at)) as last_event_at
+      FROM notifications_log
+      WHERE appointment_id = $1::uuid
+      `,
+      [appointmentId],
+    );
+
+    const waitlistCandidates = await this.prisma.queryInSchema<WaitlistRow[]>(
+      tenant.schemaName,
+      `
+      SELECT
+        w.id,
+        w.status,
+        w.desired_date::text,
+        w.desired_from::text,
+        w.desired_to::text,
+        w.notified_at::text,
+        w.expires_at::text,
+        w.notes,
+        w.created_at::text,
+        w.updated_at::text,
+        w.booked_appointment_id::text,
+        w.last_notified_slot_start_at::text,
+        c.id as client_id,
+        c.name as client_name,
+        c.phone as client_phone,
+        c.telegram_chat_id as client_telegram_chat_id,
+        c.notifications_consent as client_notifications_consent,
+        sv.id as service_id,
+        sv.name as service_name,
+        s.id as staff_id,
+        s.name as staff_name,
+        s.color as staff_color
+      FROM waitlist w
+      JOIN clients c ON c.id = w.client_id
+      JOIN services sv ON sv.id = w.service_id
+      LEFT JOIN staff s ON s.id = w.staff_id
+      WHERE w.status IN ('waiting', 'notified')
+        AND w.service_id = $1::uuid
+        AND (w.staff_id IS NULL OR w.staff_id = $2::uuid)
+      ORDER BY
+        CASE WHEN w.desired_date = $3::date THEN 0 ELSE 1 END,
+        w.desired_date NULLS LAST,
+        w.desired_from NULLS LAST,
+        w.created_at ASC
+      LIMIT 6
+      `,
+      [appointment.service_id, appointment.staff_id, new Date(appointment.start_at).toISOString().slice(0, 10)],
+    );
+
+    const [tenantDelivery] = await this.prisma.queryInSchema<any[]>(
+      'public',
+      `
+      SELECT
+        telegram_bot_token,
+        telegram_chat_id,
+        sms_api_key,
+        sms_sender_id,
+        theme_config
+      FROM tenants
+      WHERE id = $1::uuid
+      LIMIT 1
+      `,
+      [tenant.id],
+    );
+
+    const themeConfig =
+      typeof tenantDelivery?.theme_config === 'string'
+        ? JSON.parse(tenantDelivery.theme_config || '{}')
+        : (tenantDelivery?.theme_config || {});
+
     return {
       appointment: this.decorateAppointmentPresentation(appointment),
       notifications,
+      notification_summary: notificationSummary || {
+        total: 0,
+        failed: 0,
+        sent: 0,
+        last_event_at: null,
+      },
+      delivery_profile: {
+        owner_telegram: Boolean(tenantDelivery?.telegram_chat_id && tenantDelivery?.telegram_bot_token),
+        client_telegram: Boolean(appointment.client_telegram_chat_id),
+        client_sms_fallback: Boolean(
+          (themeConfig?.enableSmsNotifications ?? Boolean(tenantDelivery?.sms_api_key && tenantDelivery?.sms_sender_id)) &&
+          tenantDelivery?.sms_api_key &&
+          tenantDelivery?.sms_sender_id,
+        ),
+        client_consent: Boolean(appointment.client_notifications_consent),
+      },
+      waitlist_candidates: waitlistCandidates,
     };
   }
 
@@ -1271,8 +1451,26 @@ export class AppointmentsService {
   async updateVisitProgress(
     tenant: Tenant,
     appointmentId: string,
-    progress: 'scheduled' | 'checked_in' | 'in_service',
+    progress: VisitProgress,
   ) {
+    if (progress === 'completed') {
+      await this.updateStatus(tenant, appointmentId, AppointmentStatus.COMPLETED);
+      return {
+        id: appointmentId,
+        progress,
+        label: this.getVisitProgressLabel(progress),
+      };
+    }
+
+    if (progress === 'no_show') {
+      await this.updateStatus(tenant, appointmentId, AppointmentStatus.NO_SHOW);
+      return {
+        id: appointmentId,
+        progress,
+        label: this.getVisitProgressLabel(progress),
+      };
+    }
+
     const [appointment] = await this.prisma.queryInSchema<{ id: string; status: string; intake_data: unknown }[]>(
       tenant.schemaName,
       `SELECT id, status, intake_data FROM appointments WHERE id = $1::uuid LIMIT 1`,
@@ -1310,6 +1508,296 @@ export class AppointmentsService {
       progress,
       label: this.getVisitProgressLabel(progress),
     };
+  }
+
+  async retryFailedNotifications(tenant: Tenant, appointmentId: string) {
+    const failed = await this.prisma.queryInSchema<{ type: string }[]>(
+      tenant.schemaName,
+      `
+      SELECT DISTINCT type
+      FROM notifications_log
+      WHERE appointment_id = $1::uuid
+        AND status = 'failed'
+      ORDER BY type ASC
+      `,
+      [appointmentId],
+    );
+
+    if (!failed.length) {
+      return { appointmentId, retried: 0 };
+    }
+
+    let retried = 0;
+    for (const entry of failed) {
+      await this.retryNotification(tenant, appointmentId, entry.type);
+      retried += 1;
+    }
+
+    return { appointmentId, retried };
+  }
+
+  async listWaitlist(tenant: Tenant, from?: string, to?: string) {
+    await this.prisma.ensureWaitlistTable(tenant.schemaName);
+
+    const hasRange = Boolean(from && to);
+    return this.prisma.queryInSchema<WaitlistRow[]>(
+      tenant.schemaName,
+      `
+      SELECT
+        w.id,
+        w.status,
+        w.desired_date::text,
+        w.desired_from::text,
+        w.desired_to::text,
+        w.notified_at::text,
+        w.expires_at::text,
+        w.notes,
+        w.created_at::text,
+        w.updated_at::text,
+        w.booked_appointment_id::text,
+        w.last_notified_slot_start_at::text,
+        c.id as client_id,
+        c.name as client_name,
+        c.phone as client_phone,
+        c.telegram_chat_id as client_telegram_chat_id,
+        c.notifications_consent as client_notifications_consent,
+        sv.id as service_id,
+        sv.name as service_name,
+        s.id as staff_id,
+        s.name as staff_name,
+        s.color as staff_color
+      FROM waitlist w
+      JOIN clients c ON c.id = w.client_id
+      JOIN services sv ON sv.id = w.service_id
+      LEFT JOIN staff s ON s.id = w.staff_id
+      WHERE 1 = 1
+        ${hasRange ? 'AND (w.desired_date IS NULL OR (w.desired_date >= $1::date AND w.desired_date <= $2::date))' : ''}
+      ORDER BY
+        CASE w.status
+          WHEN 'waiting' THEN 0
+          WHEN 'notified' THEN 1
+          WHEN 'booked' THEN 2
+          ELSE 3
+        END,
+        w.desired_date NULLS LAST,
+        w.desired_from NULLS LAST,
+        w.created_at ASC
+      LIMIT 100
+      `,
+      hasRange ? [from, to] : [],
+    );
+  }
+
+  async createWaitlistEntry(
+    tenant: Tenant,
+    dto: {
+      clientName: string;
+      clientPhone: string;
+      clientEmail?: string | null;
+      serviceId: string;
+      staffId?: string | null;
+      desiredDate?: string | null;
+      desiredFrom?: string | null;
+      desiredTo?: string | null;
+      notes?: string | null;
+    },
+  ) {
+    await this.prisma.ensureWaitlistTable(tenant.schemaName);
+
+    const clientId = await this.findOrCreateClientByContact(tenant.schemaName, {
+      clientName: dto.clientName,
+      clientPhone: dto.clientPhone,
+      clientEmail: dto.clientEmail,
+    });
+
+    const [created] = await this.prisma.queryInSchema<WaitlistRow[]>(
+      tenant.schemaName,
+      `
+      INSERT INTO waitlist (
+        client_id,
+        service_id,
+        staff_id,
+        desired_date,
+        desired_from,
+        desired_to,
+        notes,
+        status,
+        updated_at
+      )
+      VALUES ($1::uuid, $2::uuid, $3::uuid, $4::date, $5::time, $6::time, $7, 'waiting', NOW())
+      RETURNING
+        id,
+        status,
+        desired_date::text,
+        desired_from::text,
+        desired_to::text,
+        notified_at::text,
+        expires_at::text,
+        notes,
+        created_at::text,
+        updated_at::text,
+        booked_appointment_id::text,
+        last_notified_slot_start_at::text,
+        client_id,
+        service_id,
+        staff_id
+      `,
+      [
+        clientId,
+        dto.serviceId,
+        dto.staffId || null,
+        dto.desiredDate || null,
+        dto.desiredFrom || null,
+        dto.desiredTo || null,
+        dto.notes?.trim() || null,
+      ],
+    );
+
+    return created;
+  }
+
+  async updateWaitlistStatus(
+    tenant: Tenant,
+    waitlistId: string,
+    status: WaitlistStatus,
+    bookedAppointmentId?: string | null,
+  ) {
+    await this.prisma.ensureWaitlistTable(tenant.schemaName);
+
+    const [updated] = await this.prisma.queryInSchema<WaitlistRow[]>(
+      tenant.schemaName,
+      `
+      UPDATE waitlist
+      SET status = $2,
+          booked_appointment_id = $3::uuid,
+          updated_at = NOW()
+      WHERE id = $1::uuid
+      RETURNING
+        id,
+        status,
+        desired_date::text,
+        desired_from::text,
+        desired_to::text,
+        notified_at::text,
+        expires_at::text,
+        notes,
+        created_at::text,
+        updated_at::text,
+        booked_appointment_id::text,
+        last_notified_slot_start_at::text,
+        client_id,
+        service_id,
+        staff_id
+      `,
+      [waitlistId, status, bookedAppointmentId || null],
+    );
+
+    if (!updated) {
+      throw new NotFoundException('Записът в чакащи не е намерен.');
+    }
+
+    return updated;
+  }
+
+  async notifyWaitlistEntry(
+    tenant: Tenant,
+    waitlistId: string,
+    dto: {
+      slotStartAt?: string | null;
+      slotStaffId?: string | null;
+      appointmentId?: string | null;
+      publicBaseUrl?: string | null;
+    },
+  ) {
+    await this.prisma.ensureWaitlistTable(tenant.schemaName);
+
+    const [waitlist] = await this.prisma.queryInSchema<WaitlistRow[]>(
+      tenant.schemaName,
+      `
+      SELECT
+        w.id,
+        w.status,
+        w.desired_date::text,
+        w.desired_from::text,
+        w.desired_to::text,
+        w.notified_at::text,
+        w.expires_at::text,
+        w.notes,
+        w.created_at::text,
+        w.updated_at::text,
+        w.booked_appointment_id::text,
+        w.last_notified_slot_start_at::text,
+        c.id as client_id,
+        c.name as client_name,
+        c.phone as client_phone,
+        c.telegram_chat_id as client_telegram_chat_id,
+        c.notifications_consent as client_notifications_consent,
+        sv.id as service_id,
+        sv.name as service_name,
+        s.id as staff_id,
+        s.name as staff_name,
+        s.color as staff_color
+      FROM waitlist w
+      JOIN clients c ON c.id = w.client_id
+      JOIN services sv ON sv.id = w.service_id
+      LEFT JOIN staff s ON s.id = w.staff_id
+      WHERE w.id = $1::uuid
+      LIMIT 1
+      `,
+      [waitlistId],
+    );
+
+    if (!waitlist) {
+      throw new NotFoundException('Записът в чакащи не е намерен.');
+    }
+
+    const slotStartAt =
+      dto.slotStartAt ||
+      (waitlist.desired_date && waitlist.desired_from
+        ? `${waitlist.desired_date}T${waitlist.desired_from}+03:00`
+        : null);
+
+    if (!slotStartAt) {
+      throw new BadRequestException('Липсва слот за изпращане към чакащия клиент.');
+    }
+
+    const sent = await this.processNotificationNow(
+      NotificationJobType.WAITLIST_AVAILABLE,
+      {
+        tenantId: tenant.id,
+        tenantSchemaName: tenant.schemaName,
+        appointmentId: dto.appointmentId || undefined,
+        clientId: waitlist.client_id,
+        waitlistEntryId: waitlistId,
+        slotStartAt,
+        slotStaffId: dto.slotStaffId || waitlist.staff_id || undefined,
+        publicBaseUrl: dto.publicBaseUrl || undefined,
+      } as any,
+      {
+        tenantSlug: tenant.slug,
+        appointmentId: dto.appointmentId || waitlistId,
+        context: 'waitlist-available',
+      },
+    );
+
+    if (!sent) {
+      throw new ConflictException('Известието до чакащия клиент не беше изпратено.');
+    }
+
+    await this.prisma.queryInSchema(
+      tenant.schemaName,
+      `
+      UPDATE waitlist
+      SET status = 'notified',
+          notified_at = NOW(),
+          last_notified_slot_start_at = $2::timestamptz,
+          updated_at = NOW()
+      WHERE id = $1::uuid
+      `,
+      [waitlistId, slotStartAt],
+    );
+
+    return { id: waitlistId, notified: true };
   }
 
   async retryNotification(tenant: Tenant, appointmentId: string, type: string) {
@@ -1553,9 +2041,20 @@ export class AppointmentsService {
   // ─── Private helpers ──────────────────────────────────────────────────
 
   private async findOrCreateClient(schemaName: string, dto: CreateAppointmentDto): Promise<string> {
-    const normalizedPhone = normalizeBulgarianPhone(dto.clientPhone);
+    return this.findOrCreateClientByContact(schemaName, {
+      clientName: dto.clientName,
+      clientPhone: dto.clientPhone,
+      clientEmail: dto.clientEmail,
+    });
+  }
+
+  private async findOrCreateClientByContact(
+    schemaName: string,
+    input: ClientContactInput,
+  ): Promise<string> {
+    const normalizedPhone = normalizeBulgarianPhone(input.clientPhone);
     const phoneVariants = buildBulgarianPhoneVariants(normalizedPhone);
-    const submittedName = this.sanitizeClientSubmittedName(dto.clientName);
+    const submittedName = this.sanitizeClientSubmittedName(input.clientName);
     const fallbackName = submittedName || this.buildAutoClientName(normalizedPhone);
     const fallbackSalutation = this.getDefaultSalutation(fallbackName);
 
@@ -1615,7 +2114,7 @@ export class AppointmentsService {
       [
         fallbackName,
         normalizedPhone,
-        dto.clientEmail || null,
+        input.clientEmail || null,
         true,
         JSON.stringify({
           salutation: fallbackSalutation,

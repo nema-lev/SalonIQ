@@ -137,10 +137,34 @@ interface StaffException {
   staff_color?: string;
 }
 
+interface WaitlistEntry {
+  id: string;
+  status: 'waiting' | 'notified' | 'booked' | 'cancelled';
+  desired_date: string | null;
+  desired_from: string | null;
+  desired_to: string | null;
+  notified_at: string | null;
+  expires_at: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string | null;
+  booked_appointment_id: string | null;
+  last_notified_slot_start_at: string | null;
+  client_id: string;
+  client_name: string;
+  client_phone: string;
+  service_id: string;
+  service_name: string;
+  staff_id: string | null;
+  staff_name: string | null;
+  staff_color: string | null;
+}
+
 interface CalendarBoardResponse {
   staff: CalendarBoardStaff[];
   appointments: Appointment[];
   exceptions: StaffException[];
+  waitlist: WaitlistEntry[];
 }
 
 interface AppointmentContextResponse {
@@ -157,6 +181,19 @@ interface AppointmentContextResponse {
     owner_view_label: string;
   };
   notifications: NotificationLogEntry[];
+  notification_summary: {
+    total: number;
+    failed: number;
+    sent: number;
+    last_event_at: string | null;
+  };
+  delivery_profile: {
+    owner_telegram: boolean;
+    client_telegram: boolean;
+    client_sms_fallback: boolean;
+    client_consent: boolean;
+  };
+  waitlist_candidates: WaitlistEntry[];
 }
 
 const STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
@@ -280,6 +317,10 @@ function getNotificationTypeLabel(type: string) {
     'booking-cancelled-business': 'Отказ от салона',
     booking_proposal: 'Предложен нов час',
     'booking-proposal': 'Предложен нов час',
+    booking_rescheduled: 'Преместен час',
+    'booking-rescheduled': 'Преместен час',
+    waitlist_available: 'Чакащи клиенти',
+    'waitlist-available': 'Чакащи клиенти',
     reminder_24h: 'Напомняне 24 ч.',
     'reminder-24h': 'Напомняне 24 ч.',
     reminder_2h: 'Напомняне 2 ч.',
@@ -404,7 +445,8 @@ function getMinuteOffset(value: string, startHour: number) {
 }
 
 function getWorkingDayKey(value: Date) {
-  return format(value, 'EEE', { locale: bg }).toLowerCase().slice(0, 3);
+  const keys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  return keys[value.getDay()] || 'mon';
 }
 
 function getExceptionTypeLabel(type: string) {
@@ -415,6 +457,17 @@ function getExceptionTypeLabel(type: string) {
     partial_day: 'Частичен блок',
   };
   return labels[type] || 'Блокиран интервал';
+}
+
+function getWaitlistStatusPresentation(status: WaitlistEntry['status']) {
+  const config: Record<WaitlistEntry['status'], { label: string; cls: string }> = {
+    waiting: { label: 'Чака', cls: 'border-amber-200 bg-amber-50 text-amber-700' },
+    notified: { label: 'Уведомен', cls: 'border-sky-200 bg-sky-50 text-sky-700' },
+    booked: { label: 'Записан', cls: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
+    cancelled: { label: 'Архивиран', cls: 'border-slate-200 bg-slate-100 text-slate-600' },
+  };
+
+  return config[status];
 }
 
 function matchesCalendarStatusFilter(
@@ -450,6 +503,7 @@ export default function AdminCalendarPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [showBlockEditor, setShowBlockEditor] = useState(false);
+  const [showWaitlistModal, setShowWaitlistModal] = useState(false);
   const [proposalTarget, setProposalTarget] = useState<Appointment | null>(null);
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const [mobileWorkspace, setMobileWorkspace] = useState<'calendar' | 'inbox'>('calendar');
@@ -461,6 +515,20 @@ export default function AdminCalendarPage() {
   const [draggedAppointmentId, setDraggedAppointmentId] = useState<string | null>(null);
   const [dropPreview, setDropPreview] = useState<{ staffId: string; startAt: string } | null>(null);
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
+  const [resizingBlock, setResizingBlock] = useState<{
+    id: string;
+    edge: 'start' | 'end';
+    staffId: string;
+    type: string;
+    note: string | null;
+    originalStartAt: string;
+    originalEndAt: string;
+    previewStartAt: string;
+    previewEndAt: string;
+    columnTop: number;
+    columnHeight: number;
+    dayIso: string;
+  } | null>(null);
   const dateInputRef = useRef<HTMLInputElement | null>(null);
   const [blockDraft, setBlockDraft] = useState({
     staffId: 'all',
@@ -469,6 +537,17 @@ export default function AdminCalendarPage() {
     endTime: '13:00',
     type: 'blocked',
     note: '',
+  });
+  const [waitlistDraft, setWaitlistDraft] = useState({
+    clientName: '',
+    clientPhone: '',
+    clientEmail: '',
+    serviceId: '',
+    staffId: '',
+    desiredDate: format(new Date(), 'yyyy-MM-dd'),
+    desiredFrom: '10:00',
+    desiredTo: '11:00',
+    notes: '',
   });
   const dateKey = format(currentDate, 'yyyy-MM-dd');
   const rangeStart = useMemo(
@@ -489,6 +568,22 @@ export default function AdminCalendarPage() {
       apiClient.get<CalendarBoardResponse>('/appointments/calendar-board', {
         from: rangeStart.toISOString(),
         to: rangeEndExclusive.toISOString(),
+      }),
+    staleTime: 30 * 1000,
+  });
+
+  const { data: adminServices = [] } = useQuery({
+    queryKey: ['admin-calendar-services'],
+    queryFn: () => apiClient.get<Service[]>('/services/admin'),
+    staleTime: 60 * 1000,
+  });
+
+  const { data: waitlistEntries = [] } = useQuery({
+    queryKey: ['appointments-waitlist', rangeStart.toISOString(), rangeEndExclusive.toISOString()],
+    queryFn: () =>
+      apiClient.get<WaitlistEntry[]>('/appointments/waitlist', {
+        from: rangeStart.toISOString().slice(0, 10),
+        to: addDays(rangeEndExclusive, -1).toISOString().slice(0, 10),
       }),
     staleTime: 30 * 1000,
   });
@@ -527,6 +622,17 @@ export default function AdminCalendarPage() {
     onSettled: () => {
       setDraggedAppointmentId(null);
       setDropPreview(null);
+    },
+  });
+
+  const retryAllNotificationsMutation = useMutation({
+    mutationFn: (appointmentId: string) => apiClient.post(`/appointments/${appointmentId}/notifications/retry-failed`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['appointment-context'] });
+      toast.success('Пуснати са отново всички неуспешни известия.');
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Неуспешен retry на всички известия.');
     },
   });
 
@@ -576,8 +682,32 @@ export default function AdminCalendarPage() {
     },
   });
 
+  const resizeBlockMutation = useMutation({
+    mutationFn: ({
+      id,
+      staffId,
+      startAt,
+      endAt,
+      type,
+      note,
+    }: {
+      id: string;
+      staffId: string;
+      startAt: string;
+      endAt: string;
+      type: string;
+      note?: string | null;
+    }) => apiClient.patch(`/appointments/staff-blocks/${id}`, { staffId, startAt, endAt, type, note }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['appointments-calendar-board'] });
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Неуспешно преоразмеряване на блока.');
+    },
+  });
+
   const visitProgressMutation = useMutation({
-    mutationFn: ({ id, progress }: { id: string; progress: 'scheduled' | 'checked_in' | 'in_service' }) =>
+    mutationFn: ({ id, progress }: { id: string; progress: 'scheduled' | 'checked_in' | 'in_service' | 'completed' | 'no_show' }) =>
       apiClient.patch(`/appointments/${id}/visit-progress`, { progress }),
     onSuccess: () => {
       refetch();
@@ -602,6 +732,78 @@ export default function AdminCalendarPage() {
     },
   });
 
+  const waitlistCreateMutation = useMutation({
+    mutationFn: () =>
+      apiClient.post('/appointments/waitlist', {
+        clientName: waitlistDraft.clientName.trim(),
+        clientPhone: normalizeBulgarianPhone(waitlistDraft.clientPhone),
+        clientEmail: waitlistDraft.clientEmail.trim() || undefined,
+        serviceId: waitlistDraft.serviceId,
+        staffId: waitlistDraft.staffId || undefined,
+        desiredDate: waitlistDraft.desiredDate || undefined,
+        desiredFrom: waitlistDraft.desiredFrom || undefined,
+        desiredTo: waitlistDraft.desiredTo || undefined,
+        notes: waitlistDraft.notes.trim() || undefined,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['appointments-waitlist'] });
+      qc.invalidateQueries({ queryKey: ['appointments-calendar-board'] });
+      toast.success('Клиентът е добавен в чакащи.');
+      setWaitlistDraft((current) => ({
+        ...current,
+        clientName: '',
+        clientPhone: '',
+        clientEmail: '',
+        notes: '',
+      }));
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Неуспешно добавяне в чакащи.');
+    },
+  });
+
+  const waitlistStatusMutation = useMutation({
+    mutationFn: ({ id, status, bookedAppointmentId }: { id: string; status: WaitlistEntry['status']; bookedAppointmentId?: string | null }) =>
+      apiClient.patch(`/appointments/waitlist/${id}/status`, { status, bookedAppointmentId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['appointments-waitlist'] });
+      qc.invalidateQueries({ queryKey: ['appointments-calendar-board'] });
+      qc.invalidateQueries({ queryKey: ['appointment-context'] });
+      toast.success('Статусът на чакащия клиент е обновен.');
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Неуспешно обновяване на чакащия клиент.');
+    },
+  });
+
+  const waitlistNotifyMutation = useMutation({
+    mutationFn: ({
+      id,
+      slotStartAt,
+      slotStaffId,
+      appointmentId,
+    }: {
+      id: string;
+      slotStartAt?: string | null;
+      slotStaffId?: string | null;
+      appointmentId?: string | null;
+    }) =>
+      apiClient.post(`/appointments/waitlist/${id}/notify`, {
+        slotStartAt,
+        slotStaffId,
+        appointmentId,
+        publicBaseUrl: typeof window !== 'undefined' ? window.location.origin : undefined,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['appointments-waitlist'] });
+      qc.invalidateQueries({ queryKey: ['appointment-context'] });
+      toast.success('Чакащият клиент е уведомен.');
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Неуспешно известяване на чакащия клиент.');
+    },
+  });
+
   const handleStatusChange = async (id: string, status: string) => {
     try {
       await apiClient.patch(`/appointments/${id}/status`, { status });
@@ -609,6 +811,7 @@ export default function AdminCalendarPage() {
       qc.invalidateQueries({ queryKey: ['appointments-upcoming'] });
       qc.invalidateQueries({ queryKey: ['admin-header-upcoming'] });
       qc.invalidateQueries({ queryKey: ['appointment-context', id] });
+      qc.invalidateQueries({ queryKey: ['appointments-waitlist'] });
     } catch {
       toast.error('Грешка при смяна на статуса');
     }
@@ -634,6 +837,7 @@ export default function AdminCalendarPage() {
     qc.invalidateQueries({ queryKey: ['admin-header-upcoming'] });
     qc.invalidateQueries({ queryKey: ['appointment-context'] });
     qc.invalidateQueries({ queryKey: ['appointments-calendar-board'] });
+    qc.invalidateQueries({ queryKey: ['appointments-waitlist'] });
   };
 
   const handleDropReschedule = (appointmentId: string, startAt: string, staffId: string) => {
@@ -694,6 +898,10 @@ export default function AdminCalendarPage() {
     [inboxItems, selectedRecordId],
   );
   const detailedAppointment = selectedContext?.appointment ?? selectedAppointment;
+  const activeWaitlistEntries = useMemo(
+    () => waitlistEntries.filter((entry) => ['waiting', 'notified'].includes(entry.status)),
+    [waitlistEntries],
+  );
 
   const attentionCount = actionItems.length;
   const updateCount = updateItems.length;
@@ -768,7 +976,7 @@ export default function AdminCalendarPage() {
       ),
     [calendarBoard?.exceptions, calendarView, currentDate, staffFilter],
   );
-  const calendarRange = useMemo(() => buildCalendarRange(filteredDayAppointments), [filteredDayAppointments]);
+  const calendarRange = useMemo(() => buildCalendarRange(appointmentsInView), [appointmentsInView]);
   const hourSlots = useMemo(
     () =>
       Array.from({ length: calendarRange.endHour - calendarRange.startHour + 1 }, (_, index) => calendarRange.startHour + index),
@@ -806,6 +1014,45 @@ export default function AdminCalendarPage() {
       ),
     [visibleExceptions],
   );
+  const weekGridColumns = useMemo(
+    () =>
+      weekDays.flatMap((day) =>
+        visibleStaffColumns.map((staffMember) => ({
+          key: `${format(day, 'yyyy-MM-dd')}-${staffMember.id}`,
+          day,
+          staff: staffMember,
+          appointments: sortByStartAt(
+            appointments.filter(
+              (appointment) =>
+                appointment.staff_id === staffMember.id &&
+                isSameDay(new Date(appointment.start_at), day) &&
+                matchesCalendarStatusFilter(appointment, statusFilter),
+            ),
+          ),
+          exceptions: (calendarBoard?.exceptions ?? []).filter(
+            (exception) =>
+              exception.staff_id === staffMember.id &&
+              isSameDay(new Date(exception.start_at), day),
+          ),
+        })),
+      ),
+    [appointments, calendarBoard?.exceptions, statusFilter, visibleStaffColumns, weekDays],
+  );
+  const matchingWaitlistEntries = useMemo(() => {
+    if (selectedContext?.waitlist_candidates?.length) {
+      return selectedContext.waitlist_candidates;
+    }
+
+    if (!detailedAppointment) {
+      return activeWaitlistEntries;
+    }
+
+    return activeWaitlistEntries.filter(
+      (entry) =>
+        entry.service_id === detailedAppointment.service_id &&
+        (!entry.staff_id || entry.staff_id === detailedAppointment.staff_id),
+    );
+  }, [activeWaitlistEntries, detailedAppointment, selectedContext?.waitlist_candidates]);
   const calendarTitle = useMemo(() => {
     if (calendarView !== 'week') {
       return format(currentDate, "d MMMM yyyy 'г.'", { locale: bg });
@@ -916,6 +1163,140 @@ export default function AdminCalendarPage() {
     setShowMobileDetails(true);
   };
 
+  useEffect(() => {
+    if (!resizingBlock) return;
+
+    const handleMouseMove = (event: MouseEvent) => {
+      setResizingBlock((current) => {
+        if (!current) return current;
+
+        const snappedHalfHours = Math.round(
+          Math.min(Math.max(event.clientY - current.columnTop, 0), current.columnHeight) / (pixelsPerHour / 2),
+        );
+        const totalMinutes = calendarRange.startHour * 60 + snappedHalfHours * 30;
+        const nextPoint = new Date(current.dayIso);
+        nextPoint.setHours(Math.floor(totalMinutes / 60), totalMinutes % 60, 0, 0);
+
+        if (current.edge === 'start') {
+          const latestAllowed = new Date(new Date(current.previewEndAt).getTime() - 30 * 60 * 1000);
+          if (nextPoint >= latestAllowed) return current;
+          return { ...current, previewStartAt: nextPoint.toISOString() };
+        }
+
+        const earliestAllowed = new Date(new Date(current.previewStartAt).getTime() + 30 * 60 * 1000);
+        if (nextPoint <= earliestAllowed) return current;
+        return { ...current, previewEndAt: nextPoint.toISOString() };
+      });
+    };
+
+    const handleMouseUp = () => {
+      setResizingBlock((current) => {
+        if (!current) return null;
+
+        if (
+          current.previewStartAt !== current.originalStartAt ||
+          current.previewEndAt !== current.originalEndAt
+        ) {
+          resizeBlockMutation.mutate({
+            id: current.id,
+            staffId: current.staffId,
+            startAt: current.previewStartAt,
+            endAt: current.previewEndAt,
+            type: current.type,
+            note: current.note,
+          });
+        }
+
+        return null;
+      });
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [calendarRange.startHour, pixelsPerHour, resizeBlockMutation, resizingBlock]);
+
+  const beginBlockResize = (
+    event: React.MouseEvent<HTMLButtonElement>,
+    block: StaffException,
+    edge: 'start' | 'end',
+    day: Date,
+  ) => {
+    event.stopPropagation();
+    const column = (event.currentTarget.closest('[data-calendar-column]') as HTMLElement | null);
+    if (!column) return;
+
+    const rect = column.getBoundingClientRect();
+    setResizingBlock({
+      id: block.id,
+      edge,
+      staffId: block.staff_id,
+      type: block.type,
+      note: block.note || null,
+      originalStartAt: block.start_at,
+      originalEndAt: block.end_at,
+      previewStartAt: block.start_at,
+      previewEndAt: block.end_at,
+      columnTop: rect.top,
+      columnHeight: rect.height,
+      dayIso: new Date(day).toISOString(),
+    });
+  };
+
+  const getExceptionWindow = (block: StaffException) => {
+    if (resizingBlock?.id === block.id) {
+      return {
+        startAt: resizingBlock.previewStartAt,
+        endAt: resizingBlock.previewEndAt,
+      };
+    }
+
+    return {
+      startAt: block.start_at,
+      endAt: block.end_at,
+    };
+  };
+
+  const prefillBlockAroundAppointment = (appointment: Appointment, offsetMinutes: 0 | 30 = 30) => {
+    const start = new Date(appointment.end_at);
+    const end = new Date(start.getTime() + offsetMinutes * 60 * 1000);
+    setEditingBlockId(null);
+    setBlockDraft({
+      staffId: appointment.staff_id,
+      date: format(new Date(appointment.start_at), 'yyyy-MM-dd'),
+      startTime: format(start, 'HH:mm'),
+      endTime: format(end, 'HH:mm'),
+      type: 'blocked',
+      note: 'Буфер след часа',
+    });
+    setShowBlockEditor(true);
+  };
+
+  const prefillWaitlistFromAppointment = (appointment: Appointment) => {
+    setWaitlistDraft({
+      clientName: appointment.client_name,
+      clientPhone: formatBulgarianPhoneForDisplay(appointment.client_phone),
+      clientEmail: '',
+      serviceId: appointment.service_id,
+      staffId: appointment.staff_id,
+      desiredDate: format(new Date(appointment.start_at), 'yyyy-MM-dd'),
+      desiredFrom: format(new Date(appointment.start_at), 'HH:mm'),
+      desiredTo: format(new Date(appointment.end_at), 'HH:mm'),
+      notes: `Чака при освобождаване на слот за ${appointment.service_name}.`,
+    });
+    setShowWaitlistModal(true);
+  };
+
+  const quickReschedule = (appointment: Appointment, offsetDays: number, offsetMinutes = 0) => {
+    const nextStart = new Date(appointment.start_at);
+    nextStart.setDate(nextStart.getDate() + offsetDays);
+    nextStart.setMinutes(nextStart.getMinutes() + offsetMinutes);
+    handleDropReschedule(appointment.id, nextStart.toISOString(), appointment.staff_id);
+  };
+
   const renderPrimaryActions = (appointment: Appointment) => {
     if (appointment.status === 'pending' || appointment.status === 'proposal_pending') {
       return (
@@ -974,7 +1355,7 @@ export default function AdminCalendarPage() {
   };
 
   const renderVisitProgressControls = (appointment: Appointment) => {
-    if (appointment.status !== 'confirmed') return null;
+    if (!['confirmed', 'completed', 'no_show'].includes(appointment.status)) return null;
 
     return (
       <div className="space-y-2">
@@ -984,16 +1365,23 @@ export default function AdminCalendarPage() {
             {appointment.visit_progress_label || 'Очаква се'}
           </span>
         </div>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-2 gap-2">
           {[
             { key: 'scheduled', label: 'Очаква се' },
             { key: 'checked_in', label: 'Пристигнал' },
             { key: 'in_service', label: 'В процес' },
+            { key: 'completed', label: 'Приключен' },
+            { key: 'no_show', label: 'Неявил се' },
           ].map((option) => (
             <button
               key={option.key}
               type="button"
-              onClick={() => visitProgressMutation.mutate({ id: appointment.id, progress: option.key as 'scheduled' | 'checked_in' | 'in_service' })}
+              onClick={() =>
+                visitProgressMutation.mutate({
+                  id: appointment.id,
+                  progress: option.key as 'scheduled' | 'checked_in' | 'in_service' | 'completed' | 'no_show',
+                })
+              }
               className={`rounded-2xl px-3 py-2 text-xs font-semibold transition-colors ${
                 appointment.visit_progress === option.key
                   ? 'bg-gray-900 text-white'
@@ -1072,6 +1460,15 @@ export default function AdminCalendarPage() {
                     {detailedAppointment.status === 'pending' ? 'Потвърди' : 'Приключи'}
                   </button>
                 )}
+              {['pending', 'confirmed', 'proposal_pending'].includes(detailedAppointment.status) && (
+                <button
+                  type="button"
+                  onClick={() => prefillWaitlistFromAppointment(detailedAppointment)}
+                  className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-semibold text-amber-700 hover:bg-amber-100"
+                >
+                  В чакащи
+                </button>
+              )}
               {['pending', 'proposal_pending'].includes(detailedAppointment.status) && (
                 <button
                   type="button"
@@ -1082,6 +1479,33 @@ export default function AdminCalendarPage() {
                   className="rounded-2xl border border-violet-200 bg-violet-50 px-3 py-3 text-sm font-semibold text-violet-700 hover:bg-violet-100"
                 >
                   Нов час
+                </button>
+              )}
+              {detailedAppointment.status === 'confirmed' && (
+                <button
+                  type="button"
+                  onClick={() => quickReschedule(detailedAppointment, 0, 30)}
+                  className="rounded-2xl border border-sky-200 bg-sky-50 px-3 py-3 text-sm font-semibold text-sky-700 hover:bg-sky-100"
+                >
+                  +30 мин
+                </button>
+              )}
+              {detailedAppointment.status === 'confirmed' && (
+                <button
+                  type="button"
+                  onClick={() => quickReschedule(detailedAppointment, 1, 0)}
+                  className="rounded-2xl border border-sky-200 bg-sky-50 px-3 py-3 text-sm font-semibold text-sky-700 hover:bg-sky-100"
+                >
+                  Утре
+                </button>
+              )}
+              {detailedAppointment.status === 'confirmed' && (
+                <button
+                  type="button"
+                  onClick={() => prefillBlockAroundAppointment(detailedAppointment)}
+                  className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                >
+                  Буфер след часа
                 </button>
               )}
               {detailedAppointment.status === 'confirmed' && (
@@ -1159,6 +1583,120 @@ export default function AdminCalendarPage() {
           </div>
         )}
 
+        {selectedContext?.delivery_profile && (
+          <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Канали за известия</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <span
+                className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${
+                  selectedContext.delivery_profile.owner_telegram
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                    : 'border-gray-200 bg-gray-50 text-gray-500'
+                }`}
+              >
+                Owner Telegram
+              </span>
+              <span
+                className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${
+                  selectedContext.delivery_profile.client_telegram
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                    : 'border-gray-200 bg-gray-50 text-gray-500'
+                }`}
+              >
+                Клиент Telegram
+              </span>
+              <span
+                className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${
+                  selectedContext.delivery_profile.client_sms_fallback
+                    ? 'border-sky-200 bg-sky-50 text-sky-700'
+                    : 'border-gray-200 bg-gray-50 text-gray-500'
+                }`}
+              >
+                SMS fallback
+              </span>
+              <span
+                className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${
+                  selectedContext.delivery_profile.client_consent
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                    : 'border-rose-200 bg-rose-50 text-rose-700'
+                }`}
+              >
+                {selectedContext.delivery_profile.client_consent ? 'Има consent' : 'Няма consent'}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {matchingWaitlistEntries.length > 0 && (
+          <div className="rounded-3xl border border-gray-100 bg-white/80 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Waitlist</p>
+                <h4 className="mt-1 text-sm font-black text-gray-900">Чакащи за тази услуга</h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowWaitlistModal(true)}
+                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+              >
+                Отвори списъка
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {matchingWaitlistEntries.slice(0, 4).map((entry) => {
+                const status = getWaitlistStatusPresentation(entry.status);
+                return (
+                  <div key={entry.id} className="rounded-2xl border border-gray-100 bg-gray-50/80 px-3 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-gray-900">{entry.client_name}</p>
+                        <p className="mt-1 text-xs text-gray-500">
+                          {entry.service_name}
+                          {entry.staff_name ? ` · ${entry.staff_name}` : ''}
+                        </p>
+                      </div>
+                      <span className={`rounded-full border px-2 py-1 text-[10px] font-bold ${status.cls}`}>
+                        {status.label}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-gray-500">{formatBulgarianPhoneForDisplay(entry.client_phone)}</p>
+                    {entry.desired_date && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        Желан слот: {entry.desired_date}
+                        {entry.desired_from ? ` · ${entry.desired_from.slice(0, 5)}` : ''}
+                      </p>
+                    )}
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          waitlistNotifyMutation.mutate({
+                            id: entry.id,
+                            slotStartAt: detailedAppointment?.start_at || entry.last_notified_slot_start_at || null,
+                            slotStaffId: detailedAppointment?.staff_id || entry.staff_id || null,
+                            appointmentId: detailedAppointment?.id || null,
+                          })
+                        }
+                        className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-100"
+                      >
+                        Изпрати слот
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => waitlistStatusMutation.mutate({ id: entry.id, status: 'booked', bookedAppointmentId: detailedAppointment?.id || null })}
+                        className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                      >
+                        Маркирай записан
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {detailedAppointment?.internal_notes && (
           <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Бележка</p>
@@ -1179,8 +1717,36 @@ export default function AdminCalendarPage() {
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Notification center</p>
               <h4 className="mt-1 text-sm font-black text-gray-900">История на известията</h4>
             </div>
-            {contextLoading && <Loader2 className="h-4 w-4 animate-spin text-[var(--color-primary)]" />}
+            <div className="flex items-center gap-2">
+              {(selectedContext?.notification_summary?.failed ?? 0) > 0 && detailedAppointment && (
+                <button
+                  type="button"
+                  onClick={() => retryAllNotificationsMutation.mutate(detailedAppointment.id)}
+                  className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                >
+                  Retry всички грешки
+                </button>
+              )}
+              {contextLoading && <Loader2 className="h-4 w-4 animate-spin text-[var(--color-primary)]" />}
+            </div>
           </div>
+
+          {selectedContext?.notification_summary && (
+            <div className="mt-4 grid grid-cols-3 gap-2">
+              <div className="rounded-2xl border border-gray-100 bg-white px-3 py-3">
+                <p className="text-xs text-gray-400">Всичко</p>
+                <p className="mt-1 text-sm font-black text-gray-900">{selectedContext.notification_summary.total}</p>
+              </div>
+              <div className="rounded-2xl border border-gray-100 bg-white px-3 py-3">
+                <p className="text-xs text-gray-400">Изпратени</p>
+                <p className="mt-1 text-sm font-black text-emerald-700">{selectedContext.notification_summary.sent}</p>
+              </div>
+              <div className="rounded-2xl border border-gray-100 bg-white px-3 py-3">
+                <p className="text-xs text-gray-400">Грешки</p>
+                <p className="mt-1 text-sm font-black text-rose-700">{selectedContext.notification_summary.failed}</p>
+              </div>
+            </div>
+          )}
 
           <div className="mt-4 space-y-3">
             {selectedContext?.notifications?.length ? (
@@ -1545,6 +2111,14 @@ export default function AdminCalendarPage() {
                     <Plus className="w-4 h-4" />
                     Нова резервация
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowWaitlistModal(true)}
+                    className="inline-flex items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700 hover:bg-amber-100"
+                  >
+                    <ClipboardList className="w-4 h-4" />
+                    Чакащи ({activeWaitlistEntries.length})
+                  </button>
                 </div>
               </div>
 
@@ -1686,195 +2260,266 @@ export default function AdminCalendarPage() {
                       {calendarEmptyState ? (
                         renderCalendarEmptyState()
                       ) : calendarView === 'week' ? (
-		                    <div className="overflow-x-auto rounded-[28px] border border-white/70 bg-white/90 shadow-sm">
-		                      <div className="grid min-w-[1180px] grid-cols-7 gap-0">
-		                        {weekDays.map((day) => {
-                              const dayItems = sortByStartAt(
-                                appointments.filter(
-                                  (appointment) =>
-                                    isSameDay(new Date(appointment.start_at), day) &&
-                                    (staffFilter === 'all' || appointment.staff_id === staffFilter) &&
-                                    matchesCalendarStatusFilter(appointment, statusFilter),
-                                ),
-                              );
-                              const exceptionCount = (calendarBoard?.exceptions ?? []).filter(
-                                (exception) =>
-                                  isSameDay(new Date(exception.start_at), day) &&
-                                  (staffFilter === 'all' || exception.staff_id === staffFilter),
-                              ).length;
+                        <div className="overflow-x-auto rounded-[28px] border border-white/70 bg-white/90 shadow-sm">
+                          <div
+                            className="grid min-w-[1680px]"
+                            style={{ gridTemplateColumns: `72px repeat(${Math.max(weekGridColumns.length, 1)}, minmax(180px, 1fr))` }}
+                          >
+                            <div className="sticky top-0 z-10 border-b border-r border-gray-100 bg-white/95 px-3 py-4 backdrop-blur">
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">Час</p>
+                            </div>
+                            {weekGridColumns.map((column, index) => (
+                              <div
+                                key={column.key}
+                                className={`sticky top-0 z-10 border-b border-r border-gray-100 bg-white/95 px-3 py-4 backdrop-blur last:border-r-0 ${
+                                  index % Math.max(visibleStaffColumns.length, 1) === 0 ? 'border-l-2 border-l-gray-200' : ''
+                                } ${isToday(column.day) ? 'bg-[var(--color-primary)]/5' : ''}`}
+                              >
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+                                  {format(column.day, 'EEE d MMM', { locale: bg })}
+                                </p>
+                                <div className="mt-2 flex items-center gap-2">
+                                  <span
+                                    className="flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-black text-white"
+                                    style={{ backgroundColor: column.staff.color || 'var(--color-primary)' }}
+                                  >
+                                    {getInitials(column.staff.name)}
+                                  </span>
+                                  <div className="min-w-0">
+                                    <p className="truncate text-sm font-black text-gray-900">{column.staff.name}</p>
+                                    <p className="text-[11px] text-gray-500">{column.appointments.length} записа</p>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
 
-		                          return (
-		                            <div
-		                              key={day.toISOString()}
-		                              className={`min-h-[640px] border-r border-gray-100 px-3 py-4 last:border-r-0 ${
-		                                isToday(day) ? 'bg-[var(--color-primary)]/3' : 'bg-white/70'
-		                              }`}
-		                            >
-		                              <div className="border-b border-gray-100 pb-3">
-		                                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
-		                                  {format(day, 'EEEE', { locale: bg })}
-		                                </p>
-		                                <div className="mt-1 flex items-center justify-between gap-2">
-		                                  <h5 className="text-lg font-black text-gray-900">{format(day, 'd MMM', { locale: bg })}</h5>
-		                                  {isToday(day) && (
-		                                    <span className="rounded-full bg-[var(--color-primary)]/10 px-2.5 py-1 text-[11px] font-bold text-[var(--color-primary)]">
-		                                      Днес
-		                                    </span>
-		                                  )}
-		                                </div>
-		                                <div className="mt-3 flex flex-wrap gap-2 text-[11px] font-semibold">
-		                                  <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-700">
-                                        {dayItems.filter((item) => item.status === 'confirmed').length} запазени
-                                      </span>
-		                                  <span className="rounded-full bg-amber-50 px-2.5 py-1 text-amber-700">
-                                        {dayItems.filter((item) => item.status === 'pending').length} заявки
-                                      </span>
-		                                  {exceptionCount > 0 && (
-		                                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">
-                                          {exceptionCount} блока
-                                        </span>
-		                                  )}
-		                                </div>
-		                              </div>
+                            <div className="relative border-r border-gray-100 bg-gray-50/60" style={{ height: `${calendarHeight}px` }}>
+                              {hourSlots.slice(0, -1).map((hour) => {
+                                const top = (hour - calendarRange.startHour) * pixelsPerHour;
+                                return (
+                                  <div key={hour}>
+                                    <div className="absolute left-0 right-0 border-t border-dashed border-gray-200" style={{ top: `${top}px` }} />
+                                    <div className="absolute left-0 top-0 -translate-y-1/2 px-3 text-xs font-semibold text-gray-400" style={{ top: `${top}px` }}>
+                                      {String(hour).padStart(2, '0')}:00
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
 
-                              <div className="mt-3 space-y-3">
-                                {visibleStaffColumns.map((staffMember) => {
-                                  const staffItems = dayItems.filter((item) => item.staff_id === staffMember.id);
-                                  const staffBlocks = (calendarBoard?.exceptions ?? []).filter(
-                                    (exception) => exception.staff_id === staffMember.id && isSameDay(new Date(exception.start_at), day),
-                                  );
-                                  const isDropTarget =
-                                    dropPreview?.staffId === staffMember.id &&
-                                    dropPreview?.startAt &&
-                                    isSameDay(new Date(dropPreview.startAt), day);
+                            {weekGridColumns.map((column, index) => (
+                              <div
+                                key={column.key}
+                                data-calendar-column={column.key}
+                                className={`relative border-r border-gray-100 bg-white/70 last:border-r-0 ${
+                                  index % Math.max(visibleStaffColumns.length, 1) === 0 ? 'border-l-2 border-l-gray-200' : ''
+                                }`}
+                                style={{ height: `${calendarHeight}px` }}
+                              >
+                                {showUnavailable && (() => {
+                                  const dayKey = getWorkingDayKey(column.day);
+                                  const schedule = column.staff.working_hours?.[dayKey];
+                                  const overlays: Array<{
+                                    id?: string;
+                                    top: number;
+                                    height: number;
+                                    label: string;
+                                    kind: 'closed' | 'exception';
+                                    block?: StaffException;
+                                  }> = [];
 
-                                  return (
+                                  if (!schedule?.isOpen) {
+                                    overlays.push({
+                                      top: 0,
+                                      height: calendarHeight,
+                                      label: 'Почивен ден',
+                                      kind: 'closed',
+                                    });
+                                  } else {
+                                    const [openHour, openMinute] = schedule.open.split(':').map(Number);
+                                    const [closeHour, closeMinute] = schedule.close.split(':').map(Number);
+                                    const openOffset = (openHour * 60 + openMinute - calendarRange.startHour * 60) / 60 * pixelsPerHour;
+                                    const closeOffset = (closeHour * 60 + closeMinute - calendarRange.startHour * 60) / 60 * pixelsPerHour;
+
+                                    if (openOffset > 0) {
+                                      overlays.push({
+                                        top: 0,
+                                        height: openOffset,
+                                        label: 'Извън работно време',
+                                        kind: 'closed',
+                                      });
+                                    }
+                                    if (closeOffset < calendarHeight) {
+                                      overlays.push({
+                                        top: Math.max(closeOffset, 0),
+                                        height: Math.max(calendarHeight - closeOffset, 0),
+                                        label: 'Извън работно време',
+                                        kind: 'closed',
+                                      });
+                                    }
+                                  }
+
+                                  for (const exception of column.exceptions) {
+                                    const window = getExceptionWindow(exception);
+                                    const top = Math.max((getMinuteOffset(window.startAt, calendarRange.startHour) / 60) * pixelsPerHour, 0);
+                                    const bottom = Math.min((getMinuteOffset(window.endAt, calendarRange.startHour) / 60) * pixelsPerHour, calendarHeight);
+                                    const height = Math.max(bottom - top, 40);
+                                    overlays.push({
+                                      id: exception.id,
+                                      top,
+                                      height,
+                                      label: exception.note || 'Блокиран интервал',
+                                      kind: 'exception',
+                                      block: exception,
+                                    });
+                                  }
+
+                                  return overlays.map((overlay, overlayIndex) => (
                                     <div
-                                      key={`${day.toISOString()}-${staffMember.id}`}
-                                      className={`rounded-3xl border p-3 transition-colors ${
-                                        isDropTarget
-                                          ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/6'
-                                          : 'border-gray-100 bg-white/90'
+                                      key={overlay.id || `${column.key}-overlay-${overlayIndex}`}
+                                      className={`absolute left-0 right-0 z-0 border-y ${
+                                        overlay.kind === 'exception' ? 'border-slate-300/70' : 'border-gray-200/80'
                                       }`}
-                                      onDragOver={(event) => {
-                                        if (!draggedAppointmentId) return;
-                                        const source = appointments.find((item) => item.id === draggedAppointmentId);
-                                        if (!source) return;
-                                        event.preventDefault();
-                                        const sourceDate = new Date(source.start_at);
-                                        const nextStart = new Date(day);
-                                        nextStart.setHours(sourceDate.getHours(), sourceDate.getMinutes(), 0, 0);
-                                        setDropPreview({ staffId: staffMember.id, startAt: nextStart.toISOString() });
-                                      }}
-                                      onDrop={(event) => {
-                                        if (!draggedAppointmentId) return;
-                                        const source = appointments.find((item) => item.id === draggedAppointmentId);
-                                        if (!source) return;
-                                        event.preventDefault();
-                                        const sourceDate = new Date(source.start_at);
-                                        const nextStart = new Date(day);
-                                        nextStart.setHours(sourceDate.getHours(), sourceDate.getMinutes(), 0, 0);
-                                        handleDropReschedule(draggedAppointmentId, nextStart.toISOString(), staffMember.id);
+                                      style={{
+                                        top: `${overlay.top}px`,
+                                        height: `${overlay.height}px`,
+                                        background:
+                                          overlay.kind === 'exception'
+                                            ? 'repeating-linear-gradient(-45deg, rgba(148,163,184,0.16), rgba(148,163,184,0.16) 6px, rgba(148,163,184,0.05) 6px, rgba(148,163,184,0.05) 12px)'
+                                            : 'rgba(148,163,184,0.08)',
                                       }}
                                     >
-                                      <div className="flex items-center justify-between gap-2">
-                                        <div className="flex items-center gap-2">
-                                          <span
-                                            className="flex h-8 w-8 items-center justify-center rounded-full text-[11px] font-black text-white"
-                                            style={{ backgroundColor: staffMember.color || 'var(--color-primary)' }}
+                                      <span className="absolute left-2 top-2 rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-500 shadow-sm">
+                                        {overlay.label}
+                                      </span>
+                                      {overlay.block && (
+                                        <>
+                                          <button
+                                            type="button"
+                                            onMouseDown={(event) => beginBlockResize(event, overlay.block!, 'start', column.day)}
+                                            className="absolute left-1/2 top-0 z-[3] h-3 w-10 -translate-x-1/2 -translate-y-1/2 rounded-full border border-slate-200 bg-white shadow"
+                                          />
+                                          <button
+                                            type="button"
+                                            onMouseDown={(event) => beginBlockResize(event, overlay.block!, 'end', column.day)}
+                                            className="absolute bottom-0 left-1/2 z-[3] h-3 w-10 -translate-x-1/2 translate-y-1/2 rounded-full border border-slate-200 bg-white shadow"
+                                          />
+                                          <button
+                                            type="button"
+                                            onClick={() => openBlockEditorForBlock(overlay.block!)}
+                                            className="absolute right-2 top-2 rounded-full border border-white/80 bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-600 shadow-sm"
                                           >
-                                            {getInitials(staffMember.name)}
-                                          </span>
-                                          <div className="min-w-0">
-                                            <p className="truncate text-sm font-black text-gray-900">{staffMember.name}</p>
-                                            <p className="text-[11px] text-gray-500">{staffItems.length} записа</p>
-                                          </div>
-                                        </div>
-                                        {staffBlocks.length > 0 && (
-                                          <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600">
-                                            {staffBlocks.length} блока
-                                          </span>
-                                        )}
-                                      </div>
-
-                                      {staffBlocks.length > 0 && showUnavailable && (
-                                        <div className="mt-3 flex flex-wrap gap-2">
-                                          {staffBlocks.slice(0, 2).map((block) => (
-                                            <button
-                                              key={block.id}
-                                              type="button"
-                                              onClick={() => openBlockEditorForBlock(block)}
-                                              className="rounded-2xl border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold text-slate-600"
-                                            >
-                                              {format(new Date(block.start_at), 'HH:mm')}–{format(new Date(block.end_at), 'HH:mm')} · {getExceptionTypeLabel(block.type)}
-                                            </button>
-                                          ))}
-                                        </div>
+                                            Редактирай
+                                          </button>
+                                        </>
                                       )}
-
-                                      <div className="mt-3 space-y-2">
-                                        {!staffItems.length ? (
-                                          <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-3 py-4 text-center text-xs text-gray-400">
-                                            Пуснете запис тук.
-                                          </div>
-                                        ) : (
-                                          staffItems.map((appointment) => {
-                                            const statusCfg = getOwnerStatusPresentation(appointment);
-                                            const accent = appointment.service_color || appointment.staff_color || 'var(--color-primary)';
-                                            const isSelected = appointment.id === selectedRecordId;
-
-                                            return (
-                                              <button
-                                                key={appointment.id}
-                                                type="button"
-                                                draggable={!['completed', 'cancelled', 'no_show'].includes(appointment.status)}
-                                                onDragStart={() => setDraggedAppointmentId(appointment.id)}
-                                                onDragEnd={() => {
-                                                  setDraggedAppointmentId(null);
-                                                  setDropPreview(null);
-                                                }}
-                                                onClick={() => focusRecord(appointment.id, appointment.start_at)}
-                                                className={`w-full rounded-2xl border p-3 text-left shadow-sm transition-transform hover:scale-[1.01] ${
-                                                  isSelected ? 'ring-2 ring-[var(--color-primary)]/25' : ''
-                                                }`}
-                                                style={{
-                                                  borderColor: colorWithAlpha(accent, '55', 'rgba(14, 165, 233, 0.3)'),
-                                                  backgroundColor: colorWithAlpha(accent, '18', 'rgba(14, 165, 233, 0.08)'),
-                                                }}
-                                              >
-                                                <div className="flex items-start justify-between gap-2">
-                                                  <p className="text-[11px] font-bold text-gray-700">
-                                                    {format(new Date(appointment.start_at), 'HH:mm')} - {format(new Date(appointment.end_at), 'HH:mm')}
-                                                  </p>
-                                                  <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusCfg.cls}`}>
-                                                    {statusCfg.label}
-                                                  </span>
-                                                </div>
-	                                                <p className="mt-2 line-clamp-2 text-sm font-black text-gray-900">{appointment.client_name}</p>
-	                                                <p className="mt-1 line-clamp-2 text-xs font-semibold text-gray-700">{appointment.service_name}</p>
-	                                                <p className="mt-2 text-[11px] text-gray-500">
-	                                                  {formatBulgarianPhoneForDisplay(appointment.client_phone)}
-	                                                </p>
-                                                  {appointment.status === 'confirmed' && (
-                                                    <span className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${getVisitProgressClass(appointment.visit_progress)}`}>
-                                                      {appointment.visit_progress_label}
-                                                    </span>
-                                                  )}
-	                                              </button>
-	                                            );
-	                                          })
-                                        )}
-                                      </div>
                                     </div>
+                                  ));
+                                })()}
+
+                                {halfHourDropSlots.map((slot) => {
+                                  const [hour, minute] = slot.label.split(':').map(Number);
+                                  const nextStart = new Date(column.day);
+                                  nextStart.setHours(hour, minute, 0, 0);
+                                  return (
+                                    <div
+                                      key={`${column.key}-${slot.key}`}
+                                      className={`absolute left-0 right-0 z-[1] transition-colors ${
+                                        dropPreview?.staffId === column.staff.id &&
+                                        dropPreview?.startAt === nextStart.toISOString()
+                                          ? 'bg-[var(--color-primary)]/8'
+                                          : ''
+                                      }`}
+                                      style={{ top: `${slot.top}px`, height: `${pixelsPerHour / 2}px` }}
+                                      onDragOver={(event) => {
+                                        if (!draggedAppointmentId) return;
+                                        event.preventDefault();
+                                        setDropPreview({ staffId: column.staff.id, startAt: nextStart.toISOString() });
+                                      }}
+                                      onDrop={(event) => {
+                                        event.preventDefault();
+                                        if (!draggedAppointmentId) return;
+                                        handleDropReschedule(draggedAppointmentId, nextStart.toISOString(), column.staff.id);
+                                      }}
+                                    />
+                                  );
+                                })}
+
+                                {hourSlots.slice(0, -1).map((hour) => {
+                                  const top = (hour - calendarRange.startHour) * pixelsPerHour;
+                                  return (
+                                    <div
+                                      key={hour}
+                                      className="absolute left-0 right-0 border-t border-gray-100"
+                                      style={{ top: `${top}px` }}
+                                    />
+                                  );
+                                })}
+
+                                {isToday(column.day) && nowIndicatorOffset !== null && (
+                                  <div
+                                    className="absolute left-0 right-0 z-[1] border-t-2 border-rose-400"
+                                    style={{ top: `${nowIndicatorOffset}px` }}
+                                  >
+                                    <span className="absolute -left-2 -top-2 h-4 w-4 rounded-full border-2 border-white bg-rose-500 shadow" />
+                                  </div>
+                                )}
+
+                                {column.appointments.map((appointment) => {
+                                  const startOffset = getMinuteOffset(appointment.start_at, calendarRange.startHour);
+                                  const endOffset = getMinuteOffset(appointment.end_at, calendarRange.startHour);
+                                  const top = (startOffset / 60) * pixelsPerHour + 4;
+                                  const height = Math.max(((endOffset - startOffset) / 60) * pixelsPerHour - 8, 56);
+                                  const statusCfg = getOwnerStatusPresentation(appointment);
+                                  const isSelected = selectedRecordId === appointment.id;
+                                  const accent = appointment.service_color || appointment.staff_color || 'var(--color-primary)';
+                                  const soft = colorWithAlpha(accent, '22', 'rgba(14, 165, 233, 0.12)');
+
+                                  return (
+                                    <button
+                                      key={appointment.id}
+                                      type="button"
+                                      draggable={!['completed', 'cancelled', 'no_show'].includes(appointment.status)}
+                                      onDragStart={() => setDraggedAppointmentId(appointment.id)}
+                                      onDragEnd={() => {
+                                        setDraggedAppointmentId(null);
+                                        setDropPreview(null);
+                                      }}
+                                      onClick={() => focusRecord(appointment.id, appointment.start_at)}
+                                      className={`absolute left-2 right-2 z-[2] rounded-2xl border p-3 text-left shadow-sm transition-transform hover:scale-[1.01] ${
+                                        isSelected ? 'ring-2 ring-[var(--color-primary)]/25' : ''
+                                      }`}
+                                      style={{
+                                        top: `${top}px`,
+                                        height: `${height}px`,
+                                        borderColor: colorWithAlpha(accent, '55', 'rgba(14, 165, 233, 0.3)'),
+                                        backgroundColor: soft,
+                                      }}
+                                    >
+                                      <div className="flex items-start justify-between gap-2">
+                                        <p className="text-[11px] font-bold text-gray-700">
+                                          {format(new Date(appointment.start_at), 'HH:mm')} - {format(new Date(appointment.end_at), 'HH:mm')}
+                                        </p>
+                                        <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusCfg.cls}`}>
+                                          {statusCfg.label}
+                                        </span>
+                                      </div>
+                                      <p className="mt-2 line-clamp-2 text-sm font-black text-gray-900">{appointment.client_name}</p>
+                                      <p className="mt-1 line-clamp-2 text-xs font-semibold text-gray-700">{appointment.service_name}</p>
+                                      <p className="mt-2 text-[11px] text-gray-500">{formatBulgarianPhoneForDisplay(appointment.client_phone)}</p>
+                                      {appointment.status === 'confirmed' && (
+                                        <span className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${getVisitProgressClass(appointment.visit_progress)}`}>
+                                          {appointment.visit_progress_label}
+                                        </span>
+                                      )}
+                                    </button>
                                   );
                                 })}
                               </div>
-		                            </div>
-		                          );
-		                        })}
-		                      </div>
-		                    </div>
-		                  ) : calendarView === 'grid' ? (
+                            ))}
+                          </div>
+                        </div>
+                      ) : calendarView === 'grid' ? (
 		                    <div className="block">
 		                      <div className="overflow-x-auto rounded-[28px] border border-white/70 bg-white/90 shadow-sm">
 	                        <div
@@ -1924,6 +2569,7 @@ export default function AdminCalendarPage() {
 		                          {visibleStaffColumns.map((staffMember) => (
 		                            <div
 		                              key={staffMember.id}
+                                  data-calendar-column={staffMember.id}
 		                              className="relative border-r border-gray-100 bg-white/70 last:border-r-0"
 		                              style={{ height: `${calendarHeight}px` }}
 		                            >
@@ -1931,7 +2577,14 @@ export default function AdminCalendarPage() {
 		                                const dayKey = getWorkingDayKey(currentDate);
 		                                const schedule = staffMember.working_hours?.[dayKey];
 		                                const staffExceptions = visibleExceptions.filter((exception) => exception.staff_id === staffMember.id);
-		                                const overlays: Array<{ top: number; height: number; label: string; kind: 'closed' | 'exception' }> = [];
+                                const overlays: Array<{
+                                  id?: string;
+                                  top: number;
+                                  height: number;
+                                  label: string;
+                                  kind: 'closed' | 'exception';
+                                  block?: StaffException;
+                                }> = [];
 
 		                                if (!schedule?.isOpen) {
 		                                  overlays.push({
@@ -1964,24 +2617,27 @@ export default function AdminCalendarPage() {
 		                                  }
 		                                }
 
-		                                for (const exception of staffExceptions) {
-		                                  const top = Math.max((getMinuteOffset(exception.start_at, calendarRange.startHour) / 60) * pixelsPerHour, 0);
-		                                  const bottom = Math.min((getMinuteOffset(exception.end_at, calendarRange.startHour) / 60) * pixelsPerHour, calendarHeight);
-		                                  const height = Math.max(bottom - top, 40);
-		                                  overlays.push({
-		                                    top,
-		                                    height,
-		                                    label: exception.note || 'Блокиран интервал',
-		                                    kind: 'exception',
-		                                  });
-		                                }
+                                for (const exception of staffExceptions) {
+                                  const window = getExceptionWindow(exception);
+                                  const top = Math.max((getMinuteOffset(window.startAt, calendarRange.startHour) / 60) * pixelsPerHour, 0);
+                                  const bottom = Math.min((getMinuteOffset(window.endAt, calendarRange.startHour) / 60) * pixelsPerHour, calendarHeight);
+                                  const height = Math.max(bottom - top, 40);
+                                  overlays.push({
+                                    id: exception.id,
+                                    top,
+                                    height,
+                                    label: exception.note || 'Блокиран интервал',
+                                    kind: 'exception',
+                                    block: exception,
+                                  });
+                                }
 
-		                                return overlays.map((overlay, index) => (
-		                                  <div
-		                                    key={`${staffMember.id}-overlay-${index}`}
-		                                    className={`absolute left-0 right-0 z-0 border-y ${
-		                                      overlay.kind === 'exception' ? 'border-slate-300/70' : 'border-gray-200/80'
-		                                    }`}
+                                return overlays.map((overlay, index) => (
+                                  <div
+                                    key={overlay.id || `${staffMember.id}-overlay-${index}`}
+                                    className={`absolute left-0 right-0 z-0 border-y ${
+                                      overlay.kind === 'exception' ? 'border-slate-300/70' : 'border-gray-200/80'
+                                    }`}
 		                                    style={{
 		                                      top: `${overlay.top}px`,
 		                                      height: `${overlay.height}px`,
@@ -1990,13 +2646,34 @@ export default function AdminCalendarPage() {
 		                                          ? 'repeating-linear-gradient(-45deg, rgba(148,163,184,0.16), rgba(148,163,184,0.16) 6px, rgba(148,163,184,0.05) 6px, rgba(148,163,184,0.05) 12px)'
 		                                          : 'rgba(148,163,184,0.08)',
 		                                    }}
-		                                  >
-		                                    <span className="absolute left-2 top-2 rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-500 shadow-sm">
-		                                      {overlay.label}
-		                                    </span>
-		                                  </div>
-		                                ));
-		                              })()}
+                                  >
+                                    <span className="absolute left-2 top-2 rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-500 shadow-sm">
+                                      {overlay.label}
+                                    </span>
+                                    {overlay.block && (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onMouseDown={(event) => beginBlockResize(event, overlay.block!, 'start', currentDate)}
+                                          className="absolute left-1/2 top-0 z-[3] h-3 w-10 -translate-x-1/2 -translate-y-1/2 rounded-full border border-slate-200 bg-white shadow"
+                                        />
+                                        <button
+                                          type="button"
+                                          onMouseDown={(event) => beginBlockResize(event, overlay.block!, 'end', currentDate)}
+                                          className="absolute bottom-0 left-1/2 z-[3] h-3 w-10 -translate-x-1/2 translate-y-1/2 rounded-full border border-slate-200 bg-white shadow"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => openBlockEditorForBlock(overlay.block!)}
+                                          className="absolute right-2 top-2 rounded-full border border-white/80 bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-600 shadow-sm"
+                                        >
+                                          Редактирай
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                ));
+                              })()}
 
 		                              {halfHourDropSlots.map((slot) => (
 		                                <div
@@ -2530,6 +3207,253 @@ export default function AdminCalendarPage() {
                                 <Trash2 className="h-4 w-4" />
                               </button>
                             </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showWaitlistModal && (
+        <div className="fixed inset-0 z-50 bg-black/45 p-4">
+          <div className="mx-auto flex h-full max-w-5xl items-center justify-center">
+            <div className="w-full max-h-[92vh] overflow-y-auto rounded-[28px] border border-gray-100 bg-white shadow-2xl">
+              <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-gray-100 bg-white px-5 py-5">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Waitlist</p>
+                  <h3 className="mt-1 text-xl font-black text-gray-900">Чакащи клиенти</h3>
+                  <p className="mt-1 text-sm text-gray-500">
+                    Тук записвате клиенти за освободени слотове и изпращате покана директно от календара.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowWaitlistModal(false)}
+                  className="flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="grid gap-5 p-5 lg:grid-cols-[360px_minmax(0,1fr)]">
+                <div className="space-y-4">
+                  <div className="rounded-[28px] border border-gray-100 bg-gray-50 p-4">
+                    <h4 className="text-sm font-black text-gray-900">Нов чакащ клиент</h4>
+                    <div className="mt-4 space-y-3">
+                      <div>
+                        <label className="mb-1.5 block text-sm font-semibold text-gray-700">Клиент</label>
+                        <input
+                          type="text"
+                          value={waitlistDraft.clientName}
+                          onChange={(event) => setWaitlistDraft((current) => ({ ...current, clientName: event.target.value }))}
+                          className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-[var(--color-primary)]"
+                          placeholder="Име на клиента"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1.5 block text-sm font-semibold text-gray-700">Телефон</label>
+                        <input
+                          type="tel"
+                          value={waitlistDraft.clientPhone}
+                          onChange={(event) => setWaitlistDraft((current) => ({ ...current, clientPhone: event.target.value }))}
+                          className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-[var(--color-primary)]"
+                          placeholder="+359..."
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1.5 block text-sm font-semibold text-gray-700">Имейл</label>
+                        <input
+                          type="email"
+                          value={waitlistDraft.clientEmail}
+                          onChange={(event) => setWaitlistDraft((current) => ({ ...current, clientEmail: event.target.value }))}
+                          className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-[var(--color-primary)]"
+                          placeholder="По избор"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1.5 block text-sm font-semibold text-gray-700">Услуга</label>
+                        <select
+                          value={waitlistDraft.serviceId}
+                          onChange={(event) => setWaitlistDraft((current) => ({ ...current, serviceId: event.target.value }))}
+                          className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-[var(--color-primary)]"
+                        >
+                          <option value="">Изберете услуга</option>
+                          {adminServices.map((service) => (
+                            <option key={service.id} value={service.id}>
+                              {service.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1.5 block text-sm font-semibold text-gray-700">Специалист</label>
+                        <select
+                          value={waitlistDraft.staffId}
+                          onChange={(event) => setWaitlistDraft((current) => ({ ...current, staffId: event.target.value }))}
+                          className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-[var(--color-primary)]"
+                        >
+                          <option value="">Всеки свободен</option>
+                          {calendarStaff.map((staffMember) => (
+                            <option key={staffMember.id} value={staffMember.id}>
+                              {staffMember.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div>
+                          <label className="mb-1.5 block text-sm font-semibold text-gray-700">Дата</label>
+                          <input
+                            type="date"
+                            value={waitlistDraft.desiredDate}
+                            onChange={(event) => setWaitlistDraft((current) => ({ ...current, desiredDate: event.target.value }))}
+                            className="w-full rounded-2xl border border-gray-200 bg-white px-3 py-3 text-sm outline-none focus:border-[var(--color-primary)]"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1.5 block text-sm font-semibold text-gray-700">От</label>
+                          <input
+                            type="time"
+                            value={waitlistDraft.desiredFrom}
+                            onChange={(event) => setWaitlistDraft((current) => ({ ...current, desiredFrom: event.target.value }))}
+                            className="w-full rounded-2xl border border-gray-200 bg-white px-3 py-3 text-sm outline-none focus:border-[var(--color-primary)]"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1.5 block text-sm font-semibold text-gray-700">До</label>
+                          <input
+                            type="time"
+                            value={waitlistDraft.desiredTo}
+                            onChange={(event) => setWaitlistDraft((current) => ({ ...current, desiredTo: event.target.value }))}
+                            className="w-full rounded-2xl border border-gray-200 bg-white px-3 py-3 text-sm outline-none focus:border-[var(--color-primary)]"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="mb-1.5 block text-sm font-semibold text-gray-700">Бележка</label>
+                        <textarea
+                          rows={3}
+                          value={waitlistDraft.notes}
+                          onChange={(event) => setWaitlistDraft((current) => ({ ...current, notes: event.target.value }))}
+                          className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-[var(--color-primary)]"
+                          placeholder="Напр. свободен е следобед, държи на конкретен специалист..."
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => waitlistCreateMutation.mutate()}
+                        disabled={
+                          waitlistCreateMutation.isPending ||
+                          !waitlistDraft.clientName.trim() ||
+                          !waitlistDraft.serviceId ||
+                          !/^\+359\d{9}$/.test(normalizeBulgarianPhone(waitlistDraft.clientPhone))
+                        }
+                        className="w-full rounded-2xl bg-[var(--color-primary)] px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-[var(--color-primary)]/20 disabled:opacity-50"
+                      >
+                        {waitlistCreateMutation.isPending ? 'Записване...' : 'Добави в чакащи'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Активни записи</p>
+                      <h4 className="mt-1 text-base font-black text-gray-900">Чакащи и уведомени</h4>
+                    </div>
+                    <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
+                      {activeWaitlistEntries.length}
+                    </span>
+                  </div>
+
+                  {!waitlistEntries.length ? (
+                    <div className="rounded-[28px] border border-dashed border-gray-200 bg-gray-50 px-4 py-8 text-center text-sm text-gray-400">
+                      Няма записи в чакащи за текущия диапазон.
+                    </div>
+                  ) : (
+                    waitlistEntries.map((entry) => {
+                      const status = getWaitlistStatusPresentation(entry.status);
+                      const notifyStartAt =
+                        detailedAppointment?.start_at ||
+                        (entry.desired_date && entry.desired_from
+                          ? `${entry.desired_date}T${entry.desired_from}+03:00`
+                          : null);
+
+                      return (
+                        <div key={entry.id} className="rounded-[28px] border border-gray-100 bg-white px-4 py-4 shadow-sm">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-sm font-black text-gray-900">{entry.client_name}</p>
+                                <span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${status.cls}`}>
+                                  {status.label}
+                                </span>
+                              </div>
+                              <p className="mt-1 text-xs text-gray-500">
+                                {entry.service_name}
+                                {entry.staff_name ? ` · ${entry.staff_name}` : ''}
+                              </p>
+                            </div>
+                            <div className="text-right text-xs text-gray-500">
+                              <p>{formatBulgarianPhoneForDisplay(entry.client_phone)}</p>
+                              {entry.desired_date && <p>{entry.desired_date}</p>}
+                            </div>
+                          </div>
+
+                          {(entry.desired_from || entry.desired_to || entry.notes) && (
+                            <div className="mt-3 space-y-1 text-xs text-gray-500">
+                              {(entry.desired_from || entry.desired_to) && (
+                                <p>
+                                  Желан слот: {entry.desired_from?.slice(0, 5) || 'няма'}
+                                  {entry.desired_to ? ` – ${entry.desired_to.slice(0, 5)}` : ''}
+                                </p>
+                              )}
+                              {entry.notes && <p>{entry.notes}</p>}
+                            </div>
+                          )}
+
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                waitlistNotifyMutation.mutate({
+                                  id: entry.id,
+                                  slotStartAt: notifyStartAt,
+                                  slotStaffId: detailedAppointment?.staff_id || entry.staff_id || null,
+                                  appointmentId: detailedAppointment?.id || null,
+                                })
+                              }
+                              disabled={!notifyStartAt || waitlistNotifyMutation.isPending}
+                              className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-100 disabled:opacity-50"
+                            >
+                              Изпрати свободен слот
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                waitlistStatusMutation.mutate({
+                                  id: entry.id,
+                                  status: 'booked',
+                                  bookedAppointmentId: detailedAppointment?.id || null,
+                                })
+                              }
+                              className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                            >
+                              Маркирай записан
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => waitlistStatusMutation.mutate({ id: entry.id, status: 'cancelled' })}
+                              className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                            >
+                              Архивирай
+                            </button>
                           </div>
                         </div>
                       );

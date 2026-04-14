@@ -245,7 +245,7 @@ export class AppointmentsController {
   @ApiOperation({ summary: 'Обнови progress-а на посещението за потвърден час' })
   async updateVisitProgress(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: { progress?: 'scheduled' | 'checked_in' | 'in_service' },
+    @Body() dto: { progress?: 'scheduled' | 'checked_in' | 'in_service' | 'completed' | 'no_show' },
     @CurrentTenant() tenant: Tenant,
   ) {
     if (!dto?.progress) {
@@ -271,6 +271,17 @@ export class AppointmentsController {
     return this.appointmentsService.retryNotification(tenant, id, dto.type);
   }
 
+  @Post(':id/notifications/retry-failed')
+  @UseGuards(JwtAuthGuard, TenantGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Retry на всички неуспешни известия за записа' })
+  async retryFailedNotifications(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentTenant() tenant: Tenant,
+  ) {
+    return this.appointmentsService.retryFailedNotifications(tenant, id);
+  }
+
   @Patch(':id/reschedule')
   @UseGuards(JwtAuthGuard, TenantGuard)
   @ApiBearerAuth()
@@ -285,6 +296,72 @@ export class AppointmentsController {
     }
 
     return this.appointmentsService.rescheduleAppointment(tenant, id, dto.startAt, dto.staffId);
+  }
+
+  @Get('waitlist')
+  @UseGuards(JwtAuthGuard, TenantGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Списък на чакащите клиенти за текущия tenant' })
+  async listWaitlist(
+    @Query('from') from: string | undefined,
+    @Query('to') to: string | undefined,
+    @CurrentTenant() tenant: Tenant,
+  ) {
+    return this.appointmentsService.listWaitlist(tenant, from, to);
+  }
+
+  @Post('waitlist')
+  @UseGuards(JwtAuthGuard, TenantGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Добави клиент в чакащи' })
+  async createWaitlist(
+    @Body()
+    dto: {
+      clientName?: string;
+      clientPhone?: string;
+      clientEmail?: string | null;
+      serviceId?: string;
+      staffId?: string | null;
+      desiredDate?: string | null;
+      desiredFrom?: string | null;
+      desiredTo?: string | null;
+      notes?: string | null;
+    },
+    @CurrentTenant() tenant: Tenant,
+  ) {
+    if (!dto?.clientName || !dto?.clientPhone || !dto?.serviceId) {
+      throw new BadRequestException('Липсват задължителни данни за чакащия клиент.');
+    }
+
+    return this.appointmentsService.createWaitlistEntry(tenant, dto as any);
+  }
+
+  @Patch('waitlist/:id/status')
+  @UseGuards(JwtAuthGuard, TenantGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Смени статуса на запис в чакащи' })
+  async updateWaitlistStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: { status?: 'waiting' | 'notified' | 'booked' | 'cancelled'; bookedAppointmentId?: string | null },
+    @CurrentTenant() tenant: Tenant,
+  ) {
+    if (!dto?.status) {
+      throw new BadRequestException('Липсва waitlist статус.');
+    }
+
+    return this.appointmentsService.updateWaitlistStatus(tenant, id, dto.status, dto.bookedAppointmentId);
+  }
+
+  @Post('waitlist/:id/notify')
+  @UseGuards(JwtAuthGuard, TenantGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Изпрати свободен слот към чакащ клиент' })
+  async notifyWaitlist(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: { slotStartAt?: string | null; slotStaffId?: string | null; appointmentId?: string | null; publicBaseUrl?: string | null },
+    @CurrentTenant() tenant: Tenant,
+  ) {
+    return this.appointmentsService.notifyWaitlistEntry(tenant, id, dto || {});
   }
 
   @Get('proposal/:slug/respond')

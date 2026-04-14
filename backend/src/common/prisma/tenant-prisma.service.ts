@@ -96,6 +96,7 @@ export class TenantPrismaService extends PrismaClient implements OnModuleInit, O
     // Изпълняваме SQL функцията от migration файла
     await this.$executeRawUnsafe(`SELECT create_tenant_schema('${schemaName}')`);
     await this.ensureServiceGroupColumns(schemaName);
+    await this.ensureWaitlistTable(schemaName);
 
     this.schemaCache.set(schemaName, true);
     this.logger.log(`Tenant schema ${schemaName} created successfully`);
@@ -123,6 +124,40 @@ export class TenantPrismaService extends PrismaClient implements OnModuleInit, O
     );
     await this.$executeRawUnsafe(
       `ALTER TABLE "${schemaName}".services ADD COLUMN IF NOT EXISTS group_time_slots TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]`,
+    );
+  }
+
+  async ensureWaitlistTable(schemaName: string): Promise<void> {
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(schemaName)) {
+      throw new Error(`Invalid schema name: ${schemaName}`);
+    }
+
+    await this.$executeRawUnsafe(
+      `CREATE TABLE IF NOT EXISTS "${schemaName}".waitlist (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        client_id UUID NOT NULL REFERENCES "${schemaName}".clients(id),
+        service_id UUID NOT NULL REFERENCES "${schemaName}".services(id),
+        staff_id UUID REFERENCES "${schemaName}".staff(id),
+        desired_date DATE,
+        desired_from TIME,
+        desired_to TIME,
+        status VARCHAR(20) NOT NULL DEFAULT 'waiting',
+        notified_at TIMESTAMPTZ,
+        expires_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`,
+    );
+    await this.$executeRawUnsafe(
+      `ALTER TABLE "${schemaName}".waitlist ADD COLUMN IF NOT EXISTS notes TEXT`,
+    );
+    await this.$executeRawUnsafe(
+      `ALTER TABLE "${schemaName}".waitlist ADD COLUMN IF NOT EXISTS last_notified_slot_start_at TIMESTAMPTZ`,
+    );
+    await this.$executeRawUnsafe(
+      `ALTER TABLE "${schemaName}".waitlist ADD COLUMN IF NOT EXISTS booked_appointment_id UUID REFERENCES "${schemaName}".appointments(id)`,
+    );
+    await this.$executeRawUnsafe(
+      `ALTER TABLE "${schemaName}".waitlist ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
     );
   }
 

@@ -125,6 +125,30 @@ export class SmsApiService {
     return this.sendSms(opts.phone, message, opts.senderId, opts.apiToken);
   }
 
+  async sendWaitlistAvailableSms(opts: {
+    phone: string;
+    clientName: string;
+    businessName: string;
+    serviceName: string;
+    staffName: string;
+    dateStr: string;
+    timeStr: string;
+    bookingUrl?: string;
+    apiToken: string;
+    senderId: string;
+  }) {
+    const lines = [
+      `${opts.businessName}: освободи се час`,
+      `${opts.clientName}, свободен е ${opts.serviceName}`,
+      `${opts.dateStr} в ${opts.timeStr}`,
+      `Специалист: ${opts.staffName}`,
+    ];
+    if (opts.bookingUrl) {
+      lines.push(`Запази: ${opts.bookingUrl}`);
+    }
+    return this.sendSms(opts.phone, lines.join('\n'), opts.senderId, opts.apiToken);
+  }
+
   private normalizePhone(phone: string): string | null {
     let cleaned = phone.replace(/[\s\-()]/g, '');
     if (cleaned.startsWith('0')) cleaned = '+359' + cleaned.substring(1);

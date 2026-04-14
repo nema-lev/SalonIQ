@@ -23,7 +23,11 @@ export function resolveTheme(
     logoUrl: theme?.logoUrl || null,
     faviconUrl: theme?.faviconUrl || null,
     coverImageUrl: theme?.coverImageUrl || null,
+    coverText: theme?.coverText || null,
+    logoShape: theme?.logoShape || 'rounded',
     borderRadius: theme?.borderRadius || preset.borderRadius,
     surfaceStyle: theme?.surfaceStyle || preset.surfaceStyle,
+    poweredByText: theme?.poweredByText || 'Powered by SalonIQ',
+    serviceCategories: theme?.serviceCategories || [],
   };
 }

@@ -1,14 +1,14 @@
 'use client';
 
 import Image from 'next/image';
-import { MapPin, Phone, Globe } from 'lucide-react';
+import { MapPin, Phone, Globe, ExternalLink } from 'lucide-react';
 import { useTenant } from '@/lib/tenant-context';
 import { formatBulgarianPhoneForDisplay } from '@/lib/phone';
 import { getBusinessProfile } from '@/lib/business-copy';
 
 export function BusinessHeader() {
   const tenant = useTenant();
-  const { theme, businessName, address, city, phone, website } = tenant;
+  const { theme, businessName, address, city, phone, website, googleMapsUrl, showBusinessNameInPortal } = tenant;
   const profile = getBusinessProfile(tenant.businessType);
   const location = [address, city].filter(Boolean).join(', ');
 
@@ -68,11 +68,11 @@ export function BusinessHeader() {
           }}
         >
           <div
-            className="w-24 h-24 rounded-2xl border-4 border-white shadow-lg flex-shrink-0 overflow-hidden"
+            className="w-24 h-24 border-4 border-white shadow-lg flex-shrink-0 overflow-hidden"
             style={{
               width: 86,
               height: 86,
-              borderRadius: 26,
+              borderRadius: theme.logoShape === 'circle' ? 999 : 26,
               border: '1px solid rgba(255,255,255,0.86)',
               boxShadow: '0 18px 38px rgba(15,23,42,0.18)',
               overflow: 'hidden',
@@ -149,62 +149,86 @@ export function BusinessHeader() {
               >
                 {profile.label}
               </span>
-              <span
+            </div>
+            {theme.coverText && (
+              <p
                 style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  padding: '6px 10px',
-                  borderRadius: 999,
-                  background: 'rgba(255,255,255,0.5)',
-                  border: '1px solid var(--line-soft)',
-                  fontSize: 12,
-                  fontWeight: 700,
-                  color: 'var(--text-soft)',
+                  margin: 0,
+                  fontSize: 'clamp(1.2rem, 3.4vw, 2rem)',
+                  lineHeight: 1.1,
+                  fontWeight: 900,
+                  color: 'var(--text-strong)',
+                  letterSpacing: '-0.04em',
                 }}
               >
-                {profile.operations.onlineFlowLabel}
-              </span>
-            </div>
-            <h1
-              className="text-2xl font-black text-gray-900 leading-tight"
-              style={{
-                margin: 0,
-                fontSize: 'clamp(2.1rem, 5vw, 3.75rem)',
-                lineHeight: 0.96,
-                fontWeight: 900,
-                color: 'var(--text-strong)',
-                letterSpacing: '-0.04em',
-              }}
-            >
-              {businessName}
-            </h1>
+                {theme.coverText}
+              </p>
+            )}
+            {showBusinessNameInPortal && (
+              <h1
+                className="text-2xl font-black text-gray-900 leading-tight"
+                style={{
+                  margin: theme.coverText ? '8px 0 0' : 0,
+                  fontSize: theme.coverText ? 'clamp(1.35rem, 3.2vw, 2.2rem)' : 'clamp(2.1rem, 5vw, 3.75rem)',
+                  lineHeight: 0.96,
+                  fontWeight: 900,
+                  color: 'var(--text-strong)',
+                  letterSpacing: '-0.04em',
+                }}
+              >
+                {businessName}
+              </h1>
+            )}
             <div
               style={{
                 display: 'flex',
                 flexWrap: 'wrap',
                 alignItems: 'center',
                 gap: 10,
-                marginTop: 14,
+                marginTop: theme.coverText || showBusinessNameInPortal ? 14 : 0,
               }}
             >
               {location && (
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '8px 12px',
-                    borderRadius: 999,
-                    background: 'rgba(108,91,137,0.08)',
-                    color: 'var(--text-soft)',
-                    fontSize: 14,
-                    fontWeight: 600,
-                  }}
-                >
-                  <MapPin size={14} />
-                  {location}
-                </span>
+                googleMapsUrl ? (
+                  <a
+                    href={googleMapsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '8px 12px',
+                      borderRadius: 999,
+                      background: 'rgba(108,91,137,0.08)',
+                      color: 'var(--text-soft)',
+                      fontSize: 14,
+                      fontWeight: 600,
+                      textDecoration: 'none',
+                    }}
+                  >
+                    <MapPin size={14} />
+                    {location}
+                    <ExternalLink size={13} />
+                  </a>
+                ) : (
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '8px 12px',
+                      borderRadius: 999,
+                      background: 'rgba(108,91,137,0.08)',
+                      color: 'var(--text-soft)',
+                      fontSize: 14,
+                      fontWeight: 600,
+                    }}
+                  >
+                    <MapPin size={14} />
+                    {location}
+                  </span>
+                )
               )}
               {phone && (
                 <a

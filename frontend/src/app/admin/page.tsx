@@ -329,8 +329,8 @@ function getNotificationTypeLabel(type: string) {
     'booking-proposal': 'Предложен нов час',
     booking_rescheduled: 'Преместен час',
     'booking-rescheduled': 'Преместен час',
-    waitlist_available: 'Чакащи клиенти',
-    'waitlist-available': 'Чакащи клиенти',
+    waitlist_available: 'Резервен списък',
+    'waitlist-available': 'Резервен списък',
     reminder_24h: 'Напомняне 24 ч.',
     'reminder-24h': 'Напомняне 24 ч.',
     reminder_2h: 'Напомняне 2 ч.',
@@ -1439,12 +1439,6 @@ export default function AdminCalendarPage() {
             Премести
           </button>
           <button
-            onClick={() => handleStatusChange(appointment.id, 'completed')}
-            className="rounded-xl bg-sky-600 px-3 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90"
-          >
-            Приключи
-          </button>
-          <button
             onClick={() => handleStatusChange(appointment.id, 'no_show')}
             className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
           >
@@ -1461,48 +1455,6 @@ export default function AdminCalendarPage() {
     }
 
     return null;
-  };
-
-  const renderVisitProgressControls = (appointment: Appointment) => {
-    if (!['confirmed', 'completed', 'no_show'].includes(appointment.status)) return null;
-
-    return (
-      <div className="space-y-2">
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Посещение</p>
-          <span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${getVisitProgressClass(appointment.visit_progress)}`}>
-            {appointment.visit_progress_label || 'Очаква се'}
-          </span>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          {[
-            { key: 'scheduled', label: 'Очаква се' },
-            { key: 'checked_in', label: 'Пристигнал' },
-            { key: 'in_service', label: 'В процес' },
-            { key: 'completed', label: 'Приключен' },
-            { key: 'no_show', label: 'Неявил се' },
-          ].map((option) => (
-            <button
-              key={option.key}
-              type="button"
-              onClick={() =>
-                visitProgressMutation.mutate({
-                  id: appointment.id,
-                  progress: option.key as 'scheduled' | 'checked_in' | 'in_service' | 'completed' | 'no_show',
-                })
-              }
-              className={`rounded-2xl px-3 py-2 text-xs font-semibold transition-colors ${
-                appointment.visit_progress === option.key
-                  ? 'bg-gray-900 text-white'
-                  : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
-              }`}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      </div>
-    );
   };
 
   const renderCalendarEmptyState = () => (
@@ -1759,21 +1711,18 @@ export default function AdminCalendarPage() {
 
         {detailedAppointment && (
           <div className="grid gap-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Бързи действия</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Действия за часа</p>
             <div className="grid grid-cols-2 gap-2">
               {detailedAppointment.status !== 'proposal_pending' &&
-                ['pending', 'confirmed'].includes(detailedAppointment.status) && (
+                ['pending'].includes(detailedAppointment.status) && (
                   <button
                     type="button"
                     onClick={() =>
-                      handleStatusChange(
-                        detailedAppointment.id,
-                        detailedAppointment.status === 'pending' ? 'confirmed' : 'completed',
-                      )
+                      handleStatusChange(detailedAppointment.id, 'confirmed')
                     }
                     className="rounded-2xl bg-emerald-600 px-3 py-3 text-sm font-semibold text-white hover:opacity-90"
                   >
-                    {detailedAppointment.status === 'pending' ? 'Потвърди' : 'Приключи'}
+                    Потвърди
                   </button>
                 )}
               {['pending', 'confirmed', 'proposal_pending'].includes(detailedAppointment.status) && (
@@ -1880,8 +1829,6 @@ export default function AdminCalendarPage() {
           </div>
         </div>
 
-        {detailedAppointment && renderVisitProgressControls(detailedAppointment)}
-
         {selectedContext?.appointment &&
           (selectedContext.appointment.client_name_source === 'owner' ||
             (selectedContext.appointment.original_client_name &&
@@ -1952,7 +1899,7 @@ export default function AdminCalendarPage() {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Waitlist</p>
-                <h4 className="mt-1 text-sm font-black text-gray-900">Чакащи за тази услуга</h4>
+                <h4 className="mt-1 text-sm font-black text-gray-900">Резервен списък за услугата</h4>
               </div>
               <button
                 type="button"
@@ -3341,7 +3288,6 @@ export default function AdminCalendarPage() {
               )}
 
 	              {detailedAppointment && <div>{renderPrimaryActions(detailedAppointment)}</div>}
-                {detailedAppointment && renderVisitProgressControls(detailedAppointment)}
 
               {selectedInboxItem?.bucket === 'updates' && (
                 <button
@@ -3604,7 +3550,7 @@ export default function AdminCalendarPage() {
               <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-gray-100 bg-white px-5 py-5">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Waitlist</p>
-                  <h3 className="mt-1 text-xl font-black text-gray-900">Чакащи клиенти</h3>
+                  <h3 className="mt-1 text-xl font-black text-gray-900">Резервен списък</h3>
                   <p className="mt-1 text-sm text-gray-500">
                     Тук записвате клиенти за освободени слотове и изпращате покана директно от календара.
                   </p>

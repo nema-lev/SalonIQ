@@ -59,7 +59,7 @@ export default function StatsPage() {
   });
 
   return (
-    <div>
+    <div className="mx-auto w-full max-w-6xl min-w-0">
       {/* Period selector */}
       <div className="flex gap-1 p-1 bg-gray-100 rounded-xl mb-6 w-fit">
         {PERIODS.map(({ value, label }) => (

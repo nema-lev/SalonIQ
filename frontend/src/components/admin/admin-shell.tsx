@@ -28,7 +28,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           <AdminSidebar mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
           <div
             className="min-h-screen min-w-0 lg:pl-[280px]"
-            style={{ minHeight: '100vh', minWidth: 0, paddingLeft: '0px' }}
+            style={{ minHeight: '100vh', minWidth: 0 }}
           >
             <div
               className="flex min-h-screen min-w-0 flex-col"

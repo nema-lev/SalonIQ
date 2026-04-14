@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Headers,
+  Query,
   NotFoundException,
   Patch,
   Post,
@@ -111,6 +112,11 @@ class UpdateGeneralSettingsDto {
     return trimmed === '' ? undefined : trimmed;
   })
   googleMapsUrl?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  showBusinessNameInPortal?: boolean;
 }
 
 class UpdateNotificationSettingsDto {
@@ -262,6 +268,25 @@ class UpdateThemeSettingsDto {
   @IsOptional()
   @IsString()
   faviconUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  coverText?: string;
+
+  @IsOptional()
+  @IsIn(['rounded', 'circle'])
+  logoShape?: 'rounded' | 'circle';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  poweredByText?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  serviceCategories?: string[];
 }
 
 class TelegramWebhookActionDto {
@@ -289,6 +314,12 @@ class ClientTelegramLinkDto {
   clientPhone: string;
 }
 
+class UpdateServiceCategoriesDto {
+  @IsArray()
+  @IsString({ each: true })
+  serviceCategories: string[];
+}
+
 @ApiTags('tenants')
 @Controller({ path: 'tenants', version: '1' })
 export class TenantController {
@@ -306,6 +337,15 @@ export class TenantController {
     @CurrentTenant() tenant: any,
     @Body() dto: UpdateGeneralSettingsDto,
   ) {
+    const current = await this.getTenantRowById(tenant.id);
+    const currentTheme = this.parseTheme(current.theme_config);
+    const nextTheme = {
+      ...currentTheme,
+      ...(dto.showBusinessNameInPortal !== undefined
+        ? { showBusinessNameInPortal: dto.showBusinessNameInPortal }
+        : {}),
+    };
+
     await this.prisma.$executeRawUnsafe(
       `
       UPDATE public.tenants
@@ -317,8 +357,9 @@ export class TenantController {
           email = $6,
           website = $7,
           google_maps_url = $8,
+          theme_config = $9::jsonb,
           updated_at = NOW()
-      WHERE id = $9::uuid
+      WHERE id = $10::uuid
       `,
       dto.businessName.trim(),
       this.nullable(dto.description),
@@ -328,6 +369,7 @@ export class TenantController {
       this.nullable(dto.email),
       this.nullable(dto.website),
       this.nullable(dto.googleMapsUrl),
+      JSON.stringify(nextTheme),
       tenant.id,
     );
 
@@ -566,6 +608,13 @@ export class TenantController {
       logoUrl: this.nullable(dto.logoUrl),
       coverImageUrl: this.nullable(dto.coverImageUrl),
       faviconUrl: this.nullable(dto.faviconUrl),
+      coverText: this.nullable(dto.coverText),
+      logoShape: dto.logoShape || currentTheme.logoShape || 'rounded',
+      poweredByText:
+        this.nullable(dto.poweredByText) ||
+        currentTheme.poweredByText ||
+        'Powered by SalonIQ',
+      serviceCategories: this.normalizeServiceCategories(dto.serviceCategories ?? currentTheme.serviceCategories),
     };
 
     await this.prisma.$executeRawUnsafe(
@@ -580,6 +629,38 @@ export class TenantController {
     );
 
     return { updated: true, theme: nextTheme };
+  }
+
+  @Patch('settings/service-categories')
+  @UseGuards(JwtAuthGuard, TenantGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Обнови списъка с категории за услугите' })
+  async updateServiceCategories(
+    @CurrentTenant() tenant: any,
+    @Body() dto: UpdateServiceCategoriesDto,
+  ) {
+    const current = await this.getTenantRowById(tenant.id);
+    const currentTheme = this.parseTheme(current.theme_config);
+    const nextTheme = {
+      ...currentTheme,
+      serviceCategories: this.normalizeServiceCategories(dto.serviceCategories),
+    };
+
+    await this.prisma.$executeRawUnsafe(
+      `
+      UPDATE public.tenants
+      SET theme_config = $1::jsonb,
+          updated_at = NOW()
+      WHERE id = $2::uuid
+      `,
+      JSON.stringify(nextTheme),
+      tenant.id,
+    );
+
+    return {
+      updated: true,
+      serviceCategories: nextTheme.serviceCategories,
+    };
   }
 
   @Post('settings/notifications/webhook/connect')
@@ -778,6 +859,104 @@ export class TenantController {
     };
   }
 
+  @Get('client-quick-search')
+  @UseGuards(TenantGuard)
+  @ApiOperation({ summary: 'Бързи подсказки за клиент по име или телефон в публичния booking flow' })
+  async clientQuickSearch(
+    @CurrentTenant() tenant: any,
+    @Query('q') rawQuery?: string,
+  ) {
+    const query = (rawQuery || '').trim();
+    const digitQuery = query.replace(/\D/g, '');
+
+    if (query.length < 2 && digitQuery.length < 6) {
+      return [];
+    }
+
+    const phoneVariants = buildBulgarianPhoneVariants(query);
+    const phonePatterns = [query, digitQuery, ...phoneVariants]
+      .filter(Boolean)
+      .map((value) => `%${value}%`);
+
+    const rows = await this.prisma.queryInSchema<any[]>(
+      tenant.schemaName,
+      `
+      SELECT
+        id,
+        name,
+        phone,
+        email,
+        total_visits,
+        last_visit_at,
+        COALESCE(NULLIF(profile_data->>'originalClientName', ''), NULL) as original_client_name
+      FROM clients
+      WHERE name ILIKE $1
+         OR phone ILIKE ANY($2::text[])
+      ORDER BY total_visits DESC, last_visit_at DESC NULLS LAST, updated_at DESC
+      LIMIT 6
+      `,
+      [`%${query}%`, phonePatterns],
+    );
+
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      phone: row.phone,
+      email: row.email,
+      totalVisits: Number(row.total_visits || 0),
+      originalClientName: row.original_client_name,
+    }));
+  }
+
+  @Get('client-upcoming')
+  @UseGuards(TenantGuard)
+  @ApiOperation({ summary: 'Провери предстоящите часове на клиент по телефон' })
+  async clientUpcoming(
+    @CurrentTenant() tenant: any,
+    @Query('phone') rawPhone?: string,
+  ) {
+    const normalizedPhone = normalizeBulgarianPhone(rawPhone || '');
+    if (!normalizedPhone) {
+      throw new BadRequestException('Липсва валиден телефон.');
+    }
+
+    const phoneVariants = buildBulgarianPhoneVariants(normalizedPhone);
+    const rows = await this.prisma.queryInSchema<any[]>(
+      tenant.schemaName,
+      `
+      SELECT
+        a.id,
+        a.start_at,
+        a.end_at,
+        a.status,
+        sv.name as service_name,
+        s.name as staff_name
+      FROM appointments a
+      JOIN clients c ON c.id = a.client_id
+      JOIN services sv ON sv.id = a.service_id
+      JOIN staff s ON s.id = a.staff_id
+      WHERE c.phone = ANY($1::text[])
+        AND a.start_at >= NOW()
+        AND a.status NOT IN ('cancelled', 'completed', 'no_show')
+      ORDER BY a.start_at ASC
+      LIMIT 12
+      `,
+      [phoneVariants],
+    );
+
+    return {
+      phone: normalizedPhone,
+      appointments: rows.map((row) => ({
+        id: row.id,
+        startAt: row.start_at,
+        endAt: row.end_at,
+        status: row.status,
+        serviceName: row.service_name,
+        staffName: row.staff_name,
+      })),
+    };
+  }
+
   /**
    * Връща конфигурацията на tenant-а.
    * Извиква се от Next.js SSR (layout.tsx) при всяка заявка.
@@ -895,9 +1074,14 @@ export class TenantController {
         logoUrl: theme.logoUrl || null,
         faviconUrl: theme.faviconUrl || null,
         coverImageUrl: theme.coverImageUrl || null,
+        coverText: theme.coverText || null,
+        logoShape: theme.logoShape || 'rounded',
         borderRadius: theme.borderRadius || 'rounded',
         surfaceStyle: theme.surfaceStyle || 'light',
+        poweredByText: theme.poweredByText || 'Powered by SalonIQ',
+        serviceCategories: this.normalizeServiceCategories(theme.serviceCategories),
       },
+      showBusinessNameInPortal: theme.showBusinessNameInPortal ?? true,
     };
   }
 
@@ -905,6 +1089,20 @@ export class TenantController {
     if (value == null) return null;
     const trimmed = value.trim();
     return trimmed === '' ? null : trimmed;
+  }
+
+  private normalizeServiceCategories(value: unknown) {
+    if (!Array.isArray(value)) return [];
+
+    const unique = new Set<string>();
+    for (const entry of value) {
+      if (typeof entry !== 'string') continue;
+      const trimmed = entry.trim();
+      if (!trimmed) continue;
+      unique.add(trimmed.slice(0, 80));
+    }
+
+    return [...unique];
   }
 
   private async persistTelegramCredentialsFromAction(

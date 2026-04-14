@@ -46,6 +46,10 @@ class UpdatePlatformTenantDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsString()
+  poweredByText?: string;
 }
 
 class ResetPasswordDto {

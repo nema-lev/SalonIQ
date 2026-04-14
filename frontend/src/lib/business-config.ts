@@ -31,7 +31,10 @@ export type BusinessProfile = {
   label: string;
   description: string;
   copy: BusinessCopy;
-  themePreset: Omit<ThemeConfig, 'logoUrl' | 'faviconUrl' | 'coverImageUrl'>;
+  themePreset: Omit<
+    ThemeConfig,
+    'logoUrl' | 'faviconUrl' | 'coverImageUrl' | 'coverText' | 'logoShape' | 'poweredByText' | 'serviceCategories'
+  >;
   operations: {
     staffSelection: 'required' | 'optional' | 'disabled';
     staffSelectionLabel: string;

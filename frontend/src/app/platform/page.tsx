@@ -19,6 +19,7 @@ type TenantCard = {
   planRenewsAt: string | null;
   isActive: boolean;
   owner: { name: string | null; email: string | null };
+  poweredByText: string;
   summary: {
     services: number;
     staff: number;
@@ -35,7 +36,7 @@ const PLAN_STATUSES = ['TRIAL', 'ACTIVE', 'PAST_DUE', 'CANCELLED'] as const;
 export default function PlatformDashboardPage() {
   const router = useRouter();
   const qc = useQueryClient();
-  const [drafts, setDrafts] = useState<Record<string, { businessType: string; plan: string; planStatus: string; planRenewsAt: string; isActive: boolean; tempPassword: string }>>({});
+  const [drafts, setDrafts] = useState<Record<string, { businessType: string; plan: string; planStatus: string; planRenewsAt: string; isActive: boolean; tempPassword: string; poweredByText: string }>>({});
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'attention' | 'dueSoon' | 'blocked' | 'healthy'>('all');
   const [businessTypeFilter, setBusinessTypeFilter] = useState<'ALL' | BusinessTypeKey>('ALL');
@@ -49,7 +50,7 @@ export default function PlatformDashboardPage() {
   const tenants = data ?? [];
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, payload }: { id: string; payload: { businessType: string; plan: string; planStatus: string; planRenewsAt: string | null; isActive: boolean } }) =>
+    mutationFn: ({ id, payload }: { id: string; payload: { businessType: string; plan: string; planStatus: string; planRenewsAt: string | null; isActive: boolean; poweredByText: string } }) =>
       apiClient.patch(`/platform/tenants/${id}`, payload),
     onSuccess: () => {
       toast.success('Бизнесът е обновен.');
@@ -195,7 +196,7 @@ export default function PlatformDashboardPage() {
     );
   }, [tenantCards]);
 
-  const updateDraft = (tenant: TenantCard, patch: Partial<{ businessType: string; plan: string; planStatus: string; planRenewsAt: string; isActive: boolean; tempPassword: string }>) => {
+  const updateDraft = (tenant: TenantCard, patch: Partial<{ businessType: string; plan: string; planStatus: string; planRenewsAt: string; isActive: boolean; tempPassword: string; poweredByText: string }>) => {
     setDrafts((current) => ({
       ...current,
       [tenant.id]: {
@@ -205,6 +206,7 @@ export default function PlatformDashboardPage() {
         planRenewsAt: current[tenant.id]?.planRenewsAt ?? (tenant.planRenewsAt ? tenant.planRenewsAt.slice(0, 10) : ''),
         isActive: current[tenant.id]?.isActive ?? tenant.isActive,
         tempPassword: current[tenant.id]?.tempPassword ?? '',
+        poweredByText: current[tenant.id]?.poweredByText ?? tenant.poweredByText,
         ...patch,
       },
     }));
@@ -338,6 +340,7 @@ export default function PlatformDashboardPage() {
               planRenewsAt: tenant.planRenewsAt ? tenant.planRenewsAt.slice(0, 10) : '',
               isActive: tenant.isActive,
               tempPassword: '',
+              poweredByText: tenant.poweredByText,
             };
             const profile = getBusinessTypeConfig(draft.businessType as BusinessTypeKey);
             const draftPlanProfile = getSubscriptionPlanConfig(draft.plan as SubscriptionPlanKey);
@@ -487,6 +490,17 @@ export default function PlatformDashboardPage() {
                     </div>
                   </div>
 
+                  <div>
+                    <label style={{ display: 'block', marginBottom: 6, fontSize: 13, fontWeight: 700, color: '#374151' }}>Текст под клиентския портал</label>
+                    <input
+                      type="text"
+                      value={draft.poweredByText}
+                      onChange={(e) => updateDraft(tenant, { poweredByText: e.target.value })}
+                      placeholder="Powered by ..."
+                      style={{ width: '100%', border: '1px solid #d1d5db', borderRadius: 12, padding: '10px 12px', fontSize: 14 }}
+                    />
+                  </div>
+
                   <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 14, color: '#111827' }}>
                     <input
                       type="checkbox"
@@ -508,6 +522,7 @@ export default function PlatformDashboardPage() {
                             planStatus: draft.planStatus,
                             planRenewsAt: draft.planRenewsAt || null,
                             isActive: draft.isActive,
+                            poweredByText: draft.poweredByText,
                           },
                         })
                       }
@@ -534,6 +549,7 @@ export default function PlatformDashboardPage() {
                             planStatus: draft.planStatus,
                             planRenewsAt: draft.planRenewsAt || null,
                             isActive: false,
+                            poweredByText: draft.poweredByText,
                           },
                         })
                       }

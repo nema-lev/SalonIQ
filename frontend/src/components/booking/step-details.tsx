@@ -1,13 +1,14 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { ChevronLeft, User, Phone, Mail, MessageSquare } from 'lucide-react';
 import { useTenant } from '@/lib/tenant-context';
 import { getBusinessCopy } from '@/lib/business-copy';
-import { normalizeBulgarianPhone } from '@/lib/phone';
+import { formatBulgarianPhoneForDisplay, normalizeBulgarianPhone } from '@/lib/phone';
+import { apiClient } from '@/lib/api-client';
 import type { BookingFormData } from '@/types/booking';
 
 const buildSchema = (collectClientEmail: boolean) =>
@@ -29,6 +30,24 @@ const buildSchema = (collectClientEmail: boolean) =>
   });
 
 type FormValues = z.infer<ReturnType<typeof buildSchema>>;
+type ClientSuggestion = {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string | null;
+  totalVisits?: number;
+};
+type UpcomingLookupResult = {
+  phone: string;
+  appointments: Array<{
+    id: string;
+    startAt: string;
+    endAt: string;
+    status: string;
+    serviceName: string;
+    staffName: string;
+  }>;
+};
 
 interface StepDetailsProps {
   formData: Partial<BookingFormData>;
@@ -51,6 +70,8 @@ export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
   const {
     register,
     handleSubmit,
+    setValue,
+    watch,
     formState: { errors, isValid },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -62,6 +83,53 @@ export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
     },
     mode: 'onChange',
   });
+  const clientName = watch('clientName');
+  const clientPhone = watch('clientPhone');
+  const [lookupMode, setLookupMode] = useState<'name' | 'phone'>('name');
+  const [suggestions, setSuggestions] = useState<ClientSuggestion[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [upcomingLookup, setUpcomingLookup] = useState<UpcomingLookupResult | null>(null);
+  const [upcomingLoading, setUpcomingLoading] = useState(false);
+  const [recentPhones, setRecentPhones] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(`saloniq_recent_phones_${tenant.slug}`) || '[]');
+      if (Array.isArray(stored)) {
+        setRecentPhones(stored.filter((item): item is string => typeof item === 'string'));
+      }
+    } catch {
+      setRecentPhones([]);
+    }
+  }, [tenant.slug]);
+
+  useEffect(() => {
+    const lookupValue = (lookupMode === 'phone' ? clientPhone : clientName)?.trim() || '';
+    const digitCount = lookupValue.replace(/\D/g, '').length;
+    const shouldSearch = lookupMode === 'phone' ? digitCount >= 6 : lookupValue.length >= 2;
+
+    if (!shouldSearch) {
+      setSuggestions([]);
+      setLoadingSuggestions(false);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        setLoadingSuggestions(true);
+        const result = await apiClient.get<ClientSuggestion[]>('/tenants/client-quick-search', { q: lookupValue });
+        setSuggestions(result);
+      } catch {
+        setSuggestions([]);
+      } finally {
+        setLoadingSuggestions(false);
+      }
+    }, 220);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [clientName, clientPhone, lookupMode]);
 
   const onSubmit = (values: FormValues) => {
     onNext({
@@ -71,6 +139,30 @@ export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
       notes: values.notes || undefined,
       consentGiven: true,
     });
+  };
+
+  const chooseSuggestion = (suggestion: ClientSuggestion) => {
+    setValue('clientName', suggestion.name, { shouldValidate: true, shouldDirty: true });
+    setValue('clientPhone', formatBulgarianPhoneForDisplay(suggestion.phone), { shouldValidate: true, shouldDirty: true });
+    if (tenant.collectClientEmail && suggestion.email) {
+      setValue('clientEmail', suggestion.email, { shouldValidate: true, shouldDirty: true });
+    }
+    setShowSuggestions(false);
+  };
+
+  const lookupUpcoming = async (phone?: string) => {
+    const normalizedPhone = normalizeBulgarianPhone(phone || clientPhone || recentPhones[0] || '');
+    if (!normalizedPhone) return;
+
+    try {
+      setUpcomingLoading(true);
+      const result = await apiClient.get<UpcomingLookupResult>('/tenants/client-upcoming', { phone: normalizedPhone });
+      setUpcomingLookup(result);
+    } catch {
+      setUpcomingLookup({ phone: normalizedPhone, appointments: [] });
+    } finally {
+      setUpcomingLoading(false);
+    }
   };
 
   return (
@@ -99,6 +191,10 @@ export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
               type="text"
               placeholder="Мария Иванова"
               autoComplete="name"
+              onFocus={() => {
+                setLookupMode('name');
+                setShowSuggestions(true);
+              }}
               className={`
                 w-full pl-10 pr-4 py-3 rounded-xl border-2 outline-none transition-colors
                 ${errors.clientName
@@ -108,6 +204,28 @@ export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
               `}
             />
           </div>
+          {showSuggestions && lookupMode === 'name' && (loadingSuggestions || suggestions.length > 0) && (
+            <div className="mt-2 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+              {loadingSuggestions ? (
+                <div className="px-4 py-3 text-sm text-gray-500">Търсене в предишни клиенти...</div>
+              ) : (
+                suggestions.map((suggestion) => (
+                  <button
+                    key={suggestion.id}
+                    type="button"
+                    onClick={() => chooseSuggestion(suggestion)}
+                    className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-gray-50"
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">{suggestion.name}</p>
+                      <p className="text-xs text-gray-500">{formatBulgarianPhoneForDisplay(suggestion.phone)}</p>
+                    </div>
+                    <span className="text-[11px] text-gray-400">{suggestion.totalVisits || 0} посещ.</span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
           {errors.clientName && (
             <p className="text-red-500 text-xs mt-1">{errors.clientName.message}</p>
           )}
@@ -125,6 +243,10 @@ export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
               type="tel"
               placeholder="0899 123 456 или +359 899 123 456"
               autoComplete="tel"
+              onFocus={() => {
+                setLookupMode('phone');
+                setShowSuggestions(true);
+              }}
               className={`
                 w-full pl-10 pr-4 py-3 rounded-xl border-2 outline-none transition-colors
                 ${errors.clientPhone
@@ -134,6 +256,28 @@ export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
               `}
             />
           </div>
+          {showSuggestions && lookupMode === 'phone' && (loadingSuggestions || suggestions.length > 0) && (
+            <div className="mt-2 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+              {loadingSuggestions ? (
+                <div className="px-4 py-3 text-sm text-gray-500">Търсене в предишни клиенти...</div>
+              ) : (
+                suggestions.map((suggestion) => (
+                  <button
+                    key={suggestion.id}
+                    type="button"
+                    onClick={() => chooseSuggestion(suggestion)}
+                    className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-gray-50"
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">{formatBulgarianPhoneForDisplay(suggestion.phone)}</p>
+                      <p className="text-xs text-gray-500">{suggestion.name}</p>
+                    </div>
+                    <span className="text-[11px] text-gray-400">{suggestion.totalVisits || 0} посещ.</span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
           {errors.clientPhone && (
             <p className="text-red-500 text-xs mt-1">{errors.clientPhone.message}</p>
           )}
@@ -195,6 +339,62 @@ export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
 
         <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
           {notificationCopy}
+        </div>
+
+        <div className="rounded-xl border border-gray-200 bg-white px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-gray-900">Провери предстоящите си часове</p>
+              <p className="mt-1 text-xs text-gray-500">
+                Работи по въведения телефон. На това устройство пазим последно използваните номера за по-бърз достъп.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void lookupUpcoming()}
+              disabled={upcomingLoading && !clientPhone}
+              className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+            >
+              {upcomingLoading ? 'Проверка...' : 'Провери'}
+            </button>
+          </div>
+          {recentPhones.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {recentPhones.slice(0, 3).map((phone) => (
+                <button
+                  key={phone}
+                  type="button"
+                  onClick={() => void lookupUpcoming(phone)}
+                  className="rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50"
+                >
+                  {formatBulgarianPhoneForDisplay(phone)}
+                </button>
+              ))}
+            </div>
+          )}
+          {upcomingLookup && (
+            <div className="mt-3 space-y-2">
+              {upcomingLookup.appointments.length > 0 ? (
+                upcomingLookup.appointments.map((appointment) => (
+                  <div key={appointment.id} className="rounded-xl bg-gray-50 px-3 py-3 text-sm">
+                    <p className="font-semibold text-gray-900">{appointment.serviceName}</p>
+                    <p className="mt-1 text-gray-600">
+                      {new Date(appointment.startAt).toLocaleString('bg-BG', {
+                        day: '2-digit',
+                        month: 'long',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </p>
+                    <p className="mt-1 text-xs text-gray-500">{appointment.staffName}</p>
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm text-gray-500">Няма открити предстоящи часове за този номер.</p>
+              )}
+            </div>
+          )}
         </div>
 
         <button

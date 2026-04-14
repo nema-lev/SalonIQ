@@ -193,7 +193,7 @@ export default function AdminStaffPage() {
   };
 
   return (
-    <div>
+    <div className="mx-auto w-full max-w-6xl min-w-0">
       <div className="mb-6 flex items-center justify-between gap-3">
         <div>
           <p className="text-sm text-gray-500">

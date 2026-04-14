@@ -54,6 +54,7 @@ interface AppointmentRow {
   preferred_channel: string;
   notifications_consent: boolean;
   intake_data: unknown;
+  profile_data: unknown;
   service_name: string;
   staff_name: string;
 }
@@ -265,6 +266,7 @@ export class NotificationProcessor extends WorkerHost {
         COALESCE(NULLIF(c.profile_data->>'salutation', ''), split_part(c.name, ' ', 1)) as client_salutation,
         c.phone as client_phone,
         c.telegram_chat_id, c.preferred_channel, c.notifications_consent,
+        c.profile_data,
         sv.name as service_name,
         s.name as staff_name
        FROM appointments a
@@ -283,9 +285,15 @@ export class NotificationProcessor extends WorkerHost {
 
     const canNotifyClient = Boolean(appt.notifications_consent);
 
+    const resolvedClientDisplayName = this.resolveClientDisplayName(
+      appt.client_name,
+      appt.client_salutation,
+      appt.profile_data,
+    );
+
     const appointmentDetails: AppointmentDetails = {
       id: appt.id,
-      clientName: appt.client_salutation || appt.client_name,
+      clientName: resolvedClientDisplayName,
       clientPhone: appt.client_phone,
       serviceName: appt.service_name,
       staffName: appt.staff_name,
@@ -329,7 +337,7 @@ export class NotificationProcessor extends WorkerHost {
       await this.telegramService.sendOwnerNewBooking(
         tenant.telegram_bot_token,
         tenant.telegram_chat_id,
-        { ...appointmentDetails, clientName: appt.client_name },
+        { ...appointmentDetails, clientName: resolvedClientDisplayName },
         tenant.business_name,
         (job.data.status as 'confirmed' | 'pending') || 'confirmed',
         notificationTemplates.ownerNewBooking,
@@ -345,7 +353,7 @@ export class NotificationProcessor extends WorkerHost {
       await this.telegramService.sendOwnerClientCancellation(
         tenant.telegram_bot_token,
         tenant.telegram_chat_id,
-        { ...appointmentDetails, clientName: appt.client_name },
+        { ...appointmentDetails, clientName: resolvedClientDisplayName },
         tenant.business_name,
         job.data.reason,
       );
@@ -614,5 +622,47 @@ export class NotificationProcessor extends WorkerHost {
       // BullMQ ще retry-не при throw
       throw new Error(`Notification failed: ${result.error}`);
     }
+  }
+
+  private resolveClientDisplayName(
+    currentName: string,
+    salutation: string,
+    profileDataRaw: unknown,
+  ) {
+    const profileData = this.parseProfileData(profileDataRaw);
+    const originalClientName =
+      typeof profileData.originalClientName === 'string' ? profileData.originalClientName.trim() : '';
+    const preferred = this.pickNonGenericName(currentName, originalClientName, salutation);
+    return preferred || currentName || salutation || 'Клиент';
+  }
+
+  private parseProfileData(value: unknown) {
+    if (!value) return {};
+    if (typeof value === 'string') {
+      try {
+        return JSON.parse(value || '{}') as Record<string, unknown>;
+      } catch {
+        return {};
+      }
+    }
+    if (typeof value === 'object') {
+      return value as Record<string, unknown>;
+    }
+    return {};
+  }
+
+  private pickNonGenericName(...candidates: Array<string | undefined | null>) {
+    for (const raw of candidates) {
+      const value = (raw || '').trim();
+      if (!value) continue;
+      const normalized = value.toLocaleLowerCase('bg-BG');
+      if (
+        ['пълно име', 'две имена', 'име', 'вашето име', 'твоето име', 'full name', 'name', 'your name'].includes(normalized)
+      ) {
+        continue;
+      }
+      return value;
+    }
+    return '';
   }
 }

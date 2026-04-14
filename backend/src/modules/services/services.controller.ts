@@ -21,6 +21,7 @@ class UpsertServiceDto {
   @IsOptional() @IsInt() @Min(1) @Max(100) slot_capacity?: number;
   @IsOptional() @IsArray() @IsIn(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], { each: true }) group_days?: string[];
   @IsOptional() @IsArray() @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { each: true }) group_time_slots?: string[];
+  @IsOptional() @IsIn(['manual', 'theme']) color_mode?: string;
 }
 
 @ApiTags('services')
@@ -37,7 +38,7 @@ export class ServicesController {
     return this.prisma.queryInSchema(
       tenant.schemaName,
       `SELECT id, name, description, category, duration_minutes,
-              price, currency, color, staff_ids, display_order,
+              price, currency, color, color_mode, staff_ids, display_order,
               booking_mode, slot_capacity, group_days, group_time_slots
        FROM services WHERE is_public = true
        ORDER BY display_order ASC, name ASC`,
@@ -55,7 +56,7 @@ export class ServicesController {
     return this.prisma.queryInSchema(
       tenant.schemaName,
       `SELECT id, name, description, category, duration_minutes,
-              price, currency, color, staff_ids, is_public, display_order,
+              price, currency, color, color_mode, staff_ids, is_public, display_order,
               booking_mode, slot_capacity, group_days, group_time_slots
        FROM services ORDER BY display_order ASC, name ASC`,
       [],
@@ -74,12 +75,11 @@ export class ServicesController {
       tenant.schemaName,
       `INSERT INTO services (
         name, description, category, duration_minutes, price, color, is_public,
-        booking_mode, slot_capacity, group_days, group_time_slots
-      )
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::text[],$11::text[]) RETURNING id`,
+        booking_mode, slot_capacity, group_days, group_time_slots, color_mode
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::text[],$11::text[],$12) RETURNING id`,
       [dto.name, dto.description||null, dto.category||null,
        dto.duration_minutes, dto.price ?? null, dto.color||'#8b5cf6', dto.is_public??true,
-       dto.booking_mode || 'standard', dto.slot_capacity ?? 1, dto.group_days || [], dto.group_time_slots || []],
+       dto.booking_mode || 'standard', dto.slot_capacity ?? 1, dto.group_days || [], dto.group_time_slots || [], dto.color_mode || 'manual'],
     );
     return { id: rows[0].id };
   }
@@ -99,11 +99,11 @@ export class ServicesController {
       `UPDATE services SET name=$1, description=$2, category=$3,
        duration_minutes=$4, price=$5, color=$6, is_public=$7,
        booking_mode=$8, slot_capacity=$9, group_days=$10::text[], group_time_slots=$11::text[],
-       updated_at=NOW()
-       WHERE id=$12`,
+       color_mode=$12, updated_at=NOW()
+       WHERE id=$13`,
       [dto.name, dto.description||null, dto.category||null,
        dto.duration_minutes, dto.price ?? null, dto.color||'#8b5cf6',
-       dto.is_public??true, dto.booking_mode || 'standard', dto.slot_capacity ?? 1, dto.group_days || [], dto.group_time_slots || [], id],
+       dto.is_public??true, dto.booking_mode || 'standard', dto.slot_capacity ?? 1, dto.group_days || [], dto.group_time_slots || [], dto.color_mode || 'manual', id],
     );
     return { id };
   }

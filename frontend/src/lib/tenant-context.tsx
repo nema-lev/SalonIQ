@@ -12,8 +12,12 @@ export interface ThemeConfig {
   logoUrl: string | null;
   faviconUrl: string | null;
   coverImageUrl: string | null;
+  coverText: string | null;
+  logoShape: 'rounded' | 'circle';
   borderRadius: 'sharp' | 'rounded' | 'pill';
   surfaceStyle: 'light' | 'graphite' | 'dark';
+  poweredByText: string;
+  serviceCategories: string[];
 }
 
 export interface TenantConfig {
@@ -42,11 +46,12 @@ export interface TenantConfig {
   enableTelegramNotifications: boolean;
   enableSmsNotifications: boolean;
   notificationTemplates: NotificationTemplates;
+  showBusinessNameInPortal: boolean;
 }
 
 type TenantContextValue = {
   tenant: TenantConfig;
-  updateTenant: (patch: Partial<TenantConfig> & { theme?: Partial<ThemeConfig> }) => void;
+  updateTenant: (patch: Omit<Partial<TenantConfig>, 'theme'> & { theme?: Partial<ThemeConfig> }) => void;
 };
 
 const TenantContext = createContext<TenantContextValue | null>(null);
@@ -64,7 +69,7 @@ export function TenantProvider({
     setTenantState(tenant);
   }, [tenant]);
 
-  const updateTenant = (patch: Partial<TenantConfig> & { theme?: Partial<ThemeConfig> }) => {
+  const updateTenant = (patch: Omit<Partial<TenantConfig>, 'theme'> & { theme?: Partial<ThemeConfig> }) => {
     setTenantState((current) => ({
       ...current,
       ...patch,

@@ -59,14 +59,26 @@ type ThemePreset = {
 };
 
 const THEME_PRESETS: ThemePreset[] = [
-  { id: 'royal', label: 'Royal', primaryColor: '#7c3aed', secondaryColor: '#a855f7', accentColor: '#f59e0b', borderRadius: 'rounded', surfaceStyle: 'light' },
-  { id: 'emerald', label: 'Emerald', primaryColor: '#047857', secondaryColor: '#10b981', accentColor: '#f59e0b', borderRadius: 'rounded', surfaceStyle: 'light' },
-  { id: 'rose', label: 'Rose', primaryColor: '#e11d48', secondaryColor: '#fb7185', accentColor: '#f97316', borderRadius: 'pill', surfaceStyle: 'light' },
-  { id: 'midnight', label: 'Midnight', primaryColor: '#8b5cf6', secondaryColor: '#38bdf8', accentColor: '#f97316', borderRadius: 'rounded', surfaceStyle: 'dark' },
-  { id: 'graphite', label: 'Graphite', primaryColor: '#111827', secondaryColor: '#475569', accentColor: '#22c55e', borderRadius: 'sharp', surfaceStyle: 'graphite' },
-  { id: 'gold', label: 'Gold', primaryColor: '#9a3412', secondaryColor: '#f59e0b', accentColor: '#111827', borderRadius: 'sharp', surfaceStyle: 'light' },
-  { id: 'ocean', label: 'Ocean', primaryColor: '#0369a1', secondaryColor: '#38bdf8', accentColor: '#14b8a6', borderRadius: 'rounded', surfaceStyle: 'light' },
-  { id: 'noir', label: 'Noir', primaryColor: '#0f172a', secondaryColor: '#334155', accentColor: '#f59e0b', borderRadius: 'pill', surfaceStyle: 'dark' },
+  { id: 'rose-light', label: 'Rose Light', primaryColor: '#d9465f', secondaryColor: '#fda4af', accentColor: '#7c2d12', borderRadius: 'rounded', surfaceStyle: 'light' },
+  { id: 'peach', label: 'Peach', primaryColor: '#ea580c', secondaryColor: '#fdba74', accentColor: '#7c2d12', borderRadius: 'rounded', surfaceStyle: 'light' },
+  { id: 'amber-cream', label: 'Amber Cream', primaryColor: '#c2410c', secondaryColor: '#facc15', accentColor: '#854d0e', borderRadius: 'pill', surfaceStyle: 'light' },
+  { id: 'olive', label: 'Olive', primaryColor: '#4d7c0f', secondaryColor: '#a3e635', accentColor: '#166534', borderRadius: 'rounded', surfaceStyle: 'light' },
+  { id: 'emerald-light', label: 'Emerald Light', primaryColor: '#047857', secondaryColor: '#6ee7b7', accentColor: '#14532d', borderRadius: 'rounded', surfaceStyle: 'light' },
+  { id: 'teal-mist', label: 'Teal Mist', primaryColor: '#0f766e', secondaryColor: '#5eead4', accentColor: '#155e75', borderRadius: 'rounded', surfaceStyle: 'light' },
+  { id: 'sky-light', label: 'Sky Light', primaryColor: '#0369a1', secondaryColor: '#7dd3fc', accentColor: '#1d4ed8', borderRadius: 'rounded', surfaceStyle: 'light' },
+  { id: 'cobalt', label: 'Cobalt', primaryColor: '#1d4ed8', secondaryColor: '#93c5fd', accentColor: '#4338ca', borderRadius: 'sharp', surfaceStyle: 'light' },
+  { id: 'lilac', label: 'Lilac', primaryColor: '#7c3aed', secondaryColor: '#c4b5fd', accentColor: '#be185d', borderRadius: 'pill', surfaceStyle: 'light' },
+  { id: 'blush', label: 'Blush', primaryColor: '#be185d', secondaryColor: '#f9a8d4', accentColor: '#9f1239', borderRadius: 'rounded', surfaceStyle: 'light' },
+  { id: 'graphite-dark', label: 'Graphite Dark', primaryColor: '#111827', secondaryColor: '#6b7280', accentColor: '#22c55e', borderRadius: 'sharp', surfaceStyle: 'graphite' },
+  { id: 'slate-dark', label: 'Slate Dark', primaryColor: '#0f172a', secondaryColor: '#475569', accentColor: '#38bdf8', borderRadius: 'rounded', surfaceStyle: 'dark' },
+  { id: 'noir', label: 'Noir', primaryColor: '#020617', secondaryColor: '#334155', accentColor: '#f59e0b', borderRadius: 'pill', surfaceStyle: 'dark' },
+  { id: 'carbon', label: 'Carbon', primaryColor: '#1f2937', secondaryColor: '#4b5563', accentColor: '#ef4444', borderRadius: 'sharp', surfaceStyle: 'dark' },
+  { id: 'forest-night', label: 'Forest Night', primaryColor: '#14532d', secondaryColor: '#22c55e', accentColor: '#facc15', borderRadius: 'rounded', surfaceStyle: 'dark' },
+  { id: 'teal-night', label: 'Teal Night', primaryColor: '#134e4a', secondaryColor: '#14b8a6', accentColor: '#f59e0b', borderRadius: 'rounded', surfaceStyle: 'dark' },
+  { id: 'ocean-night', label: 'Ocean Night', primaryColor: '#0c4a6e', secondaryColor: '#38bdf8', accentColor: '#f97316', borderRadius: 'rounded', surfaceStyle: 'dark' },
+  { id: 'violet-night', label: 'Violet Night', primaryColor: '#581c87', secondaryColor: '#8b5cf6', accentColor: '#f472b6', borderRadius: 'pill', surfaceStyle: 'dark' },
+  { id: 'ruby-night', label: 'Ruby Night', primaryColor: '#7f1d1d', secondaryColor: '#ef4444', accentColor: '#f59e0b', borderRadius: 'rounded', surfaceStyle: 'dark' },
+  { id: 'smoke', label: 'Smoke', primaryColor: '#374151', secondaryColor: '#9ca3af', accentColor: '#eab308', borderRadius: 'rounded', surfaceStyle: 'graphite' },
 ];
 
 function normalizeOptionalString(value: unknown) {
@@ -212,6 +224,7 @@ function GeneralSettings() {
       email: tenant.email || '',
       website: tenant.website || '',
       googleMapsUrl: tenant.googleMapsUrl || '',
+      showBusinessNameInPortal: tenant.showBusinessNameInPortal,
     },
   });
   const {
@@ -238,6 +251,7 @@ function GeneralSettings() {
       email: tenant.email || '',
       website: tenant.website || '',
       googleMapsUrl: tenant.googleMapsUrl || '',
+      showBusinessNameInPortal: tenant.showBusinessNameInPortal,
     });
   }, [tenant, reset]);
 
@@ -276,6 +290,7 @@ function GeneralSettings() {
       email: normalizeOptionalString(values.email)?.toLowerCase(),
       website: normalizeOptionalString(values.website),
       googleMapsUrl: normalizeOptionalString(values.googleMapsUrl),
+      showBusinessNameInPortal: Boolean(values.showBusinessNameInPortal),
     };
 
     try {
@@ -289,6 +304,7 @@ function GeneralSettings() {
         email: payload.email ?? null,
         website: payload.website ?? null,
         googleMapsUrl: payload.googleMapsUrl ?? null,
+        showBusinessNameInPortal: payload.showBusinessNameInPortal,
       });
       reset({
         businessName: payload.businessName,
@@ -299,6 +315,7 @@ function GeneralSettings() {
         email: payload.email || '',
         website: payload.website || '',
         googleMapsUrl: payload.googleMapsUrl || '',
+        showBusinessNameInPortal: payload.showBusinessNameInPortal,
       });
       toast.success('Информацията за бизнеса е запазена.');
     } catch (error: any) {
@@ -379,6 +396,19 @@ function GeneralSettings() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div className="md:col-span-2">
               <Input label="Наименование" {...register('businessName')} />
+              <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 p-4">
+                <input
+                  {...register('showBusinessNameInPortal')}
+                  type="checkbox"
+                  className="mt-0.5 h-5 w-5 rounded accent-[var(--color-primary)]"
+                />
+                <div>
+                  <p className="font-semibold text-gray-800">Показвай наименованието в клиентския портал</p>
+                  <p className="mt-0.5 text-sm text-gray-500">
+                    Изключи го, ако името на бизнеса вече е изписано в корицата като текст.
+                  </p>
+                </div>
+              </label>
             </div>
             <div className="md:col-span-2">
               <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-4 py-4">
@@ -1735,6 +1765,9 @@ function ThemeSettings() {
       logoUrl: tenant.theme.logoUrl || '',
       coverImageUrl: tenant.theme.coverImageUrl || '',
       faviconUrl: tenant.theme.faviconUrl || '',
+      coverText: tenant.theme.coverText || '',
+      logoShape: tenant.theme.logoShape || 'rounded',
+      poweredByText: tenant.theme.poweredByText || 'Powered by SalonIQ',
     },
   });
 
@@ -1748,6 +1781,9 @@ function ThemeSettings() {
       logoUrl: tenant.theme.logoUrl || '',
       coverImageUrl: tenant.theme.coverImageUrl || '',
       faviconUrl: tenant.theme.faviconUrl || '',
+      coverText: tenant.theme.coverText || '',
+      logoShape: tenant.theme.logoShape || 'rounded',
+      poweredByText: tenant.theme.poweredByText || 'Powered by SalonIQ',
     });
   }, [tenant.theme, reset]);
 
@@ -1759,6 +1795,8 @@ function ThemeSettings() {
   const logoUrl = watch('logoUrl');
   const coverImageUrl = watch('coverImageUrl');
   const faviconUrl = watch('faviconUrl');
+  const coverText = watch('coverText');
+  const logoShape = watch('logoShape');
 
   const selectedPreset = useMemo(
     () =>
@@ -1807,6 +1845,9 @@ function ThemeSettings() {
         logoUrl: result.theme.logoUrl || '',
         coverImageUrl: result.theme.coverImageUrl || '',
         faviconUrl: result.theme.faviconUrl || '',
+        coverText: result.theme.coverText || '',
+        logoShape: result.theme.logoShape || 'rounded',
+        poweredByText: result.theme.poweredByText || 'Powered by SalonIQ',
       });
       toast.success('Обликът е запазен.');
     } catch (error: any) {
@@ -1914,6 +1955,45 @@ function ThemeSettings() {
           <input type="hidden" {...register('logoUrl')} />
           <input type="hidden" {...register('coverImageUrl')} />
           <input type="hidden" {...register('faviconUrl')} />
+          <input type="hidden" {...register('logoShape')} />
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Input
+              label="Текст върху корицата"
+              placeholder="Салон Зори"
+              {...register('coverText')}
+              hint="Текстът се показва над или вместо наименованието в клиентския портал."
+            />
+            <Input
+              label="Текст под клиентския портал"
+              placeholder="Powered by ..."
+              {...register('poweredByText')}
+              hint="Изписва се в долната част на клиентския портал."
+            />
+          </div>
+
+          <div className="rounded-2xl border border-gray-200 p-4">
+            <p className="text-sm font-semibold text-gray-900">Форма на логото</p>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              {[
+                { value: 'rounded', label: 'Заоблен правоъгълник' },
+                { value: 'circle', label: 'Кръг' },
+              ].map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setValue('logoShape', option.value as 'rounded' | 'circle', { shouldDirty: true })}
+                  className={`rounded-2xl border px-4 py-3 text-sm font-semibold transition-all ${
+                    logoShape === option.value
+                      ? 'border-gray-900 bg-gray-900 text-white'
+                      : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <input
             ref={logoInputRef}
@@ -1962,6 +2042,35 @@ function ThemeSettings() {
                       : `linear-gradient(135deg, ${primaryColor}, ${secondaryColor})`,
               }}
             >
+              {coverText && (
+                <p
+                  style={{
+                    margin: '0 0 12px',
+                    fontSize: 22,
+                    fontWeight: 900,
+                    color: surfaceStyle === 'graphite' ? '#111827' : '#ffffff',
+                    letterSpacing: '-0.04em',
+                  }}
+                >
+                  {coverText}
+                </p>
+              )}
+              <div
+                style={{
+                  width: 52,
+                  height: 52,
+                  borderRadius: logoShape === 'circle' ? 999 : 18,
+                  background: 'rgba(255,255,255,0.82)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginBottom: 12,
+                  fontWeight: 900,
+                  color: primaryColor,
+                }}
+              >
+                {tenant.businessName.charAt(0)}
+              </div>
               <button
                 type="button"
                 className="px-5 py-2.5 text-sm font-semibold text-white"

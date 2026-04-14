@@ -126,7 +126,7 @@ export function BusinessInfo() {
       )}
 
       <p className="text-center text-xs text-gray-300 pb-4" style={{ textAlign: 'center', fontSize: 12, color: '#9b93b8', paddingBottom: 16, margin: 0, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-        Powered by SalonIQ
+        {tenant.theme.poweredByText || 'Powered by SalonIQ'}
       </p>
     </div>
   );

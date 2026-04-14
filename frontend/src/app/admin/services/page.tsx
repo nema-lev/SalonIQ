@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { toast } from 'sonner';
 import { Plus, Pencil, Loader2, Clock, Tag, Users } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
-import { useTenant } from '@/lib/tenant-context';
+import { useTenant, useTenantActions } from '@/lib/tenant-context';
 
 interface Service {
   id: string;
@@ -18,6 +18,7 @@ interface Service {
   duration_minutes: number;
   price: number | null;
   color: string;
+  color_mode?: 'manual' | 'theme';
   is_public: boolean;
   booking_mode?: 'standard' | 'group';
   slot_capacity?: number;
@@ -52,17 +53,29 @@ const schema = z.object({
   slot_capacity: z.coerce.number().min(1).max(100).default(1),
   group_days: z.array(z.string()).default([]),
   group_time_slots_text: z.string().optional(),
+  color_mode: z.enum(['manual', 'theme']).default('theme'),
 });
 type FormValues = z.infer<typeof schema>;
 
 const COLORS = ['#7c3aed','#8b5cf6','#a855f7','#ec4899','#ef4444','#f59e0b','#10b981','#3b82f6','#6366f1'];
 
+function buildThemeCategoryPalette(primary: string, secondary: string) {
+  return [primary, secondary, '#22c55e', '#f59e0b', '#ec4899', '#3b82f6', '#8b5cf6', '#14b8a6'];
+}
+
 export default function AdminServicesPage() {
   const qc = useQueryClient();
   const tenant = useTenant();
+  const { updateTenant } = useTenantActions();
   const isGroupTrainingBusiness = tenant.businessType === 'GROUP_TRAINING';
+  const [categoryDraft, setCategoryDraft] = useState('');
   const [editing, setEditing] = useState<Service | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [serviceCategories, setServiceCategories] = useState<string[]>(tenant.theme.serviceCategories || []);
+
+  useEffect(() => {
+    setServiceCategories(tenant.theme.serviceCategories || []);
+  }, [tenant.theme.serviceCategories]);
 
   const { data: services, isLoading } = useQuery({
     queryKey: ['admin-services'],
@@ -79,6 +92,7 @@ export default function AdminServicesPage() {
       slot_capacity: 1,
       group_days: [],
       group_time_slots_text: '',
+      color_mode: 'theme',
     },
   });
 
@@ -95,6 +109,11 @@ export default function AdminServicesPage() {
         slot_capacity: isGroupTrainingBusiness ? data.slot_capacity : 1,
         group_days: isGroupTrainingBusiness ? data.group_days : [],
         group_time_slots: isGroupTrainingBusiness ? parsedGroupTimeSlots : [],
+        category: data.category?.trim() || undefined,
+        color:
+          data.color_mode === 'theme'
+            ? resolveCategoryColor(data.category?.trim() || null, serviceCategories, tenant.theme.primaryColor, tenant.theme.secondaryColor)
+            : data.color,
       };
       delete (payload as Partial<FormValues>).showPrice;
       delete (payload as Partial<FormValues>).group_time_slots_text;
@@ -126,6 +145,7 @@ export default function AdminServicesPage() {
       color: svc.color,
       is_public: svc.is_public,
       showPrice: svc.price != null,
+      color_mode: svc.color_mode || 'manual',
       booking_mode: svc.booking_mode || (isGroupTrainingBusiness ? 'group' : 'standard'),
       slot_capacity: svc.slot_capacity ?? 1,
       group_days: svc.group_days ?? [],
@@ -135,11 +155,33 @@ export default function AdminServicesPage() {
   };
 
   const selectedColor = watch('color');
+  const colorMode = watch('color_mode');
   const showPrice = watch('showPrice');
   const selectedGroupDays = watch('group_days') || [];
+  const categoryValue = watch('category') || '';
+  const groupedServices = groupServicesByCategory(services || []);
+  const themePalette = buildThemeCategoryPalette(tenant.theme.primaryColor, tenant.theme.secondaryColor);
+
+  const persistCategories = async (nextCategories: string[]) => {
+    const result = await apiClient.patch<{ updated: boolean; serviceCategories: string[] }>(
+      '/tenants/settings/service-categories',
+      { serviceCategories: nextCategories },
+    );
+    setServiceCategories(result.serviceCategories);
+    updateTenant({ theme: { serviceCategories: result.serviceCategories } });
+  };
+
+  const addCategory = async () => {
+    const trimmed = categoryDraft.trim();
+    if (!trimmed) return;
+    const next = Array.from(new Set([...serviceCategories, trimmed]));
+    await persistCategories(next);
+    setCategoryDraft('');
+    toast.success('Категорията е добавена.');
+  };
 
   return (
-    <div>
+    <div className="mx-auto w-full max-w-6xl min-w-0">
       <div className="flex justify-between items-center mb-6">
         <p className="text-sm text-gray-500">{services?.length ?? 0} услуги</p>
         <button
@@ -154,6 +196,7 @@ export default function AdminServicesPage() {
               slot_capacity: 1,
               group_days: [],
               group_time_slots_text: '',
+              color_mode: 'theme',
             });
             setShowForm(true);
           }}
@@ -163,39 +206,94 @@ export default function AdminServicesPage() {
         </button>
       </div>
 
+      <div className="mb-6 rounded-2xl border border-gray-200 bg-white p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-[220px] flex-1">
+            <label className="mb-1 block text-sm font-medium text-gray-700">Категории</label>
+            <input
+              value={categoryDraft}
+              onChange={(event) => setCategoryDraft(event.target.value)}
+              placeholder="Добави категория"
+              className="w-full rounded-xl border-2 border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-[var(--color-primary)]"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => void addCategory()}
+            className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-100"
+          >
+            Добави категория
+          </button>
+        </div>
+        {serviceCategories.length > 0 && (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {serviceCategories.map((category, index) => (
+              <span
+                key={category}
+                className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold"
+                style={{
+                  backgroundColor: `${themePalette[index % themePalette.length]}18`,
+                  borderColor: `${themePalette[index % themePalette.length]}40`,
+                  color: themePalette[index % themePalette.length],
+                }}
+              >
+                {category}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
       {isLoading ? (
         <div className="flex justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-[var(--color-primary)]" /></div>
       ) : (
         <div className="grid gap-3">
-          {services?.map((svc) => (
-            <div key={svc.id} className="bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-4">
-              <div className="w-3 h-12 rounded-full flex-shrink-0" style={{ backgroundColor: svc.color }} />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <p className="font-bold text-gray-900">{svc.name}</p>
-                  {!svc.is_public && <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Скрита</span>}
+          {groupedServices.map(([categoryName, categoryServices]) => {
+            const categoryColor = resolveCategoryColor(categoryName === '__uncategorized__' ? null : categoryName, serviceCategories, tenant.theme.primaryColor, tenant.theme.secondaryColor);
+            return (
+              <div key={categoryName} className="rounded-3xl border border-gray-100 bg-white p-4">
+                <div className="mb-4 flex items-center gap-3">
+                  <span className="h-3 w-3 rounded-full" style={{ backgroundColor: categoryColor }} />
+                  <h3 className="text-sm font-black text-gray-900">
+                    {categoryName === '__uncategorized__' ? 'Без категория' : categoryName}
+                  </h3>
+                  <span className="text-xs text-gray-400">{categoryServices.length} услуги</span>
                 </div>
-                <div className="flex items-center gap-4 text-sm text-gray-400 mt-0.5">
-                  {svc.category && <span className="flex items-center gap-1"><Tag className="w-3 h-3" />{svc.category}</span>}
-                  <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{svc.duration_minutes} мин.</span>
-                  {svc.booking_mode === 'group' && (
-                    <span className="flex items-center gap-1"><Users className="w-3 h-3" />до {svc.slot_capacity ?? 1} души</span>
-                  )}
-                  <span className="font-semibold text-gray-600">
-                    {svc.price != null ? `${svc.price} €` : 'Цена по запитване'}
-                  </span>
+                <div className="grid gap-3">
+                  {categoryServices.map((svc) => (
+                    <div key={svc.id} className="bg-white rounded-2xl border border-gray-100 p-4 flex items-center gap-4">
+                      <div className="w-3 h-12 rounded-full flex-shrink-0" style={{ backgroundColor: svc.color_mode === 'theme' ? categoryColor : svc.color }} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="font-bold text-gray-900">{svc.name}</p>
+                          {!svc.is_public && <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Скрита</span>}
+                          {svc.color_mode === 'theme' && <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Тема</span>}
+                        </div>
+                        <div className="flex items-center gap-4 text-sm text-gray-400 mt-0.5 flex-wrap">
+                          {svc.category && <span className="flex items-center gap-1"><Tag className="w-3 h-3" />{svc.category}</span>}
+                          <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{svc.duration_minutes} мин.</span>
+                          {svc.booking_mode === 'group' && (
+                            <span className="flex items-center gap-1"><Users className="w-3 h-3" />до {svc.slot_capacity ?? 1} души</span>
+                          )}
+                          <span className="font-semibold text-gray-600">
+                            {svc.price != null ? `${svc.price} €` : 'Цена по запитване'}
+                          </span>
+                        </div>
+                        {svc.booking_mode === 'group' && (
+                          <p className="mt-1 text-xs text-gray-500">
+                            {(svc.group_days ?? []).map((day) => GROUP_DAY_LABELS[day as keyof typeof GROUP_DAY_LABELS] || day).join(', ') || 'Без дни'} · {(svc.group_time_slots ?? []).join(', ') || 'Без часове'}
+                          </p>
+                        )}
+                      </div>
+                      <button onClick={() => openEdit(svc)} className="p-2 rounded-lg hover:bg-gray-50 transition-colors">
+                        <Pencil className="w-4 h-4 text-gray-400" />
+                      </button>
+                    </div>
+                  ))}
                 </div>
-                {svc.booking_mode === 'group' && (
-                  <p className="mt-1 text-xs text-gray-500">
-                    {(svc.group_days ?? []).map((day) => GROUP_DAY_LABELS[day as keyof typeof GROUP_DAY_LABELS] || day).join(', ') || 'Без дни'} · {(svc.group_time_slots ?? []).join(', ') || 'Без часове'}
-                  </p>
-                )}
               </div>
-              <button onClick={() => openEdit(svc)} className="p-2 rounded-lg hover:bg-gray-50 transition-colors">
-                <Pencil className="w-4 h-4 text-gray-400" />
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -215,7 +313,12 @@ export default function AdminServicesPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Категория</label>
-                  <input {...register('category')} placeholder="Коса, Нокти..." className="w-full px-3 py-2.5 rounded-xl border-2 border-gray-200 focus:border-[var(--color-primary)] outline-none text-sm" />
+                  <select {...register('category')} className="w-full px-3 py-2.5 rounded-xl border-2 border-gray-200 focus:border-[var(--color-primary)] outline-none text-sm bg-white">
+                    <option value="">Без категория</option>
+                    {[...new Set([...(serviceCategories || []), ...(categoryValue ? [categoryValue] : [])])].map((category) => (
+                      <option key={category} value={category}>{category}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Продължителност (мин) *</label>
@@ -237,12 +340,36 @@ export default function AdminServicesPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Цвят</label>
-                  <div className="flex gap-1.5 flex-wrap">
-                    {COLORS.map((c) => (
-                      <button key={c} type="button" onClick={() => setValue('color', c)}
-                        className={`w-6 h-6 rounded-full transition-transform ${selectedColor === c ? 'scale-125 ring-2 ring-offset-1 ring-gray-400' : ''}`}
-                        style={{ backgroundColor: c }} />
-                    ))}
+                  <div className="space-y-3">
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setValue('color_mode', 'theme', { shouldDirty: true })}
+                        className={`rounded-xl px-3 py-2 text-xs font-semibold ${colorMode === 'theme' ? 'bg-gray-900 text-white' : 'border border-gray-200 bg-white text-gray-600'}`}
+                      >
+                        От темата
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setValue('color_mode', 'manual', { shouldDirty: true })}
+                        className={`rounded-xl px-3 py-2 text-xs font-semibold ${colorMode === 'manual' ? 'bg-gray-900 text-white' : 'border border-gray-200 bg-white text-gray-600'}`}
+                      >
+                        Ръчен цвят
+                      </button>
+                    </div>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {COLORS.map((c) => (
+                        <button key={c} type="button" onClick={() => setValue('color', c)}
+                          disabled={colorMode !== 'manual'}
+                          className={`w-6 h-6 rounded-full transition-transform disabled:opacity-35 ${selectedColor === c ? 'scale-125 ring-2 ring-offset-1 ring-gray-400' : ''}`}
+                          style={{ backgroundColor: c }} />
+                      ))}
+                    </div>
+                    {colorMode === 'theme' && (
+                      <p className="text-xs text-gray-500">
+                        Цветът ще се вземе от избраната тема и категорията.
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -321,4 +448,26 @@ export default function AdminServicesPage() {
       )}
     </div>
   );
+}
+
+function groupServicesByCategory(services: Service[]) {
+  const groups = new Map<string, Service[]>();
+  for (const service of services) {
+    const key = service.category?.trim() || '__uncategorized__';
+    const bucket = groups.get(key) || [];
+    bucket.push(service);
+    groups.set(key, bucket);
+  }
+  return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], 'bg'));
+}
+
+function resolveCategoryColor(
+  category: string | null,
+  categories: string[],
+  primaryColor: string,
+  secondaryColor: string,
+) {
+  const palette = buildThemeCategoryPalette(primaryColor, secondaryColor);
+  const index = Math.max(categories.findIndex((entry) => entry === category), 0);
+  return palette[index % palette.length];
 }

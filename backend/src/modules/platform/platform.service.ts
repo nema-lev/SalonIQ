@@ -19,6 +19,7 @@ type TenantListRow = {
   created_at: Date;
   owner_name: string | null;
   owner_email: string | null;
+  theme_config: unknown;
 };
 
 @Injectable()
@@ -42,7 +43,8 @@ export class PlatformService {
         t.is_active,
         t.created_at,
         o.name AS owner_name,
-        o.email AS owner_email
+        o.email AS owner_email,
+        t.theme_config
       FROM public.tenants t
       LEFT JOIN LATERAL (
         SELECT name, email
@@ -75,6 +77,7 @@ export class PlatformService {
             name: tenant.owner_name,
             email: tenant.owner_email,
           },
+          poweredByText: this.parseTheme(tenant.theme_config).poweredByText || 'Powered by SalonIQ',
           summary,
           access,
         };
@@ -92,6 +95,7 @@ export class PlatformService {
       planStatus?: string;
       planRenewsAt?: string | null;
       isActive?: boolean;
+      poweredByText?: string;
     },
   ) {
     const current = await this.getTenantById(tenantId);
@@ -107,6 +111,12 @@ export class PlatformService {
       throw new BadRequestException('Невалидна дата за платено до.');
     }
 
+    const currentTheme = this.parseTheme(current.theme_config);
+    const nextTheme = {
+      ...currentTheme,
+      ...(dto.poweredByText !== undefined ? { poweredByText: dto.poweredByText.trim() || 'Powered by SalonIQ' } : {}),
+    };
+
     await this.prisma.$executeRawUnsafe(
       `
       UPDATE public.tenants
@@ -115,14 +125,16 @@ export class PlatformService {
           plan_status = $3::public.plan_status,
           plan_renews_at = $4,
           is_active = $5,
+          theme_config = $6::jsonb,
           updated_at = NOW()
-      WHERE id = $6::uuid
+      WHERE id = $7::uuid
       `,
       dto.businessType ?? current.business_type,
       dto.plan ?? current.plan,
       dto.planStatus ?? current.plan_status,
       planRenewsAt,
       dto.isActive ?? current.is_active,
+      JSON.stringify(nextTheme),
       tenantId,
     );
 
@@ -201,9 +213,10 @@ export class PlatformService {
         plan_status: string;
         plan_renews_at: Date | null;
         is_active: boolean;
+        theme_config: unknown;
       }[]
     >`
-      SELECT id, plan, business_type, plan_status, plan_renews_at, is_active
+      SELECT id, plan, business_type, plan_status, plan_renews_at, is_active, theme_config
       FROM public.tenants
       WHERE id = ${tenantId}::uuid
       LIMIT 1
@@ -305,5 +318,21 @@ export class PlatformService {
     }
 
     return { blocked: false, reason: null };
+  }
+
+  private parseTheme(themeConfig: unknown) {
+    if (typeof themeConfig === 'string') {
+      try {
+        return JSON.parse(themeConfig || '{}');
+      } catch {
+        return {};
+      }
+    }
+
+    if (themeConfig && typeof themeConfig === 'object') {
+      return themeConfig as Record<string, unknown>;
+    }
+
+    return {};
   }
 }

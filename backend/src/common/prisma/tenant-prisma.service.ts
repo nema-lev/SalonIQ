@@ -125,6 +125,9 @@ export class TenantPrismaService extends PrismaClient implements OnModuleInit, O
     await this.$executeRawUnsafe(
       `ALTER TABLE "${schemaName}".services ADD COLUMN IF NOT EXISTS group_time_slots TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]`,
     );
+    await this.$executeRawUnsafe(
+      `ALTER TABLE "${schemaName}".services ADD COLUMN IF NOT EXISTS color_mode VARCHAR(20) NOT NULL DEFAULT 'manual'`,
+    );
   }
 
   async ensureWaitlistTable(schemaName: string): Promise<void> {

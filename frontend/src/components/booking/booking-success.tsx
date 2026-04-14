@@ -29,6 +29,22 @@ export function BookingSuccess({ appointment, formData, onNewBooking }: BookingS
       : null;
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const storageKey = `saloniq_recent_phones_${tenant.slug}`;
+    try {
+      const existing = JSON.parse(window.localStorage.getItem(storageKey) || '[]');
+      const normalized = String(formData.clientPhone || '');
+      const next = [
+        normalized,
+        ...(Array.isArray(existing) ? existing.filter((value) => value !== normalized) : []),
+      ].slice(0, 5);
+      window.localStorage.setItem(storageKey, JSON.stringify(next));
+    } catch {
+      // ignore device cache failures
+    }
+  }, [formData.clientPhone, tenant.slug]);
+
+  useEffect(() => {
     if (!tenant.enableTelegramNotifications) {
       setTelegramBotLink(null);
       setTelegramLinked(false);

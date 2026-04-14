@@ -500,6 +500,7 @@ export default function AdminCalendarPage() {
   const [draggedAppointmentId, setDraggedAppointmentId] = useState<string | null>(null);
   const [draggedRequestId, setDraggedRequestId] = useState<string | null>(null);
   const [dropPreview, setDropPreview] = useState<{ staffId: string; startAt: string } | null>(null);
+  const [pointerDragLabel, setPointerDragLabel] = useState<string | null>(null);
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [resizingBlock, setResizingBlock] = useState<{
     id: string;
@@ -518,6 +519,23 @@ export default function AdminCalendarPage() {
   const dateInputRef = useRef<HTMLInputElement | null>(null);
   const longPressTimeoutRef = useRef<number | null>(null);
   const suppressTapUntilRef = useRef(0);
+  const calendarColumnRegistryRef = useRef<
+    Record<
+      string,
+      {
+        element: HTMLDivElement | null;
+        staffId: string;
+        day: Date;
+      }
+    >
+  >({});
+  const pointerDragRef = useRef<{
+    target: MoveTarget;
+    kind: 'appointment' | 'request';
+    moved: boolean;
+    startX: number;
+    startY: number;
+  } | null>(null);
   const [blockDraft, setBlockDraft] = useState({
     staffId: 'all',
     date: format(new Date(), 'yyyy-MM-dd'),
@@ -855,6 +873,38 @@ export default function AdminCalendarPage() {
     setPendingTouchPlacement({ startAt: nextIso, staffId });
     setDropPreview({ staffId, startAt: nextIso });
   };
+
+  const registerCalendarColumn = useCallback(
+    (key: string, staffId: string, day: Date) => (node: HTMLDivElement | null) => {
+      if (!node) {
+        delete calendarColumnRegistryRef.current[key];
+        return;
+      }
+
+      calendarColumnRegistryRef.current[key] = {
+        element: node,
+        staffId,
+        day,
+      };
+    },
+    [],
+  );
+
+  const clearDesktopDragState = useCallback(() => {
+    pointerDragRef.current = null;
+    setDraggedAppointmentId(null);
+    setDraggedRequestId(null);
+    setDropPreview(null);
+    setPointerDragLabel(null);
+  }, []);
+
+  const beginDesktopPointerDrag = useCallback(
+    (target: MoveTarget, kind: 'appointment' | 'request', startX: number, startY: number) => {
+      if (isCompactViewport || typeof window === 'undefined') return;
+      pointerDragRef.current = { target, kind, moved: false, startX, startY };
+    },
+    [isCompactViewport],
+  );
 
   const handleRequestPlacement = async (requestId: string, startAt: string, staffId: string) => {
     const request = inboxItems.find((item) => item.id === requestId);
@@ -1268,6 +1318,57 @@ export default function AdminCalendarPage() {
     return () => window.removeEventListener('resize', syncViewportMode);
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const dragState = pointerDragRef.current;
+      if (!dragState) return;
+      if (!dragState.moved) {
+        const distance = Math.hypot(event.clientX - dragState.startX, event.clientY - dragState.startY);
+        if (distance < 6) return;
+        dragState.moved = true;
+        suppressTapUntilRef.current = Date.now() + 500;
+        setDraggedAppointmentId(dragState.kind === 'appointment' ? dragState.target.id : null);
+        setDraggedRequestId(dragState.kind === 'request' ? dragState.target.id : null);
+        setPointerDragLabel(dragState.target.client_name);
+        setDropPreview({
+          staffId: dragState.target.staff_id,
+          startAt: dragState.target.start_at,
+        });
+      }
+      const nextTarget = resolvePointerDropTarget(event.clientX, event.clientY);
+      if (!nextTarget) {
+        setDropPreview(null);
+        return;
+      }
+      setDropPreview(nextTarget);
+    };
+
+    const handlePointerUp = async () => {
+      const dragState = pointerDragRef.current;
+      if (!dragState) return;
+      const preview = dropPreview;
+      if (dragState.moved && preview) {
+        if (dragState.kind === 'request') {
+          await handleRequestPlacement(dragState.target.id, preview.startAt, preview.staffId);
+        } else {
+          handleDropReschedule(dragState.target.id, preview.startAt, preview.staffId);
+        }
+      }
+      clearDesktopDragState();
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+    };
+  }, [clearDesktopDragState, dropPreview, handleRequestPlacement, handleDropReschedule, calendarRange.startHour, pixelsPerHour]);
+
   const activePreviewTarget = useMemo(() => {
     if (touchMoveTarget) return touchMoveTarget;
     if (draggedAppointmentId) {
@@ -1297,6 +1398,30 @@ export default function AdminCalendarPage() {
     },
     [previewDurationMinutes],
   );
+
+  function resolvePointerDropTarget(clientX: number, clientY: number) {
+    for (const entry of Object.values(calendarColumnRegistryRef.current)) {
+      const rect = entry.element?.getBoundingClientRect();
+      if (!rect) continue;
+      if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
+        continue;
+      }
+
+      const slotHeight = pixelsPerHour / (60 / CALENDAR_SLOT_MINUTES);
+      const relativeY = Math.min(Math.max(clientY - rect.top, 0), rect.height);
+      const slotIndex = Math.floor(relativeY / slotHeight);
+      const totalMinutes = calendarRange.startHour * 60 + slotIndex * CALENDAR_SLOT_MINUTES;
+      const nextStart = new Date(entry.day);
+      nextStart.setHours(Math.floor(totalMinutes / 60), totalMinutes % 60, 0, 0);
+
+      return {
+        staffId: entry.staffId,
+        startAt: nextStart.toISOString(),
+      };
+    }
+
+    return null;
+  }
 
   useEffect(() => {
     setBlockDraft((current) => ({
@@ -2097,11 +2222,14 @@ export default function AdminCalendarPage() {
   const renderRequestCard = (request: UpcomingAppointment) => (
     <div
       key={request.id}
-      draggable={!isCompactViewport}
-      onDragStart={() => setDraggedRequestId(request.id)}
-      onDragEnd={() => {
-        setDraggedRequestId(null);
-        setDropPreview(null);
+      onPointerDown={(event) => {
+        if (event.pointerType !== 'mouse' || event.button !== 0) return;
+        beginDesktopPointerDrag(
+          toMoveTarget(request as unknown as Appointment, 'request'),
+          'request',
+          event.clientX,
+          event.clientY,
+        );
       }}
       onTouchStart={() => beginLongPressMove(toMoveTarget(request as unknown as Appointment, 'request'))}
       onTouchMove={clearLongPressTimer}
@@ -2630,6 +2758,7 @@ export default function AdminCalendarPage() {
                               <div
                                 key={column.key}
                                 data-calendar-column={column.key}
+                                ref={registerCalendarColumn(column.key, column.staff.id, column.day)}
                                 className={`relative border-r border-gray-100 bg-white/70 last:border-r-0 ${
                                   index % Math.max(visibleStaffColumns.length, 1) === 0 ? 'border-l-2 border-l-gray-200' : ''
                                 }`}
@@ -2842,11 +2971,15 @@ export default function AdminCalendarPage() {
                                     <button
                                       key={appointment.id}
                                       type="button"
-                                      draggable={!isCompactViewport && !['completed', 'cancelled', 'no_show'].includes(appointment.status)}
-                                      onDragStart={() => setDraggedAppointmentId(appointment.id)}
-                                      onDragEnd={() => {
-                                        setDraggedAppointmentId(null);
-                                        setDropPreview(null);
+                                      onPointerDown={(event) => {
+                                        if (event.pointerType !== 'mouse' || event.button !== 0) return;
+                                        if (['completed', 'cancelled', 'no_show'].includes(appointment.status)) return;
+                                        beginDesktopPointerDrag(
+                                          toMoveTarget(appointment, 'appointment'),
+                                          'appointment',
+                                          event.clientX,
+                                          event.clientY,
+                                        );
                                       }}
                                       onClick={() => focusRecord(appointment.id, appointment.start_at)}
                                       className={`absolute left-2 right-2 z-[2] rounded-2xl border px-3 py-2 text-left shadow-sm transition-transform hover:scale-[1.01] ${
@@ -2921,6 +3054,7 @@ export default function AdminCalendarPage() {
 		                            <div
 		                              key={staffMember.id}
                                   data-calendar-column={staffMember.id}
+                                  ref={registerCalendarColumn(`day-${staffMember.id}`, staffMember.id, currentDate)}
 		                              className="relative border-r border-gray-100 bg-white/70 last:border-r-0"
 		                              style={{ height: `${calendarHeight}px` }}
 		                            >
@@ -3135,13 +3269,16 @@ export default function AdminCalendarPage() {
 			                                  <button
 			                                    key={appointment.id}
 			                                    type="button"
-			                                    draggable={!isCompactViewport && !['completed', 'cancelled', 'no_show'].includes(appointment.status)}
-			                                    onDragStart={() => setDraggedAppointmentId(appointment.id)}
-			                                    onDragEnd={() => {
-			                                      setDraggedAppointmentId(null);
-                                          setDraggedRequestId(null);
-			                                      setDropPreview(null);
-			                                    }}
+			                                    onPointerDown={(event) => {
+                                        if (event.pointerType !== 'mouse' || event.button !== 0) return;
+                                        if (['completed', 'cancelled', 'no_show'].includes(appointment.status)) return;
+                                        beginDesktopPointerDrag(
+                                          toMoveTarget(appointment, 'appointment'),
+                                          'appointment',
+                                          event.clientX,
+                                          event.clientY,
+                                        );
+                                      }}
 				                                    onClick={() => focusRecord(appointment.id, appointment.start_at)}
 	                                      onTouchStart={() => beginLongPressMove(toMoveTarget(appointment, 'appointment'))}
 	                                      onTouchMove={clearLongPressTimer}

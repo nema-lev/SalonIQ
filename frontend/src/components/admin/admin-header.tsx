@@ -37,15 +37,15 @@ export function AdminHeader({ onOpenMenu }: { onOpenMenu: () => void }) {
     staleTime: 30 * 1000,
     refetchInterval: 15000,
   });
-  const pendingCount = upcoming?.length ?? 0;
   const inboxActionCount = useMemo(
     () => (upcoming ?? []).filter((item) => item.status === 'pending').length,
     [upcoming],
   );
   const inboxUpdateCount = useMemo(
-    () => (upcoming ?? []).filter((item) => Boolean(item.owner_alert_state)).length,
+    () => (upcoming ?? []).filter((item) => item.status !== 'pending').length,
     [upcoming],
   );
+  const attentionCount = inboxActionCount + inboxUpdateCount;
 
   useEffect(() => {
     setNotificationsOpen(false);
@@ -105,7 +105,7 @@ export function AdminHeader({ onOpenMenu }: { onOpenMenu: () => void }) {
         <button
           type="button"
           onClick={() => setNotificationsOpen((current) => !current)}
-          aria-label={pendingCount > 0 ? `${pendingCount} заявки и отговори искат внимание` : 'Няма нови заявки'}
+          aria-label={attentionCount > 0 ? `${attentionCount} заявки и отговори искат внимание` : 'Няма нови заявки'}
           style={{
             width: 42,
             height: 42,
@@ -121,7 +121,7 @@ export function AdminHeader({ onOpenMenu }: { onOpenMenu: () => void }) {
           }}
         >
           <Bell className="w-4 h-4 text-gray-600" />
-          {pendingCount > 0 && (
+          {attentionCount > 0 && (
             <span
               style={{
                 position: 'absolute',
@@ -141,7 +141,7 @@ export function AdminHeader({ onOpenMenu }: { onOpenMenu: () => void }) {
                 boxShadow: '0 6px 18px rgba(124,58,237,0.22)',
               }}
             >
-              {pendingCount > 99 ? '99+' : pendingCount}
+	              {attentionCount > 99 ? '99+' : attentionCount}
             </span>
           )}
         </button>
@@ -164,7 +164,7 @@ export function AdminHeader({ onOpenMenu }: { onOpenMenu: () => void }) {
             <div style={{ padding: '4px 6px 10px' }}>
               <p style={{ margin: 0, fontSize: 13, fontWeight: 800, color: '#111827' }}>Известия</p>
               <p style={{ margin: '4px 0 0', fontSize: 12, color: '#6b7280' }}>
-                {pendingCount > 0 ? `${pendingCount} елемента искат внимание` : 'Няма нови известия'}
+	                {attentionCount > 0 ? `${attentionCount} елемента искат внимание` : 'Няма нови известия'}
               </p>
             </div>
 

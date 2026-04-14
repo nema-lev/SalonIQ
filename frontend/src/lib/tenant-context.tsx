@@ -86,6 +86,10 @@ export function TenantProvider({
     const primaryGlow = toRgba(theme.primaryColor, 0.18);
     const secondaryGlow = toRgba(theme.secondaryColor, 0.14);
     const lightGradient = buildSoftSurfaceGradient(theme.primaryColor, theme.secondaryColor);
+    const surfaceAccentSoft = `color-mix(in srgb, ${theme.primaryColor} 12%, ${theme.surfaceStyle === 'dark' ? '#111827' : '#ffffff'})`;
+    const surfaceAccentMuted = `color-mix(in srgb, ${theme.primaryColor} 8%, ${theme.surfaceStyle === 'dark' ? '#0f172a' : '#f8fafc'})`;
+    const secondaryAccentSoft = `color-mix(in srgb, ${theme.secondaryColor} 10%, ${theme.surfaceStyle === 'dark' ? '#111827' : '#ffffff'})`;
+    const pillSurface = theme.surfaceStyle === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.74)';
     const surfacePalettes = {
       light: {
         bgSurface: '#f8fafc',
@@ -147,6 +151,10 @@ export function TenantProvider({
     root.style.setProperty('--bg-gradient-start', surface.bgGradientStart);
     root.style.setProperty('--bg-gradient-mid', surface.bgGradientMid);
     root.style.setProperty('--bg-gradient-end', surface.bgGradientEnd);
+    root.style.setProperty('--surface-accent-soft', surfaceAccentSoft);
+    root.style.setProperty('--surface-accent-muted', surfaceAccentMuted);
+    root.style.setProperty('--surface-secondary-soft', secondaryAccentSoft);
+    root.style.setProperty('--surface-pill', pillSurface);
 
     // Радиус на ъгълчетата
     const radii = { sharp: '0px', rounded: '8px', pill: '999px' };

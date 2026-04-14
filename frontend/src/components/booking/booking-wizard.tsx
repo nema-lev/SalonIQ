@@ -118,9 +118,9 @@ export function BookingWizard() {
                   fontSize: 13,
                   fontWeight: 700,
                   color: i <= currentIndex ? '#fff' : 'var(--text-soft)',
-                  background: i <= currentIndex ? 'var(--color-primary)' : 'rgba(108,91,137,0.1)',
+                  background: i <= currentIndex ? 'var(--color-primary)' : 'var(--surface-accent-soft)',
                   flexShrink: 0,
-                  boxShadow: i === currentIndex ? '0 10px 26px rgba(124,58,237,0.24)' : 'none',
+                  boxShadow: i === currentIndex ? '0 10px 26px color-mix(in srgb, var(--color-primary) 24%, transparent)' : 'none',
                 }}
               >
                 {i < currentIndex ? (
@@ -137,7 +137,7 @@ export function BookingWizard() {
                     h-0.5 flex-1 mx-1 transition-all duration-500
                     ${i < currentIndex ? 'bg-[var(--color-primary)]' : 'bg-gray-200'}
                   `}
-                  style={{ width: '100%', height: 4, borderRadius: 999, background: i < currentIndex ? 'var(--color-primary)' : '#e5e7eb', margin: '0 8px' }}
+                  style={{ width: '100%', height: 4, borderRadius: 999, background: i < currentIndex ? 'var(--color-primary)' : 'var(--line-soft)', margin: '0 8px' }}
                 />
               )}
             </div>

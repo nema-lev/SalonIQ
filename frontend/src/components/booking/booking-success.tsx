@@ -113,10 +113,10 @@ export function BookingSuccess({ appointment, formData, onNewBooking }: BookingS
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
       >
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">
+          <h2 className="text-2xl font-bold mb-2" style={{ color: 'var(--text-strong)' }}>
           {isPending ? '⏳ Заявката е изпратена!' : '✅ Резервацията е потвърдена!'}
         </h2>
-        <p className="text-gray-500 mb-8 leading-relaxed">
+        <p className="mb-8 leading-relaxed" style={{ color: 'var(--text-soft)' }}>
           {isPending
             ? `Заявката Ви за ${copy.bookingLabel} в ${tenant.businessName} е получена и очаква потвърждение от нашия екип. Ще получите известяване скоро.`
             : `${copy.bookingLabel.charAt(0).toUpperCase() + copy.bookingLabel.slice(1)}ът Ви в ${tenant.businessName} е потвърден. Ще получите потвърждение чрез Telegram.`
@@ -124,25 +124,25 @@ export function BookingSuccess({ appointment, formData, onNewBooking }: BookingS
         </p>
 
         {/* Booking summary */}
-        <div className="bg-gradient-to-br from-[var(--color-primary)]/5 to-[var(--color-secondary)]/5 rounded-2xl p-5 mb-6 text-left">
+        <div className="rounded-2xl p-5 mb-6 text-left" style={{ background: 'linear-gradient(135deg, var(--surface-accent-soft), var(--surface-secondary-soft))', border: '1px solid var(--line-soft)' }}>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <p className="text-xs text-gray-400 mb-0.5">{copy.serviceLabel.charAt(0).toUpperCase() + copy.serviceLabel.slice(1)}</p>
-              <p className="font-semibold text-gray-800 text-sm">{formData.serviceName}</p>
+              <p className="text-xs mb-0.5" style={{ color: 'var(--text-soft)' }}>{copy.serviceLabel.charAt(0).toUpperCase() + copy.serviceLabel.slice(1)}</p>
+              <p className="font-semibold text-sm" style={{ color: 'var(--text-strong)' }}>{formData.serviceName}</p>
             </div>
             <div>
-              <p className="text-xs text-gray-400 mb-0.5">
+              <p className="text-xs mb-0.5" style={{ color: 'var(--text-soft)' }}>
                 {copy.providerLabel.charAt(0).toUpperCase() + copy.providerLabel.slice(1)}
               </p>
-              <p className="font-semibold text-gray-800 text-sm">{formData.staffName}</p>
+              <p className="font-semibold text-sm" style={{ color: 'var(--text-strong)' }}>{formData.staffName}</p>
             </div>
             <div>
-              <p className="text-xs text-gray-400 mb-0.5">Дата</p>
-              <p className="font-semibold text-gray-800 text-sm">{formData.displayDate}</p>
+              <p className="text-xs mb-0.5" style={{ color: 'var(--text-soft)' }}>Дата</p>
+              <p className="font-semibold text-sm" style={{ color: 'var(--text-strong)' }}>{formData.displayDate}</p>
             </div>
             <div>
-              <p className="text-xs text-gray-400 mb-0.5">Час</p>
-              <p className="font-semibold text-gray-800 text-sm">{formData.timeSlot}</p>
+              <p className="text-xs mb-0.5" style={{ color: 'var(--text-soft)' }}>Час</p>
+              <p className="font-semibold text-sm" style={{ color: 'var(--text-strong)' }}>{formData.timeSlot}</p>
             </div>
           </div>
         </div>

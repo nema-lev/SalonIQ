@@ -95,25 +95,26 @@ export function StepConfirmation({ formData, onBack, onSuccess }: StepConfirmati
       <button
         onClick={onBack}
         disabled={mutation.isPending}
-        className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-4 transition-colors disabled:opacity-50"
+        className="flex items-center gap-1 text-sm mb-4 transition-colors disabled:opacity-50"
+        style={{ color: 'var(--text-soft)' }}
       >
         <ChevronLeft className="w-4 h-4" />
         Назад
       </button>
 
-      <h2 className="text-2xl font-bold text-gray-900 mb-2">Потвърдете данните</h2>
-      <p className="text-gray-500 mb-6">Проверете детайлите преди да потвърдите {copy.bookingLabel}а</p>
+      <h2 className="text-2xl font-bold mb-2" style={{ color: 'var(--text-strong)' }}>Потвърдете данните</h2>
+      <p className="mb-6" style={{ color: 'var(--text-soft)' }}>Проверете детайлите преди да потвърдите {copy.bookingLabel}а</p>
 
       {/* Summary card */}
-      <div className="bg-gray-50 rounded-2xl p-5 mb-5 space-y-3.5">
+      <div className="rounded-2xl p-5 mb-5 space-y-3.5" style={{ background: 'var(--surface-pill)', border: '1px solid var(--line-soft)' }}>
         {rows.map((row, i) => (
           <div key={i} className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center shadow-sm flex-shrink-0">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center shadow-sm flex-shrink-0" style={{ background: 'var(--bg-card)', border: '1px solid var(--line-soft)' }}>
               {row.icon}
             </div>
             <div className="flex-1 flex items-center justify-between">
-              <span className="text-sm text-gray-500">{row.label}</span>
-              <span className="text-sm font-semibold text-gray-800 text-right max-w-[55%]">
+              <span className="text-sm" style={{ color: 'var(--text-soft)' }}>{row.label}</span>
+              <span className="text-sm font-semibold text-right max-w-[55%]" style={{ color: 'var(--text-strong)' }}>
                 {row.value}
               </span>
             </div>
@@ -121,9 +122,9 @@ export function StepConfirmation({ formData, onBack, onSuccess }: StepConfirmati
         ))}
 
         {formData.servicePrice != null && (
-          <div className="pt-3 mt-3 border-t border-gray-200">
+          <div className="pt-3 mt-3" style={{ borderTop: '1px solid var(--line-soft)' }}>
             <div className="flex items-center justify-between">
-              <span className="font-semibold text-gray-700">Приблизителна цена</span>
+              <span className="font-semibold" style={{ color: 'var(--text-strong)' }}>Приблизителна цена</span>
               <span className="text-xl font-bold text-[var(--color-primary)]">
                 {formData.servicePrice} €
               </span>
@@ -134,17 +135,17 @@ export function StepConfirmation({ formData, onBack, onSuccess }: StepConfirmati
 
       {/* Notes display */}
       {formData.notes && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-5">
-          <p className="text-xs font-semibold text-amber-700 mb-1">Вашите бележки:</p>
-          <p className="text-sm text-amber-800">{formData.notes}</p>
+        <div className="rounded-xl p-4 mb-5" style={{ background: 'var(--surface-accent-soft)', border: '1px solid var(--line-soft)' }}>
+          <p className="text-xs font-semibold mb-1" style={{ color: 'var(--text-strong)' }}>Вашите бележки:</p>
+          <p className="text-sm" style={{ color: 'var(--text-soft)' }}>{formData.notes}</p>
         </div>
       )}
 
       {/* Cancellation policy */}
       {tenant.allowClientCancellation && tenant.cancellationHours > 0 && (
-        <div className="flex items-start gap-3 bg-blue-50 rounded-xl p-4 mb-6">
+        <div className="flex items-start gap-3 rounded-xl p-4 mb-6" style={{ background: 'var(--surface-accent-soft)', border: '1px solid var(--line-soft)' }}>
           <AlertCircle className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
-          <p className="text-xs text-blue-700 leading-relaxed">
+          <p className="text-xs leading-relaxed" style={{ color: 'var(--text-strong)' }}>
             <span className="font-semibold">Политика за отмяна:</span> Можете да отмените
             безплатно до {tenant.cancellationHours} часа преди {copy.bookingLabel}а.
             {' '}Потвърждение и напомняне се изпращат автоматично.

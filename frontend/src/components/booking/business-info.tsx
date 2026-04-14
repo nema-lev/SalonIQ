@@ -35,7 +35,7 @@ export function BusinessInfo() {
         style={{
           height: 1,
           background:
-            'linear-gradient(90deg, transparent 0%, rgba(124,58,237,0.18) 20%, rgba(124,58,237,0.18) 80%, transparent 100%)',
+            'linear-gradient(90deg, transparent 0%, var(--surface-accent-soft) 20%, var(--surface-secondary-soft) 80%, transparent 100%)',
         }}
       />
 
@@ -49,7 +49,7 @@ export function BusinessInfo() {
           </h3>
 
           {todaySchedule && (
-            <div className="flex items-center gap-2 mb-3 p-2.5 rounded-lg bg-[var(--color-primary)]/5" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, padding: 14, borderRadius: 16, background: 'linear-gradient(90deg, rgba(124,58,237,0.1), rgba(168,85,247,0.06))' }}>
+            <div className="flex items-center gap-2 mb-3 p-2.5 rounded-lg bg-[var(--color-primary)]/5" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, padding: 14, borderRadius: 16, background: 'linear-gradient(90deg, var(--surface-accent-soft), var(--surface-secondary-soft))', border: '1px solid var(--line-soft)' }}>
               <span
                 className={`w-2 h-2 rounded-full flex-shrink-0 ${
                   todaySchedule.isOpen ? 'bg-green-500' : 'bg-red-400'
@@ -76,10 +76,10 @@ export function BusinessInfo() {
                   className={`flex justify-between items-center text-sm py-1 ${
                     isToday ? 'font-semibold text-[var(--color-primary)]' : 'text-gray-600'
                   }`}
-                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 15, padding: '6px 0', color: isToday ? 'var(--color-primary)' : 'var(--text-soft)', fontWeight: isToday ? 800 : 500, borderBottom: '1px solid color-mix(in srgb, var(--line-soft) 70%, transparent)' }}
+                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 15, padding: '6px 0', color: isToday ? 'var(--text-strong)' : 'var(--text-soft)', fontWeight: isToday ? 800 : 500, borderBottom: '1px solid color-mix(in srgb, var(--line-soft) 70%, transparent)' }}
                 >
                   <span>{DAY_NAMES[day]}</span>
-                  <span className={schedule.isOpen ? '' : 'text-gray-400'}>
+                  <span style={{ color: schedule.isOpen ? 'inherit' : 'var(--text-soft)' }}>
                     {schedule.isOpen
                       ? `${schedule.open} – ${schedule.close}`
                       : 'Почивен'}
@@ -116,9 +116,11 @@ export function BusinessInfo() {
                 marginTop: 14,
                 padding: '10px 14px',
                 borderRadius: 999,
-                background: 'rgba(124,58,237,0.08)',
+                background: 'var(--surface-accent-soft)',
+                border: '1px solid var(--line-soft)',
                 textDecoration: 'none',
                 fontWeight: 700,
+                color: 'var(--text-strong)',
               }}
             >
               <ExternalLink className="w-3.5 h-3.5" />
@@ -128,7 +130,7 @@ export function BusinessInfo() {
         </div>
       )}
 
-      <p className="text-center text-xs text-gray-300 pb-4" style={{ textAlign: 'center', fontSize: 12, color: '#9b93b8', paddingBottom: 16, margin: 0, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+      <p className="text-center text-xs pb-4" style={{ textAlign: 'center', fontSize: 12, color: 'var(--text-soft)', paddingBottom: 16, margin: 0, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
         {tenant.theme.poweredByText || 'Powered by SalonIQ'}
       </p>
     </div>

@@ -94,7 +94,8 @@ export function ClientUpcomingLookup() {
           <button
             type="button"
             onClick={() => void lookupUpcoming(recentPhones[0])}
-            className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100"
+            className="rounded-xl px-4 py-2 text-sm font-semibold"
+            style={{ border: '1px solid var(--line-soft)', background: 'var(--surface-pill)', color: 'var(--text-strong)' }}
           >
             Последен номер
           </button>
@@ -115,7 +116,7 @@ export function ClientUpcomingLookup() {
               padding: '12px 14px 12px 40px',
               borderRadius: 16,
               border: '1px solid var(--line-soft)',
-              background: '#fff',
+              background: 'var(--surface-pill)',
               outline: 'none',
               fontSize: 14,
               color: 'var(--text-strong)',
@@ -148,7 +149,7 @@ export function ClientUpcomingLookup() {
                   key={appointment.id}
                   style={{
                     border: '1px solid var(--line-soft)',
-                    background: 'rgba(255,255,255,0.72)',
+                    background: 'var(--surface-pill)',
                     borderRadius: 18,
                     padding: 14,
                   }}

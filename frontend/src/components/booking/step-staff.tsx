@@ -64,16 +64,17 @@ export function StepStaff({ serviceId, onNext, onBack }: StepStaffProps) {
     <div>
       <button
         onClick={onBack}
-        className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-4 transition-colors"
+        className="flex items-center gap-1 text-sm mb-4 transition-colors"
+        style={{ color: 'var(--text-soft)' }}
       >
         <ChevronLeft className="w-4 h-4" />
         Назад
       </button>
 
-      <h2 className="text-2xl font-bold text-gray-900 mb-2">
+      <h2 className="text-2xl font-bold mb-2" style={{ color: 'var(--text-strong)' }}>
         Изберете {copy.providerLabel}
       </h2>
-      <p className="text-gray-500 mb-6">
+      <p className="mb-6" style={{ color: 'var(--text-soft)' }}>
         {resolvedStaff?.length
           ? profile.operations.staffSelection === 'required'
             ? `За този тип бизнес е нужен конкретен ${copy.providerLabel}.`
@@ -93,14 +94,14 @@ export function StepStaff({ serviceId, onNext, onBack }: StepStaffProps) {
               active:scale-[0.99] transition-all duration-150 text-left group
             "
           >
-            <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+            <div className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: 'var(--surface-pill)', border: '1px solid var(--line-soft)' }}>
               <Shuffle className="w-5 h-5 text-gray-400 group-hover:text-[var(--color-primary)] transition-colors" />
             </div>
             <div className="flex-1">
-              <p className="font-semibold text-gray-700 group-hover:text-[var(--color-primary)] transition-colors">
+              <p className="font-semibold group-hover:text-[var(--color-primary)] transition-colors" style={{ color: 'var(--text-strong)' }}>
                 Без предпочитание
               </p>
-              <p className="text-sm text-gray-400">
+              <p className="text-sm" style={{ color: 'var(--text-soft)' }}>
                 Системата ще избере {copy.providerAutoAssignLabel}
               </p>
             </div>
@@ -140,18 +141,19 @@ export function StepStaff({ serviceId, onNext, onBack }: StepStaffProps) {
 
             {/* Информация */}
             <div className="flex-1 min-w-0">
-              <p className="font-semibold text-gray-900 group-hover:text-[var(--color-primary)] transition-colors">
+              <p className="font-semibold group-hover:text-[var(--color-primary)] transition-colors" style={{ color: 'var(--text-strong)' }}>
                 {member.name}
               </p>
               {member.bio && (
-                <p className="text-sm text-gray-500 mt-0.5 truncate">{member.bio}</p>
+                <p className="text-sm mt-0.5 truncate" style={{ color: 'var(--text-soft)' }}>{member.bio}</p>
               )}
               {member.specialties?.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-1.5">
                   {member.specialties.slice(0, 3).map((s) => (
                     <span
                       key={s}
-                      className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500"
+                      className="text-xs px-2 py-0.5 rounded-full"
+                      style={{ background: 'var(--surface-pill)', color: 'var(--text-soft)', border: '1px solid var(--line-soft)' }}
                     >
                       {s}
                     </span>
@@ -165,7 +167,7 @@ export function StepStaff({ serviceId, onNext, onBack }: StepStaffProps) {
         ))}
 
         {!resolvedStaff?.length && !isLoading && (
-          <div className="rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-500">
+          <div className="rounded-xl p-4 text-sm" style={{ border: '1px solid var(--line-soft)', background: 'var(--bg-card)', color: 'var(--text-soft)' }}>
             В момента няма налични {copy.providerLabelPlural}. Опитайте отново след малко.
           </div>
         )}

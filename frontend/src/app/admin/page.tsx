@@ -510,6 +510,7 @@ export default function AdminCalendarPage() {
   } | null>(null);
   const dateInputRef = useRef<HTMLInputElement | null>(null);
   const longPressTimeoutRef = useRef<number | null>(null);
+  const suppressTapUntilRef = useRef(0);
   const [blockDraft, setBlockDraft] = useState({
     staffId: 'all',
     date: format(new Date(), 'yyyy-MM-dd'),
@@ -1240,6 +1241,7 @@ export default function AdminCalendarPage() {
   };
 
   const startTouchMoveMode = (target: MoveTarget) => {
+    suppressTapUntilRef.current = Date.now() + 450;
     setTouchMoveTarget(target);
     setPendingTouchPlacement(null);
     setDropPreview(null);
@@ -1260,6 +1262,9 @@ export default function AdminCalendarPage() {
   };
 
   const focusRecord = (id: string, startAt: string) => {
+    if (Date.now() < suppressTapUntilRef.current) {
+      return;
+    }
     setSelectedRecordId(id);
     setCurrentDate(new Date(startAt));
     if (typeof window !== 'undefined' && window.innerWidth < 1024) {
@@ -1672,10 +1677,11 @@ export default function AdminCalendarPage() {
                 <button
                   key={appointment.id}
                   type="button"
-                  onClick={() => focusRecord(appointment.id, appointment.start_at)}
-                  onTouchStart={() => beginLongPressMove(toMoveTarget(appointment, 'appointment'))}
-                  onTouchEnd={clearLongPressTimer}
-                  onTouchCancel={clearLongPressTimer}
+	                  onClick={() => focusRecord(appointment.id, appointment.start_at)}
+	                  onTouchStart={() => beginLongPressMove(toMoveTarget(appointment, 'appointment'))}
+	                  onTouchMove={clearLongPressTimer}
+	                  onTouchEnd={clearLongPressTimer}
+	                  onTouchCancel={clearLongPressTimer}
                   className={`absolute left-2 right-2 z-[2] rounded-2xl border px-3 py-2 text-left shadow-sm ${
                     selectedRecordId === appointment.id ? 'ring-2 ring-[var(--color-primary)]/20' : ''
                   } ${isSecondary ? 'opacity-45 saturate-50' : ''} overflow-hidden`}
@@ -1957,6 +1963,7 @@ export default function AdminCalendarPage() {
         setDropPreview(null);
       }}
       onTouchStart={() => beginLongPressMove(toMoveTarget(request as unknown as Appointment, 'request'))}
+      onTouchMove={clearLongPressTimer}
       onTouchEnd={clearLongPressTimer}
       onTouchCancel={clearLongPressTimer}
       className="rounded-3xl border border-amber-100 bg-white p-4 shadow-sm"
@@ -1974,8 +1981,8 @@ export default function AdminCalendarPage() {
             </p>
           </div>
           <div className="text-right">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Дръпни</p>
-            <p className="mt-2 text-xs text-gray-500">към календара</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">{isCompactViewport ? 'Задръж' : 'Дръпни'}</p>
+            <p className="mt-2 text-xs text-gray-500">{isCompactViewport ? 'задръж и постави' : 'към календара'}</p>
           </div>
         </div>
       </button>
@@ -2811,10 +2818,11 @@ export default function AdminCalendarPage() {
                                           setDraggedRequestId(null);
 			                                      setDropPreview(null);
 			                                    }}
-			                                    onClick={() => focusRecord(appointment.id, appointment.start_at)}
-                                      onTouchStart={() => beginLongPressMove(toMoveTarget(appointment, 'appointment'))}
-                                      onTouchEnd={clearLongPressTimer}
-                                      onTouchCancel={clearLongPressTimer}
+				                                    onClick={() => focusRecord(appointment.id, appointment.start_at)}
+	                                      onTouchStart={() => beginLongPressMove(toMoveTarget(appointment, 'appointment'))}
+	                                      onTouchMove={clearLongPressTimer}
+	                                      onTouchEnd={clearLongPressTimer}
+	                                      onTouchCancel={clearLongPressTimer}
 			                                    className={`absolute left-2 right-2 z-[2] rounded-2xl border px-3 py-2 text-left shadow-sm transition-transform hover:scale-[1.01] ${
 			                                      isSelected ? 'ring-2 ring-[var(--color-primary)]/25' : ''
 			                                    } ${isSecondary ? 'opacity-45 saturate-50' : ''} overflow-hidden`}
@@ -2859,10 +2867,11 @@ export default function AdminCalendarPage() {
 	                        >
 	                          <button
 	                            type="button"
-	                            onClick={() => focusRecord(appointment.id, appointment.start_at)}
-                              onTouchStart={() => beginLongPressMove(toMoveTarget(appointment, 'appointment'))}
-                              onTouchEnd={clearLongPressTimer}
-                              onTouchCancel={clearLongPressTimer}
+		                            onClick={() => focusRecord(appointment.id, appointment.start_at)}
+	                              onTouchStart={() => beginLongPressMove(toMoveTarget(appointment, 'appointment'))}
+	                              onTouchMove={clearLongPressTimer}
+	                              onTouchEnd={clearLongPressTimer}
+	                              onTouchCancel={clearLongPressTimer}
 	                            className="flex w-full gap-3 text-left"
 	                          >
 	                            <div className="flex w-16 flex-shrink-0 flex-col items-center gap-1.5 rounded-[20px] border border-gray-100 bg-gray-50/80 px-2 py-3">
@@ -2925,9 +2934,10 @@ export default function AdminCalendarPage() {
       {showRequestsPanel && (
         <div className="fixed inset-0 z-30 bg-black/20" onClick={() => setShowRequestsPanel(false)}>
           <div
-            className="absolute inset-y-4 left-4 w-[360px] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-[28px] border border-white/70 bg-white/95 p-5 shadow-2xl shadow-black/10 backdrop-blur"
+            className="absolute inset-x-4 bottom-4 max-h-[82vh] overflow-y-auto rounded-[28px] border border-white/70 bg-white/95 p-5 shadow-2xl shadow-black/10 backdrop-blur lg:inset-y-4 lg:bottom-auto lg:left-4 lg:right-auto lg:w-[360px] lg:max-w-[calc(100vw-2rem)]"
             onClick={(event) => event.stopPropagation()}
           >
+            <div className="mx-auto mb-3 h-1.5 w-14 rounded-full bg-gray-200 lg:hidden" />
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Заявки</p>
@@ -3020,11 +3030,11 @@ export default function AdminCalendarPage() {
         </div>
       )}
 
-      {!showRequestsPanel && actionItems.length > 0 && (
+      {!showRequestsPanel && !touchMoveTarget && !showMobileDetails && !selectedRecordId && actionItems.length > 0 && (
         <button
           type="button"
           onClick={() => setShowRequestsPanel(true)}
-          className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+152px)] left-4 z-30 rounded-full bg-amber-500 px-4 py-3 text-sm font-semibold text-white shadow-xl lg:hidden"
+          className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+24px)] right-4 z-30 rounded-full bg-amber-500 px-4 py-3 text-sm font-semibold text-white shadow-xl lg:hidden"
         >
           Заявки ({actionItems.length})
         </button>

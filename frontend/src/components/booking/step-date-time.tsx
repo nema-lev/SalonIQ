@@ -85,14 +85,15 @@ export function StepDateTime({ serviceId, staffId, onNext, onBack }: StepDateTim
     <div>
       <button
         onClick={onBack}
-        className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-4 transition-colors"
+        className="flex items-center gap-1 text-sm mb-4 transition-colors"
+        style={{ color: 'var(--text-soft)' }}
       >
         <ChevronLeft className="w-4 h-4" />
         Назад
       </button>
 
-      <h2 className="text-2xl font-bold text-gray-900 mb-2">Изберете дата и час</h2>
-      <p className="text-gray-500 mb-6">Показваме само свободните часове в реално време</p>
+      <h2 className="text-2xl font-bold mb-2" style={{ color: 'var(--text-strong)' }}>Изберете дата и час</h2>
+      <p className="mb-6" style={{ color: 'var(--text-soft)' }}>Показваме само свободните часове в реално време</p>
 
       {/* Calendar */}
       <div
@@ -117,7 +118,7 @@ export function StepDateTime({ serviceId, staffId, onNext, onBack }: StepDateTim
       {/* Time slots */}
       {selectedDate && (
         <div>
-          <h3 className="font-semibold text-gray-700 mb-3">
+          <h3 className="font-semibold mb-3" style={{ color: 'var(--text-strong)' }}>
             {format(selectedDate, "d MMMM", { locale: bg })} — свободни часове:
           </h3>
 
@@ -135,9 +136,18 @@ export function StepDateTime({ serviceId, staffId, onNext, onBack }: StepDateTim
                     py-2.5 px-3 rounded-lg text-sm font-medium transition-all duration-150
                     ${selectedSlot === slot.start
                       ? 'bg-[var(--color-primary)] text-white shadow-md scale-105'
-                      : 'bg-gray-50 text-gray-700 hover:bg-[var(--color-primary)]/10 hover:text-[var(--color-primary)] border border-gray-200'
+                      : 'border border-gray-200'
                     }
                   `}
+                  style={
+                    selectedSlot === slot.start
+                      ? undefined
+                      : {
+                          background: 'var(--surface-pill)',
+                          color: 'var(--text-strong)',
+                          borderColor: 'var(--line-soft)',
+                        }
+                  }
                 >
                   <span className="flex items-center gap-1 justify-center">
                     <Clock className="w-3 h-3" />
@@ -152,9 +162,9 @@ export function StepDateTime({ serviceId, staffId, onNext, onBack }: StepDateTim
               ))}
             </div>
           ) : (
-            <div className="text-center py-8 bg-gray-50 rounded-xl">
-              <p className="text-gray-500 font-medium">Няма свободни часове за тази дата</p>
-              <p className="text-sm text-gray-400 mt-1">Изберете друга дата</p>
+            <div className="text-center py-8 rounded-xl" style={{ background: 'var(--surface-pill)', border: '1px solid var(--line-soft)' }}>
+              <p className="font-medium" style={{ color: 'var(--text-soft)' }}>Няма свободни часове за тази дата</p>
+              <p className="text-sm mt-1" style={{ color: 'var(--text-soft)' }}>Изберете друга дата</p>
             </div>
           )}
         </div>

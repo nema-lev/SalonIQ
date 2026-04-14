@@ -128,19 +128,20 @@ export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
     <div>
       <button
         onClick={onBack}
-        className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-4 transition-colors"
+        className="flex items-center gap-1 text-sm mb-4 transition-colors"
+        style={{ color: 'var(--text-soft)' }}
       >
         <ChevronLeft className="w-4 h-4" />
         Назад
       </button>
 
-      <h2 className="text-2xl font-bold text-gray-900 mb-2">Данни за контакт</h2>
-      <p className="text-gray-500 mb-6">{copy.detailsHint}</p>
+      <h2 className="text-2xl font-bold mb-2" style={{ color: 'var(--text-strong)' }}>Данни за контакт</h2>
+      <p className="mb-6" style={{ color: 'var(--text-soft)' }}>{copy.detailsHint}</p>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         {/* Имена */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">
+          <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-strong)' }}>
             Две имена <span className="text-red-500">*</span>
           </label>
           <div className="relative">
@@ -192,7 +193,7 @@ export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
 
         {/* Телефон */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">
+          <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-strong)' }}>
             Телефон <span className="text-red-500">*</span>
           </label>
           <div className="relative">
@@ -240,16 +241,16 @@ export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
           {errors.clientPhone && (
             <p className="text-red-500 text-xs mt-1">{errors.clientPhone.message}</p>
           )}
-          <p className="text-xs text-gray-400 mt-1">
+          <p className="text-xs mt-1" style={{ color: 'var(--text-soft)' }}>
             Приемаме и `08...`, и `+359...`. Интервали, скоби и тирета се изчистват автоматично.
           </p>
         </div>
 
         {tenant.collectClientEmail && (
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+            <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-strong)' }}>
               Email{' '}
-              <span className="text-gray-400 font-normal">(по избор)</span>
+              <span style={{ color: 'var(--text-soft)', fontWeight: 400 }}>(по избор)</span>
             </label>
             <div className="relative">
               <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -275,9 +276,9 @@ export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
 
         {/* Бележки */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">
+          <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--text-strong)' }}>
             Бележки{' '}
-            <span className="text-gray-400 font-normal">(по избор)</span>
+            <span style={{ color: 'var(--text-soft)', fontWeight: 400 }}>(по избор)</span>
           </label>
           <div className="relative">
             <MessageSquare className="absolute left-3 top-3.5 w-4 h-4 text-gray-400" />
@@ -296,7 +297,10 @@ export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
           )}
         </div>
 
-        <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+        <div
+          className="rounded-xl px-4 py-3 text-sm"
+          style={{ border: '1px solid var(--line-soft)', background: 'var(--surface-accent-soft)', color: 'var(--text-strong)' }}
+        >
           {notificationCopy}
         </div>
 

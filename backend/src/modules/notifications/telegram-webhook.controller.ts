@@ -284,30 +284,17 @@ export class TelegramWebhookController {
     chatId: string,
     queryId: string,
   ) {
-    const details = await this.loadAppointmentDetailsForTelegram(tenant, appointmentId);
-    await this.appointmentsService.respondToProposal(this.toTenantContext(tenant) as Tenant, appointmentId, 'accept');
-
     await this.telegramService.answerCallbackQuery(
       tenant.telegram_bot_token,
       queryId,
-      '✅ Предложението е прието.',
+      'Функцията е премахната.',
     );
 
     await this.telegramService.sendMessage(
       tenant.telegram_bot_token,
       chatId,
-      `✅ *Часът е потвърден.*\n\nЩе получите напомняне преди посещението.`,
+      `Този бутон вече не се използва. Салонът работи само със стандартни заявки, потвърждение и отказ.`,
     );
-
-    if (tenant.telegram_chat_id && details) {
-      await this.telegramService.sendOwnerProposalResponse(
-        tenant.telegram_bot_token,
-        tenant.telegram_chat_id,
-        details,
-        tenant.business_name,
-        'accept',
-      );
-    }
   }
 
   private async handleProposalReject(
@@ -316,30 +303,17 @@ export class TelegramWebhookController {
     chatId: string,
     queryId: string,
   ) {
-    const details = await this.loadAppointmentDetailsForTelegram(tenant, appointmentId);
-    await this.appointmentsService.respondToProposal(this.toTenantContext(tenant) as Tenant, appointmentId, 'reject');
-
     await this.telegramService.answerCallbackQuery(
       tenant.telegram_bot_token,
       queryId,
-      '❌ Предложението е отказано.',
+      'Функцията е премахната.',
     );
 
     await this.telegramService.sendMessage(
       tenant.telegram_bot_token,
       chatId,
-      `❌ *Предложението е отказано.*\n\nАко е нужно, ще получите ново предложение от салона.`,
+      `Този бутон вече не се използва. Салонът работи само със стандартни заявки, потвърждение и отказ.`,
     );
-
-    if (tenant.telegram_chat_id && details) {
-      await this.telegramService.sendOwnerProposalResponse(
-        tenant.telegram_bot_token,
-        tenant.telegram_chat_id,
-        details,
-        tenant.business_name,
-        'reject',
-      );
-    }
   }
 
   private async handleMessage(tenant: any, message: NonNullable<TelegramUpdate['message']>) {

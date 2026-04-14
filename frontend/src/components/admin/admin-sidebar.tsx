@@ -83,7 +83,6 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
             <button
               type="button"
               onClick={onClose}
-              className="lg:hidden"
               style={{
                 width: 40,
                 height: 40,
@@ -162,27 +161,8 @@ function SidebarBody({ onClose }: { onClose?: () => void }) {
 export function AdminSidebar({ mobileOpen = false, onClose }: AdminSidebarProps) {
   return (
     <>
-      <aside
-        className="hidden lg:flex"
-        style={{
-          width: 280,
-          background: '#fff',
-          borderRight: '1px solid #e5e7eb',
-          flexDirection: 'column',
-          height: '100vh',
-          position: 'fixed',
-          left: 0,
-          top: 0,
-          bottom: 0,
-          zIndex: 30,
-        }}
-      >
-        <SidebarBody />
-      </aside>
-
       {mobileOpen && (
         <div
-          className="lg:hidden"
           style={{
             position: 'fixed',
             inset: 0,

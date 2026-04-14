@@ -11,18 +11,13 @@ import {
   ClipboardList,
   Clock,
   CalendarDays,
-  CheckCheck,
-  KeyRound,
   LayoutGrid,
   Loader2,
   Mail,
-  Phone,
   Plus,
-  RefreshCcw,
   Rows3,
   SlidersHorizontal,
   Trash2,
-  TriangleAlert,
   User,
   Users,
   X,
@@ -199,18 +194,18 @@ interface AppointmentContextResponse {
 const STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
   pending: { label: 'Заявка', cls: 'bg-amber-100 text-amber-800 border-amber-200' },
   requested: { label: 'Заявка', cls: 'bg-amber-100 text-amber-800 border-amber-200' },
-  proposal_pending: { label: 'Предложен час', cls: 'bg-violet-100 text-violet-800 border-violet-200' },
-  proposal_sent: { label: 'Предложен час', cls: 'bg-violet-100 text-violet-800 border-violet-200' },
+  proposal_pending: { label: 'Заявка', cls: 'bg-amber-100 text-amber-800 border-amber-200' },
+  proposal_sent: { label: 'Заявка', cls: 'bg-amber-100 text-amber-800 border-amber-200' },
   confirmed: { label: 'Запазен час', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
   approved: { label: 'Запазен час', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
   booked_direct: { label: 'Запазен час', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
   proposal_accepted: { label: 'Запазен час', cls: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
-  completed: { label: 'Приключен', cls: 'bg-sky-100 text-sky-800 border-sky-200' },
+  completed: { label: 'Приключен', cls: 'bg-slate-100 text-slate-600 border-slate-200' },
   cancelled: { label: 'Отменен', cls: 'bg-rose-100 text-rose-800 border-rose-200' },
   rejected: { label: 'Отказан', cls: 'bg-rose-100 text-rose-800 border-rose-200' },
   proposal_rejected: { label: 'Отказан', cls: 'bg-rose-100 text-rose-800 border-rose-200' },
-  cancelled_by_owner: { label: 'Отменен от салона', cls: 'bg-rose-100 text-rose-800 border-rose-200' },
-  cancelled_by_client: { label: 'Отменен от клиент', cls: 'bg-rose-100 text-rose-800 border-rose-200' },
+  cancelled_by_owner: { label: 'Отменен', cls: 'bg-rose-100 text-rose-800 border-rose-200' },
+  cancelled_by_client: { label: 'Отменен', cls: 'bg-rose-100 text-rose-800 border-rose-200' },
   no_show: { label: 'Неявил се', cls: 'bg-slate-100 text-slate-700 border-slate-200' },
 };
 
@@ -219,7 +214,6 @@ const STATUS_FILTER_OPTIONS = [
   { key: 'requests', label: 'Заявки' },
   { key: 'booked', label: 'Запазени' },
   { key: 'cancelled', label: 'Отказани / отменени' },
-  { key: 'completed', label: 'Приключени' },
 ] as const;
 
 const SECONDARY_OWNER_STATES = [
@@ -256,42 +250,6 @@ function buildInboxItem(appointment: UpcomingAppointment): InboxItemView {
     };
   }
 
-  if (appointment.owner_alert_state === 'proposal_accepted') {
-    return {
-      ...appointment,
-      bucket: 'updates',
-      label: 'Клиент прие',
-      summary: 'Клиентът прие предложен нов час.',
-      detailLabel: 'Прието предложение',
-      toneClass: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-      requiresAction: false,
-    };
-  }
-
-  if (appointment.owner_alert_state === 'proposal_rejected') {
-    return {
-      ...appointment,
-      bucket: 'updates',
-      label: 'Клиент отказа',
-      summary: 'Клиентът отказа предложения от Вас нов час.',
-      detailLabel: 'Отказано предложение',
-      toneClass: 'border-rose-200 bg-rose-50 text-rose-700',
-      requiresAction: false,
-    };
-  }
-
-  if (appointment.status === 'proposal_pending') {
-    return {
-      ...appointment,
-      bucket: 'actions',
-      label: 'Чака клиент',
-      summary: 'Изпратено е предложение за нов час и чака отговор.',
-      detailLabel: 'Предложен час',
-      toneClass: 'border-violet-200 bg-violet-50 text-violet-700',
-      requiresAction: true,
-    };
-  }
-
   return {
     ...appointment,
     bucket: 'actions',
@@ -325,8 +283,6 @@ function getNotificationTypeLabel(type: string) {
     'booking-cancelled-client': 'Клиентска отмяна',
     booking_cancelled_business: 'Отказ от салона',
     'booking-cancelled-business': 'Отказ от салона',
-    booking_proposal: 'Предложен нов час',
-    'booking-proposal': 'Предложен нов час',
     booking_rescheduled: 'Преместен час',
     'booking-rescheduled': 'Преместен час',
     waitlist_available: 'Резервен списък',
@@ -393,18 +349,6 @@ function formatEuroAmount(value: number | string | null | undefined) {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(Number.isFinite(amount) ? amount : 0)} €`;
-}
-
-function getVisitProgressClass(progress?: string) {
-  const styles: Record<string, string> = {
-    scheduled: 'border-slate-200 bg-slate-100 text-slate-700',
-    checked_in: 'border-sky-200 bg-sky-100 text-sky-700',
-    in_service: 'border-violet-200 bg-violet-100 text-violet-700',
-    completed: 'border-emerald-200 bg-emerald-100 text-emerald-700',
-    no_show: 'border-rose-200 bg-rose-100 text-rose-700',
-  };
-
-  return styles[progress || 'scheduled'] || styles.scheduled;
 }
 
 function getInitials(name: string) {
@@ -482,7 +426,7 @@ function getWaitlistStatusPresentation(status: WaitlistEntry['status']) {
 
 function matchesCalendarStatusFilter(
   item: { status?: string; owner_view_state?: string },
-  filter: 'all' | 'requests' | 'booked' | 'cancelled' | 'completed',
+  filter: 'all' | 'requests' | 'booked' | 'cancelled',
 ) {
   if (filter === 'all') return true;
   const key = item.owner_view_state || item.status || 'pending';
@@ -492,20 +436,17 @@ function matchesCalendarStatusFilter(
   }
 
   if (filter === 'booked') {
-    return ['confirmed', 'approved', 'booked_direct', 'proposal_accepted'].includes(key);
+    return ['confirmed', 'approved', 'booked_direct', 'proposal_accepted', 'completed'].includes(key);
   }
 
-  if (filter === 'cancelled') {
-    return [
-      'cancelled',
-      'rejected',
-      'proposal_rejected',
-      'cancelled_by_owner',
-      'cancelled_by_client',
-    ].includes(key);
-  }
-
-  return ['completed', 'no_show'].includes(key);
+  return [
+    'cancelled',
+    'rejected',
+    'proposal_rejected',
+    'cancelled_by_owner',
+    'cancelled_by_client',
+    'no_show',
+  ].includes(key);
 }
 
 function isSecondaryOwnerState(ownerState?: string) {
@@ -518,17 +459,14 @@ export default function AdminCalendarPage() {
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [showBlockEditor, setShowBlockEditor] = useState(false);
   const [showWaitlistModal, setShowWaitlistModal] = useState(false);
-  const [proposalTarget, setProposalTarget] = useState<Appointment | null>(null);
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
-  const [mobileWorkspace, setMobileWorkspace] = useState<'calendar' | 'inbox'>('calendar');
-  const [inboxTab, setInboxTab] = useState<'all' | 'actions' | 'updates'>('all');
   const [showMobileDetails, setShowMobileDetails] = useState(false);
   const [showDesktopDetails, setShowDesktopDetails] = useState(false);
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [touchMoveTarget, setTouchMoveTarget] = useState<Appointment | null>(null);
   const [calendarView, setCalendarView] = useState<'grid' | 'list' | 'week'>('grid');
   const [staffFilter, setStaffFilter] = useState<string>('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'requests' | 'booked' | 'cancelled' | 'completed'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'requests' | 'booked' | 'cancelled'>('all');
   const [showUnavailable, setShowUnavailable] = useState(true);
   const [isCompactViewport, setIsCompactViewport] = useState(false);
   const [draggedAppointmentId, setDraggedAppointmentId] = useState<string | null>(null);
@@ -726,20 +664,6 @@ export default function AdminCalendarPage() {
     },
   });
 
-  const visitProgressMutation = useMutation({
-    mutationFn: ({ id, progress }: { id: string; progress: 'scheduled' | 'checked_in' | 'in_service' | 'completed' | 'no_show' }) =>
-      apiClient.patch(`/appointments/${id}/visit-progress`, { progress }),
-    onSuccess: () => {
-      refetch();
-      qc.invalidateQueries({ queryKey: ['appointment-context'] });
-      qc.invalidateQueries({ queryKey: ['appointments-upcoming'] });
-      toast.success('Прогресът на посещението е обновен.');
-    },
-    onError: (error: any) => {
-      toast.error(error?.message || 'Неуспешно обновяване на прогреса.');
-    },
-  });
-
   const retryNotificationMutation = useMutation({
     mutationFn: ({ appointmentId, type }: { appointmentId: string; type: string }) =>
       apiClient.post(`/appointments/${appointmentId}/notifications/retry`, { type }),
@@ -850,7 +774,6 @@ export default function AdminCalendarPage() {
 
   const handleBookingCreated = (startAt: string) => {
     setShowBookingModal(false);
-    setProposalTarget(null);
     setCurrentDate(new Date(startAt));
     qc.invalidateQueries({ queryKey: ['appointments'] });
     qc.invalidateQueries({ queryKey: ['appointments-upcoming'] });
@@ -865,7 +788,6 @@ export default function AdminCalendarPage() {
       setTouchMoveTarget(appointment);
       setCurrentDate(new Date(appointment.start_at));
       setShowMobileDetails(false);
-      setMobileWorkspace('calendar');
       return;
     }
 
@@ -921,14 +843,6 @@ export default function AdminCalendarPage() {
   const updateItems = useMemo(
     () => inboxItems.filter((item) => item.bucket === 'updates'),
     [inboxItems],
-  );
-  const visibleActionItems = useMemo(
-    () => (inboxTab === 'updates' ? [] : actionItems),
-    [actionItems, inboxTab],
-  );
-  const visibleUpdateItems = useMemo(
-    () => (inboxTab === 'actions' ? [] : updateItems),
-    [inboxTab, updateItems],
   );
   const selectedAppointment = useMemo(
     () => dayAppointments.find((appointment) => appointment.id === selectedRecordId) ?? null,
@@ -1268,10 +1182,9 @@ export default function AdminCalendarPage() {
     });
   };
 
-  const focusRecord = (id: string, startAt: string, workspace: 'calendar' | 'inbox' = 'calendar') => {
+  const focusRecord = (id: string, startAt: string) => {
     setSelectedRecordId(id);
     setCurrentDate(new Date(startAt));
-    setMobileWorkspace(workspace);
     if (typeof window !== 'undefined' && window.innerWidth >= 1024) {
       setShowDesktopDetails(true);
       setShowMobileDetails(false);
@@ -1423,15 +1336,6 @@ export default function AdminCalendarPage() {
             className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-100"
           >
             Премести
-          </button>
-          <button
-            onClick={() => {
-              setProposalTarget(appointment);
-              setShowBookingModal(true);
-            }}
-            className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-100"
-          >
-            Предложи нов час
           </button>
           <button
             onClick={() => handleStatusChange(appointment.id, 'cancelled')}
@@ -1761,8 +1665,7 @@ export default function AdminCalendarPage() {
           <div className="grid gap-2">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Действия за часа</p>
             <div className="grid grid-cols-2 gap-2">
-              {detailedAppointment.status !== 'proposal_pending' &&
-                ['pending'].includes(detailedAppointment.status) && (
+              {['pending', 'proposal_pending'].includes(detailedAppointment.status) && (
                   <button
                     type="button"
                     onClick={() =>
@@ -1780,18 +1683,6 @@ export default function AdminCalendarPage() {
                   className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-semibold text-amber-700 hover:bg-amber-100"
                 >
                   В чакащи
-                </button>
-              )}
-              {['pending', 'proposal_pending'].includes(detailedAppointment.status) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setProposalTarget(detailedAppointment);
-                    setShowBookingModal(true);
-                  }}
-                  className="rounded-2xl border border-violet-200 bg-violet-50 px-3 py-3 text-sm font-semibold text-violet-700 hover:bg-violet-100"
-                >
-                  Нов час
                 </button>
               )}
               {!['completed', 'cancelled', 'no_show'].includes(detailedAppointment.status) && (
@@ -2116,236 +2007,8 @@ export default function AdminCalendarPage() {
 
   return (
     <div className="space-y-5">
-      <div className="sticky top-0 z-20 -mx-1 rounded-3xl border border-white/70 bg-white/80 px-2 py-2 shadow-lg shadow-black/5 backdrop-blur lg:hidden">
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            onClick={() => setMobileWorkspace('calendar')}
-            className={`rounded-2xl px-4 py-3 text-sm font-semibold transition-colors ${
-              mobileWorkspace === 'calendar'
-                ? 'bg-[var(--color-primary)] text-white shadow-lg shadow-[var(--color-primary)]/25'
-                : 'bg-white text-gray-600'
-            }`}
-          >
-            Календар
-          </button>
-          <button
-            type="button"
-            onClick={() => setMobileWorkspace('inbox')}
-            className={`rounded-2xl px-4 py-3 text-sm font-semibold transition-colors ${
-              mobileWorkspace === 'inbox'
-                ? 'bg-[var(--color-primary)] text-white shadow-lg shadow-[var(--color-primary)]/25'
-                : 'bg-white text-gray-600'
-            }`}
-          >
-            Действия ({attentionCount + updateCount})
-          </button>
-        </div>
-      </div>
-
-      <div className="grid gap-5 lg:grid-cols-[250px_minmax(0,1fr)] 2xl:grid-cols-[250px_minmax(0,1fr)_320px] min-[1700px]:grid-cols-[260px_minmax(0,1fr)_340px]">
-        <aside
-          className={`min-h-0 ${mobileWorkspace === 'inbox' ? 'block' : 'hidden'} lg:block`}
-        >
-          <div className="glass-panel flex max-h-[calc(100vh-112px)] flex-col rounded-[28px] border border-white/60 p-3 shadow-xl shadow-black/5 lg:sticky lg:top-5">
-            <div className="flex items-start justify-between gap-3 border-b border-gray-100 pb-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Action inbox</p>
-                <h3 className="mt-1 text-base font-black text-gray-900">Какво чака решение</h3>
-                <p className="mt-1 text-xs text-gray-500">Заявките и обновленията са отделени от календара.</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  refetch();
-                  qc.invalidateQueries({ queryKey: ['appointments-upcoming'] });
-                  qc.invalidateQueries({ queryKey: ['admin-header-upcoming'] });
-                }}
-                className="rounded-2xl border border-gray-200 bg-white p-2 text-gray-600 hover:bg-gray-50"
-                aria-label="Обнови inbox"
-              >
-                <RefreshCcw className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="mt-3 flex flex-wrap gap-2">
-              {[
-                { key: 'all', label: `Всички (${attentionCount + updateCount})` },
-                { key: 'actions', label: `Действия (${attentionCount})` },
-                { key: 'updates', label: `Обновления (${updateCount})` },
-              ].map((tab) => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  onClick={() => setInboxTab(tab.key as typeof inboxTab)}
-                  className={`rounded-2xl px-3 py-2 text-xs font-semibold transition-colors ${
-                    inboxTab === tab.key
-                      ? 'bg-gray-900 text-white'
-                      : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="mt-4 min-h-0 space-y-4 overflow-y-auto pr-1">
-              {(inboxTab === 'all' || inboxTab === 'actions') && (
-              <div>
-                <div className="mb-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <TriangleAlert className="h-4 w-4 text-amber-600" />
-                    <p className="text-sm font-bold text-gray-900">Изисква действие</p>
-                  </div>
-                  <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
-                    {attentionCount}
-                  </span>
-                </div>
-
-                {upcomingLoading ? (
-                  <div className="flex justify-center py-8">
-                    <Loader2 className="h-5 w-5 animate-spin text-[var(--color-primary)]" />
-                  </div>
-                ) : !visibleActionItems.length ? (
-                  <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-4 py-5 text-sm text-gray-400">
-                    Няма нови заявки за решение.
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {visibleActionItems.map((item) => (
-                      <div
-                        key={item.id}
-                        className={`rounded-3xl border p-3 shadow-sm transition-all ${selectedRecordId === item.id ? 'border-[var(--color-primary)] bg-white ring-2 ring-[var(--color-primary)]/10' : 'border-gray-100 bg-white/90'} `}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => focusRecord(item.id, item.start_at, 'calendar')}
-                          className="w-full text-left"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-bold ${item.toneClass}`}>
-                                {item.label}
-                              </div>
-                              <p className="mt-2 truncate text-sm font-bold text-gray-900">{item.client_name}</p>
-                              <p className="mt-1 text-xs text-gray-500">{item.summary}</p>
-                            </div>
-                            <div className="text-right text-xs text-gray-400">
-                              <p className="font-semibold text-gray-700">{format(new Date(item.start_at), 'HH:mm')}</p>
-                              <p>{format(new Date(item.start_at), 'd MMM', { locale: bg })}</p>
-                            </div>
-                          </div>
-                          <div className="mt-2 space-y-1 text-[11px] text-gray-500">
-                            <p>{item.service_name}</p>
-                            <p>{item.staff_name}</p>
-                          </div>
-                        </button>
-
-                        <div className="mt-3 grid grid-cols-2 gap-2">
-                          {item.status !== 'proposal_pending' && (
-                            <button
-                              type="button"
-                              onClick={() => handleStatusChange(item.id, 'confirmed')}
-                              className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:opacity-90"
-                            >
-                              Потвърди
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const target = dayAppointments.find((appointment) => appointment.id === item.id);
-                              if (target) {
-                                setProposalTarget(target);
-                                setShowBookingModal(true);
-                              } else {
-                                focusRecord(item.id, item.start_at, 'calendar');
-                              }
-                            }}
-                            className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-700 hover:bg-violet-100"
-                          >
-                            Нов час
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleStatusChange(item.id, 'cancelled')}
-                            className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100"
-                          >
-                            Откажи
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              )}
-
-              {(inboxTab === 'all' || inboxTab === 'updates') && (
-              <div>
-                <div className="mb-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <CheckCheck className="h-4 w-4 text-sky-600" />
-                    <p className="text-sm font-bold text-gray-900">Обновления</p>
-                  </div>
-                  <span className="rounded-full bg-sky-100 px-2.5 py-1 text-xs font-semibold text-sky-700">
-                    {updateCount}
-                  </span>
-                </div>
-
-                {upcomingLoading ? (
-                  <div className="flex justify-center py-8">
-                    <Loader2 className="h-5 w-5 animate-spin text-[var(--color-primary)]" />
-                  </div>
-                ) : !visibleUpdateItems.length ? (
-                  <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-4 py-5 text-sm text-gray-400">
-                    Няма нови клиентски действия.
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {visibleUpdateItems.map((item) => (
-                      <div
-                        key={item.id}
-                        className={`rounded-3xl border p-3 shadow-sm transition-all ${selectedRecordId === item.id ? 'border-[var(--color-primary)] bg-white ring-2 ring-[var(--color-primary)]/10' : 'border-gray-100 bg-white/90'}`}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => focusRecord(item.id, item.start_at, 'calendar')}
-                          className="w-full text-left"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-bold ${item.toneClass}`}>
-                                {item.label}
-                              </div>
-                              <p className="mt-2 truncate text-sm font-bold text-gray-900">{item.client_name}</p>
-                              <p className="mt-1 text-xs text-gray-500">{item.summary}</p>
-                            </div>
-                            <div className="text-right text-xs text-gray-400">
-                              <p className="font-semibold text-gray-700">{format(new Date(item.start_at), 'HH:mm')}</p>
-                              <p>{format(new Date(item.start_at), 'd MMM', { locale: bg })}</p>
-                            </div>
-                          </div>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => handleOwnerAlertRead(item.id)}
-                          className="mt-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100"
-                        >
-                          Маркирай като видяно
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              )}
-            </div>
-          </div>
-        </aside>
-
-        <section className={`${mobileWorkspace === 'calendar' ? 'block' : 'hidden'} lg:block`}>
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+        <section className="min-w-0">
           <div className="glass-panel rounded-[32px] border border-white/60 p-4 shadow-xl shadow-black/5 sm:p-5">
             <div className="flex flex-col gap-3 border-b border-gray-100 pb-4">
 	              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -2401,7 +2064,7 @@ export default function AdminCalendarPage() {
                       <button
                         type="button"
                         onClick={() => setShowDesktopDetails((current) => !current)}
-                        className="hidden h-11 items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 lg:inline-flex 2xl:hidden"
+                        className="hidden h-11 items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 lg:inline-flex xl:hidden"
                       >
                         <ClipboardList className="h-4 w-4" />
                         {showDesktopDetails ? 'Скрий детайли' : 'Покажи детайли'}
@@ -2449,10 +2112,7 @@ export default function AdminCalendarPage() {
                   )}
                   <button
                     type="button"
-                    onClick={() => {
-                      setProposalTarget(null);
-                      setShowBookingModal(true);
-                    }}
+                    onClick={() => setShowBookingModal(true)}
                     className="inline-flex items-center gap-2 rounded-2xl bg-[var(--color-primary)] px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-[var(--color-primary)]/20 transition-opacity hover:opacity-90"
                   >
                     <Plus className="w-4 h-4" />
@@ -3207,11 +2867,6 @@ export default function AdminCalendarPage() {
 		                                    {appointment.price != null && (
 		                                      <span className="font-semibold text-gray-700">{formatEuroAmount(appointment.price)}</span>
 		                                    )}
-                                        {appointment.status === 'confirmed' && (
-                                          <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${getVisitProgressClass(appointment.visit_progress)}`}>
-                                            {appointment.visit_progress_label}
-                                          </span>
-                                        )}
 		                                  </div>
 	                                </div>
 
@@ -3236,8 +2891,8 @@ export default function AdminCalendarPage() {
 
         </section>
 
-        <aside className="hidden 2xl:block">
-          <div className="glass-panel rounded-[28px] border border-white/60 p-5 shadow-xl shadow-black/5 2xl:sticky 2xl:top-5">
+        <aside className="hidden xl:block">
+          <div className="glass-panel rounded-[28px] border border-white/60 p-5 shadow-xl shadow-black/5 xl:sticky xl:top-5">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Детайлен панел</p>
             {renderDesktopDetailsPanel()}
           </div>
@@ -3245,7 +2900,7 @@ export default function AdminCalendarPage() {
       </div>
 
       {showDesktopDetails && (selectedAppointment || selectedInboxItem) && (
-        <div className="fixed inset-0 z-30 hidden bg-black/20 lg:block 2xl:hidden" onClick={() => setShowDesktopDetails(false)}>
+        <div className="fixed inset-0 z-30 hidden bg-black/20 lg:block xl:hidden" onClick={() => setShowDesktopDetails(false)}>
           <div
             className="absolute inset-y-4 right-4 w-[340px] overflow-y-auto rounded-[28px] border border-white/70 bg-white/95 p-5 shadow-2xl shadow-black/10 backdrop-blur"
             onClick={(event) => event.stopPropagation()}
@@ -3872,11 +3527,7 @@ export default function AdminCalendarPage() {
 	      <AdminBookingModal
 	        open={showBookingModal}
 	        defaultDate={dateKey}
-        proposalTarget={proposalTarget}
-        onClose={() => {
-          setShowBookingModal(false);
-          setProposalTarget(null);
-        }}
+        onClose={() => setShowBookingModal(false)}
         onCreated={handleBookingCreated}
       />
     </div>
@@ -4076,13 +3727,11 @@ function AppointmentMoveModal({
 function AdminBookingModal({
   open,
   defaultDate,
-  proposalTarget,
   onClose,
   onCreated,
 }: {
   open: boolean;
   defaultDate: string;
-  proposalTarget: Appointment | null;
   onClose: () => void;
   onCreated: (startAt: string) => void;
 }) {
@@ -4098,7 +3747,6 @@ function AdminBookingModal({
   const [notes, setNotes] = useState('');
   const [lookupField, setLookupField] = useState<'name' | 'phone'>('name');
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [mode, setMode] = useState<'direct' | 'ask-client'>('direct');
 
   const lookupValue = lookupField === 'phone' ? clientPhone : clientName;
   const deferredLookupValue = useDeferredValue(lookupValue.trim());
@@ -4114,22 +3762,14 @@ function AdminBookingModal({
     setNotes('');
     setLookupField('name');
     setShowSuggestions(false);
-    setMode('direct');
   };
 
   useEffect(() => {
     if (open) {
-      setSelectedDate(proposalTarget ? format(new Date(proposalTarget.start_at), 'yyyy-MM-dd') : defaultDate);
+      setSelectedDate(defaultDate);
       setSelectedSlot('');
-      if (proposalTarget) {
-        setServiceId(proposalTarget.service_id);
-        setStaffId(proposalTarget.staff_id);
-        setClientName(proposalTarget.client_name);
-        setClientPhone(formatBulgarianPhoneForDisplay(proposalTarget.client_phone));
-        setMode('ask-client');
-      }
     }
-  }, [defaultDate, open, proposalTarget]);
+  }, [defaultDate, open]);
 
   const { data: services, isLoading: servicesLoading } = useQuery({
     queryKey: ['admin-booking-services'],
@@ -4165,20 +3805,10 @@ function AdminBookingModal({
   });
 
   const createMutation = useMutation({
-    mutationFn: async (submitMode: 'direct' | 'ask-client') => {
+    mutationFn: async () => {
       const [year, month, day] = selectedDate.split('-').map(Number);
       const [hours, minutes] = selectedSlot.split(':').map(Number);
       const startAt = new Date(year, month - 1, day, hours, minutes, 0, 0).toISOString();
-
-      if (proposalTarget) {
-        return apiClient.post<{ id: string; status: string; startAt: string }>(
-          `/appointments/${proposalTarget.id}/proposal`,
-          {
-            startAt,
-            publicBaseUrl: window.location.origin,
-          },
-        );
-      }
 
       return apiClient.post<{ id: string; status: string; startAt: string }>('/appointments/admin', {
         serviceId,
@@ -4189,16 +3819,11 @@ function AdminBookingModal({
         clientEmail: tenant.collectClientEmail ? clientEmail.trim() || undefined : undefined,
         notes: notes.trim() || undefined,
         consentGiven: true,
-        askClient: submitMode === 'ask-client',
         publicBaseUrl: window.location.origin,
       });
     },
-    onSuccess: (data, submitMode) => {
-      toast.success(
-        proposalTarget || submitMode === 'ask-client'
-          ? 'Предложението е изпратено към клиента.'
-          : 'Резервацията е записана директно и е потвърдена.',
-      );
+    onSuccess: (data) => {
+      toast.success('Резервацията е записана.');
       queryClient.invalidateQueries({ queryKey: ['clients'] });
       queryClient.invalidateQueries({ queryKey: ['admin-header-upcoming'] });
       resetForm();
@@ -4237,14 +3862,8 @@ function AdminBookingModal({
         <div className="w-full max-h-[92vh] overflow-y-auto rounded-[28px] border border-gray-100 bg-white shadow-2xl">
           <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-gray-100 bg-white px-5 py-5">
             <div>
-              <h3 className="text-xl font-black text-gray-900">
-                {proposalTarget ? 'Предложи нов час' : 'Нова резервация от админ'}
-              </h3>
-              <p className="mt-1 text-sm text-gray-500">
-                {proposalTarget
-                  ? 'Изпращаш контра оферта към клиента. Часът ще бъде потвърден само ако той приеме.'
-                  : 'Можеш или да запишеш директно, или да изпратиш предложение към клиента за потвърждение.'}
-              </p>
+              <h3 className="text-xl font-black text-gray-900">Нова резервация от админ</h3>
+              <p className="mt-1 text-sm text-gray-500">Часът ще се запише директно за избрания клиент.</p>
             </div>
             <button
               type="button"
@@ -4266,8 +3885,7 @@ function AdminBookingModal({
                     setStaffId('');
                     setSelectedSlot('');
                   }}
-                  disabled={Boolean(proposalTarget)}
-                  className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-[var(--color-primary)] disabled:bg-gray-50 disabled:text-gray-400"
+                  className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-[var(--color-primary)]"
                 >
                   <option value="">{servicesLoading ? 'Зареждане...' : 'Изберете услуга'}</option>
                   {services?.map((service) => (
@@ -4287,7 +3905,7 @@ function AdminBookingModal({
                     setStaffId(e.target.value);
                     setSelectedSlot('');
                   }}
-                  disabled={!serviceId || Boolean(proposalTarget)}
+                  disabled={!serviceId}
                   className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-[var(--color-primary)] disabled:bg-gray-50 disabled:text-gray-400"
                 >
                   <option value="">
@@ -4437,14 +4055,8 @@ function AdminBookingModal({
               </div>
             </div>
 
-            <div className={`rounded-2xl border px-4 py-3 text-sm ${
-              proposalTarget || mode === 'ask-client'
-                ? 'border-violet-100 bg-violet-50 text-violet-900'
-                : 'border-emerald-100 bg-emerald-50 text-emerald-900'
-            }`}>
-              {proposalTarget || mode === 'ask-client'
-                ? 'Ще изпратиш предложение към клиента. Часът няма да се счита за окончателно приет, докато клиентът не го потвърди.'
-                : 'Резервацията ще се създаде директно като потвърдена. Ако клиентът вече съществува в базата, изборът от предложенията попълва автоматично име и телефон.'}
+            <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+              Резервацията ще се създаде директно. Ако клиентът вече съществува в базата, изборът от предложенията попълва автоматично име и телефон.
             </div>
 
             <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
@@ -4458,29 +4070,12 @@ function AdminBookingModal({
               <button
                 type="button"
                 disabled={!canSubmit || createMutation.isPending}
-                onClick={() => {
-                  setMode('direct');
-                  createMutation.mutate('direct');
-                }}
+                onClick={() => createMutation.mutate()}
                 className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[var(--color-primary)] px-5 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {createMutation.isPending && <Loader2 className="w-4 h-4 animate-spin" />}
-                {proposalTarget ? 'Изпрати предложението' : 'Запиши директно'}
+                Запиши
               </button>
-              {!proposalTarget && (
-                <button
-                  type="button"
-                  disabled={!canSubmit || createMutation.isPending}
-                  onClick={() => {
-                    setMode('ask-client');
-                    createMutation.mutate('ask-client');
-                  }}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-violet-200 bg-violet-50 px-5 py-3 text-sm font-semibold text-violet-700 transition-colors hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {createMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
-                  Питай клиента
-                </button>
-              )}
             </div>
           </div>
         </div>

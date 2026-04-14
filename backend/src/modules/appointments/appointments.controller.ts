@@ -376,12 +376,6 @@ export class AppointmentsController {
       throw new BadRequestException('Невалиден линк за предложение.');
     }
 
-    const result = await this.appointmentsService.respondToProposalByToken(slug, token, decision);
-    const isAccepted = result.ownerAlertState === 'proposal_accepted';
-    const message = isAccepted
-      ? 'Предложението е прието успешно.'
-      : 'Предложението е отказано успешно.';
-
     res
       .status(200)
       .contentType('text/html; charset=utf-8')
@@ -400,8 +394,8 @@ export class AppointmentsController {
   </head>
   <body>
     <div class="card">
-      <h1>${isAccepted ? 'Часът е потвърден' : 'Предложението е отказано'}</h1>
-      <p>${message}</p>
+      <h1>Функцията е премахната</h1>
+      <p>„Предложен час“ вече не се използва в приложението. Затворете тази страница и използвайте стандартния booking flow.</p>
     </div>
   </body>
 </html>`);

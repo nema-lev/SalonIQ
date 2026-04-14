@@ -118,8 +118,8 @@ export class AppointmentsService {
 
   async createByAdmin(tenant: Tenant, dto: CreateAppointmentDto) {
     return this.create(tenant, dto, {
-      forceConfirmed: !dto.askClient,
-      askClient: Boolean(dto.askClient),
+      forceConfirmed: true,
+      askClient: false,
       bookedBy: 'owner',
       publicBaseUrl: dto.publicBaseUrl,
     });
@@ -190,7 +190,7 @@ export class AppointmentsService {
         COALESCE(NULLIF(a.intake_data->'stateMeta'->>'transitionKind', ''), a.status) as owner_view_state,
         CASE
           WHEN a.status = 'pending' THEN 'Заявка'
-          WHEN a.status = 'proposal_pending' THEN 'Предложен час'
+          WHEN a.status = 'proposal_pending' THEN 'Заявка'
           WHEN a.status = 'confirmed' THEN 'Запазен час'
           WHEN a.status = 'completed' THEN 'Приключен'
           WHEN a.status = 'no_show' THEN 'Неявил се'
@@ -420,7 +420,7 @@ export class AppointmentsService {
         COALESCE(NULLIF(a.intake_data->'stateMeta'->>'transitionKind', ''), a.status) as owner_view_state,
         CASE
           WHEN a.status = 'pending' THEN 'Заявка'
-          WHEN a.status = 'proposal_pending' THEN 'Предложен час'
+          WHEN a.status = 'proposal_pending' THEN 'Заявка'
           WHEN a.status = 'confirmed' THEN 'Запазен час'
           WHEN a.status = 'completed' THEN 'Приключен'
           WHEN a.status = 'no_show' THEN 'Неявил се'
@@ -471,7 +471,7 @@ export class AppointmentsService {
         COALESCE(NULLIF(a.intake_data->'stateMeta'->>'transitionKind', ''), a.status) as owner_view_state,
         CASE
           WHEN a.status = 'pending' THEN 'Заявка'
-          WHEN a.status = 'proposal_pending' THEN 'Предложен час'
+          WHEN a.status = 'proposal_pending' THEN 'Заявка'
           WHEN a.status = 'confirmed' THEN 'Запазен час'
           WHEN a.status = 'completed' THEN 'Приключен'
           WHEN a.status = 'no_show' THEN 'Неявил се'
@@ -942,13 +942,11 @@ export class AppointmentsService {
     }
 
     // 6. Определи статуса
-    const status = options.askClient
-      ? AppointmentStatus.PROPOSAL_PENDING
-      : options.forceConfirmed
-        ? AppointmentStatus.CONFIRMED
-        : requiresConfirmation || service.requires_confirmation
-          ? AppointmentStatus.PENDING
-          : AppointmentStatus.CONFIRMED;
+    const status = options.forceConfirmed
+      ? AppointmentStatus.CONFIRMED
+      : requiresConfirmation || service.requires_confirmation
+        ? AppointmentStatus.PENDING
+        : AppointmentStatus.CONFIRMED;
 
     const intakeData = {
       ...(dto.intakeData || {}),
@@ -957,23 +955,8 @@ export class AppointmentsService {
       stateMeta: this.buildOwnerStateMeta(
         null,
         status,
-        options.askClient
-          ? 'proposal_sent'
-          : status === AppointmentStatus.PENDING
-            ? 'requested'
-            : 'booked_direct',
+        status === AppointmentStatus.PENDING ? 'requested' : 'booked_direct',
       ),
-      ...(options.askClient
-        ? {
-            proposal: this.buildProposalMetadata({
-              kind: 'admin_inquiry',
-              publicBaseUrl: options.publicBaseUrl,
-              originalStatus: null,
-              originalStartAt: null,
-              originalEndAt: null,
-            }),
-          }
-        : {}),
     };
 
     // 7. Създай резервацията
@@ -1006,25 +989,7 @@ export class AppointmentsService {
     const appointmentId = rows[0].id;
 
     // 8. Постави в notification queue
-    if (status === AppointmentStatus.PROPOSAL_PENDING) {
-      await this.processNotificationNow(
-        NotificationJobType.BOOKING_PROPOSAL,
-        {
-          tenantId: tenant.id,
-          tenantSchemaName: tenant.schemaName,
-          appointmentId,
-          clientId,
-        },
-        {
-          tenantSlug: tenant.slug,
-          appointmentId,
-          context: 'create-proposal',
-          delay: 0,
-        },
-      );
-    } else {
-      await this.scheduleNotifications(tenant, appointmentId, clientId, status, startAt);
-    }
+    await this.scheduleNotifications(tenant, appointmentId, clientId, status, startAt);
 
     this.logger.log(`Appointment ${appointmentId} created for tenant ${tenant.slug}`);
     return { id: appointmentId, status, startAt, endAt };
@@ -1035,240 +1000,11 @@ export class AppointmentsService {
     appointmentId: string,
     dto: { startAt: string; publicBaseUrl?: string },
   ) {
-    const [appointment] = await this.prisma.queryInSchema<any[]>(
-      tenant.schemaName,
-      `
-      SELECT
-        a.id,
-        a.client_id,
-        a.staff_id,
-        a.service_id,
-        a.start_at,
-        a.end_at,
-        a.status,
-        a.intake_data,
-        sv.duration_minutes,
-        sv.buffer_before_min,
-        sv.buffer_after_min
-      FROM appointments a
-      JOIN services sv ON sv.id = a.service_id
-      WHERE a.id = $1::uuid
-      LIMIT 1
-      `,
-      [appointmentId],
-    );
-
-    if (!appointment) {
-      throw new NotFoundException('Резервацията не е намерена.');
-    }
-
-    if (![AppointmentStatus.PENDING, AppointmentStatus.PROPOSAL_PENDING].includes(appointment.status)) {
-      throw new BadRequestException('Контра оферта може да се изпрати само за непотвърдена заявка.');
-    }
-
-    const startAt = new Date(dto.startAt);
-    if (Number.isNaN(startAt.getTime())) {
-      throw new BadRequestException('Невалиден нов час.');
-    }
-
-    const totalDuration =
-      Number(appointment.duration_minutes) +
-      Number(appointment.buffer_before_min || 0) +
-      Number(appointment.buffer_after_min || 0);
-    const endAt = addMinutes(startAt, totalDuration);
-
-    await this.assertNoConflict(
-      tenant.schemaName,
-      appointment.staff_id,
-      startAt,
-      endAt,
-      appointment.id,
-    );
-
-    const intakeData = this.parseIntakeData(appointment.intake_data);
-    const existingProposal = intakeData.proposal;
-    const proposal = this.buildProposalMetadata({
-      kind: 'counter_offer',
-      publicBaseUrl: dto.publicBaseUrl || existingProposal?.publicBaseUrl || undefined,
-      originalStatus: (existingProposal?.originalStatus as AppointmentStatus | null) ?? appointment.status,
-      originalStartAt: existingProposal?.originalStartAt || new Date(appointment.start_at).toISOString(),
-      originalEndAt: existingProposal?.originalEndAt || new Date(appointment.end_at).toISOString(),
-    });
-
-    await this.prisma.queryInSchema(
-      tenant.schemaName,
-      `
-      UPDATE appointments
-      SET start_at = $1::timestamptz,
-          end_at = $2::timestamptz,
-          status = $3,
-          intake_data = $4::jsonb,
-          updated_at = NOW()
-      WHERE id = $5::uuid
-      `,
-      [
-        startAt.toISOString(),
-        endAt.toISOString(),
-        AppointmentStatus.PROPOSAL_PENDING,
-        JSON.stringify({
-          ...intakeData,
-          proposal,
-          stateMeta: this.buildOwnerStateMeta(appointment.status, AppointmentStatus.PROPOSAL_PENDING, 'proposal_sent'),
-        }),
-        appointment.id,
-      ],
-    );
-
-    await this.processNotificationNow(
-      NotificationJobType.BOOKING_PROPOSAL,
-      {
-        tenantId: tenant.id,
-        tenantSchemaName: tenant.schemaName,
-        appointmentId: appointment.id,
-        clientId: appointment.client_id,
-      },
-      {
-        tenantSlug: tenant.slug,
-        appointmentId: appointment.id,
-        context: 'propose-alternative',
-        delay: 0,
-      },
-    );
-
-    return {
-      id: appointment.id,
-      status: AppointmentStatus.PROPOSAL_PENDING,
-      startAt,
-      endAt,
-    };
+    throw new BadRequestException('Функцията "Предложен час" е премахната.');
   }
 
   async respondToProposal(tenant: Tenant, appointmentId: string, decision: ProposalDecision) {
-    const [appointment] = await this.prisma.queryInSchema<any[]>(
-      tenant.schemaName,
-      `
-      SELECT id, client_id, status, start_at, end_at, intake_data
-      FROM appointments
-      WHERE id = $1::uuid
-      LIMIT 1
-      `,
-      [appointmentId],
-    );
-
-    if (!appointment) {
-      throw new NotFoundException('Резервацията не е намерена.');
-    }
-
-    if (appointment.status !== AppointmentStatus.PROPOSAL_PENDING) {
-      throw new BadRequestException('Това предложение вече не е активно.');
-    }
-
-    const intakeData = this.parseIntakeData(appointment.intake_data);
-    const proposal = intakeData.proposal;
-
-    if (!proposal) {
-      throw new BadRequestException('Липсват данни за предложението.');
-    }
-
-    if (decision === 'accept') {
-      const nextIntake = {
-        ...intakeData,
-        proposal: {
-          ...proposal,
-          ownerAlertState: 'proposal_accepted' as const,
-          lastDecision: 'accept' as const,
-        },
-        stateMeta: this.buildOwnerStateMeta(appointment.status, AppointmentStatus.CONFIRMED, 'proposal_accepted'),
-      };
-
-      await this.prisma.queryInSchema(
-        tenant.schemaName,
-        `
-        UPDATE appointments
-        SET status = $1,
-            intake_data = $2::jsonb,
-            updated_at = NOW()
-        WHERE id = $3::uuid
-        `,
-        [
-          AppointmentStatus.CONFIRMED,
-          JSON.stringify(nextIntake),
-          appointment.id,
-        ],
-      );
-
-      await this.scheduleRemindersOnly(
-        tenant,
-        appointment.id,
-        appointment.client_id,
-        new Date(appointment.start_at),
-      );
-
-      return {
-        id: appointment.id,
-        status: AppointmentStatus.CONFIRMED,
-        ownerAlertState: 'proposal_accepted',
-      };
-    }
-
-    const originalStatus = (proposal.originalStatus as AppointmentStatus | null) || AppointmentStatus.CANCELLED;
-    const revertStatus =
-      proposal.kind === 'counter_offer' && proposal.originalStartAt && proposal.originalEndAt
-        ? originalStatus
-        : AppointmentStatus.CANCELLED;
-    const nextStartAt =
-      proposal.kind === 'counter_offer' && proposal.originalStartAt
-        ? proposal.originalStartAt
-        : new Date(appointment.start_at).toISOString();
-    const nextEndAt =
-      proposal.kind === 'counter_offer' && proposal.originalEndAt
-        ? proposal.originalEndAt
-        : new Date(appointment.end_at).toISOString();
-
-    const nextIntake = {
-      ...intakeData,
-      proposal: {
-        ...proposal,
-        ownerAlertState: 'proposal_rejected' as const,
-        lastDecision: 'reject' as const,
-      },
-      stateMeta: this.buildOwnerStateMeta(
-        appointment.status,
-        revertStatus,
-        revertStatus === AppointmentStatus.CANCELLED ? 'proposal_rejected' : 'proposal_sent',
-      ),
-    };
-
-    await this.prisma.queryInSchema(
-      tenant.schemaName,
-      `
-      UPDATE appointments
-      SET status = $1,
-          start_at = $2::timestamptz,
-          end_at = $3::timestamptz,
-          cancellation_reason = $4,
-          cancelled_by = $5,
-          cancelled_at = CASE WHEN $1 = 'cancelled' THEN NOW() ELSE NULL END,
-          intake_data = $6::jsonb,
-          updated_at = NOW()
-      WHERE id = $7::uuid
-      `,
-      [
-        revertStatus,
-        nextStartAt,
-        nextEndAt,
-        revertStatus === AppointmentStatus.CANCELLED ? 'Клиентът отказа предложението.' : null,
-        revertStatus === AppointmentStatus.CANCELLED ? 'client' : null,
-        JSON.stringify(nextIntake),
-        appointment.id,
-      ],
-    );
-
-    return {
-      id: appointment.id,
-      status: revertStatus,
-      ownerAlertState: 'proposal_rejected',
-    };
+    throw new BadRequestException('Функцията "Предложен час" е премахната.');
   }
 
   async respondToProposalByToken(
@@ -1276,41 +1012,7 @@ export class AppointmentsService {
     token: string,
     decision: ProposalDecision,
   ) {
-    const tenants = await this.prisma.$queryRawUnsafe<Array<{ id: string; slug: string; schema_name: string }>>(
-      `SELECT id, slug, schema_name FROM public.tenants WHERE slug = $1 AND is_active = true LIMIT 1`,
-      tenantSlug,
-    );
-
-    if (!tenants.length) {
-      throw new NotFoundException('Бизнесът не е намерен.');
-    }
-
-    const tenant = tenants[0];
-    const tokenField = decision === 'accept' ? 'acceptToken' : 'rejectToken';
-    const [appointment] = await this.prisma.queryInSchema<any[]>(
-      tenant.schema_name,
-      `
-      SELECT id
-      FROM appointments
-      WHERE intake_data->'proposal'->>$1 = $2
-      LIMIT 1
-      `,
-      [tokenField, token],
-    );
-
-    if (!appointment) {
-      throw new NotFoundException('Линкът за предложението не е валиден.');
-    }
-
-    return this.respondToProposal(
-      {
-        id: tenant.id,
-        slug: tenant.slug,
-        schemaName: tenant.schema_name,
-      } as Tenant,
-      appointment.id,
-      decision,
-    );
+    throw new BadRequestException('Функцията "Предложен час" е премахната.');
   }
 
   async clearOwnerAlert(tenant: Tenant, appointmentId: string) {
@@ -2530,8 +2232,8 @@ export class AppointmentsService {
 
   private validateStatusTransition(current: AppointmentStatus, next: AppointmentStatus) {
     const allowed: Record<AppointmentStatus, AppointmentStatus[]> = {
-      [AppointmentStatus.PENDING]: [AppointmentStatus.CONFIRMED, AppointmentStatus.CANCELLED, AppointmentStatus.PROPOSAL_PENDING],
-      [AppointmentStatus.PROPOSAL_PENDING]: [AppointmentStatus.CONFIRMED, AppointmentStatus.CANCELLED, AppointmentStatus.PENDING],
+      [AppointmentStatus.PENDING]: [AppointmentStatus.CONFIRMED, AppointmentStatus.CANCELLED],
+      [AppointmentStatus.PROPOSAL_PENDING]: [AppointmentStatus.CONFIRMED, AppointmentStatus.CANCELLED],
       [AppointmentStatus.CONFIRMED]: [AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW],
       [AppointmentStatus.COMPLETED]: [],
       [AppointmentStatus.CANCELLED]: [],

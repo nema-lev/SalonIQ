@@ -39,7 +39,7 @@ export function AdminHeader({ onOpenMenu }: { onOpenMenu: () => void }) {
   });
   const pendingCount = upcoming?.length ?? 0;
   const inboxActionCount = useMemo(
-    () => (upcoming ?? []).filter((item) => item.status === 'pending' || item.status === 'proposal_pending').length,
+    () => (upcoming ?? []).filter((item) => item.status === 'pending').length,
     [upcoming],
   );
   const inboxUpdateCount = useMemo(
@@ -80,7 +80,6 @@ export function AdminHeader({ onOpenMenu }: { onOpenMenu: () => void }) {
         <button
           type="button"
           onClick={onOpenMenu}
-          className="lg:hidden"
           style={{
             width: 42,
             height: 42,
@@ -190,7 +189,7 @@ export function AdminHeader({ onOpenMenu }: { onOpenMenu: () => void }) {
                   {inboxActionCount > 0 ? `${inboxActionCount} заявки искат решение` : 'Няма чакащи решения'}
                 </div>
                 <div style={{ marginTop: 4, fontSize: 12, color: '#6b7280' }}>
-                  Отваря action inbox-а с новите заявки и предложения.
+                  Отваря календара с чакащите решения за деня.
                 </div>
               </button>
 
@@ -214,7 +213,7 @@ export function AdminHeader({ onOpenMenu }: { onOpenMenu: () => void }) {
                   {inboxUpdateCount > 0 ? `${inboxUpdateCount} нови обновления` : 'Няма нови обновления'}
                 </div>
                 <div style={{ marginTop: 4, fontSize: 12, color: '#6b7280' }}>
-                  Клиентски отговори и отмени, които трябва да прегледате.
+                  Клиентски действия и промени по записите.
                 </div>
               </button>
             </div>

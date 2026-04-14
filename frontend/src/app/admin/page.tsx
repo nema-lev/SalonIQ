@@ -1,8 +1,8 @@
 'use client';
 
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format, addDays, subDays, isToday, startOfDay, endOfDay, startOfWeek, endOfWeek, eachDayOfInterval, isSameDay } from 'date-fns';
+import { format, addDays, subDays, isToday, startOfDay, endOfDay, startOfWeek, endOfWeek, eachDayOfInterval, isSameDay, differenceInMinutes } from 'date-fns';
 import { bg } from 'date-fns/locale';
 import {
   Ban,
@@ -472,6 +472,12 @@ function isSecondaryOwnerState(ownerState?: string) {
   return SECONDARY_OWNER_STATES.includes((ownerState || 'pending') as (typeof SECONDARY_OWNER_STATES)[number]);
 }
 
+function getEventDurationMinutes(startAt?: string, endAt?: string) {
+  if (!startAt || !endAt) return CALENDAR_SLOT_MINUTES;
+  const duration = differenceInMinutes(new Date(endAt), new Date(startAt));
+  return Math.max(duration || CALENDAR_SLOT_MINUTES, CALENDAR_SLOT_MINUTES);
+}
+
 export default function AdminCalendarPage() {
   const qc = useQueryClient();
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -820,6 +826,26 @@ export default function AdminCalendarPage() {
 
   const handleDropReschedule = (appointmentId: string, startAt: string, staffId: string) => {
     rescheduleMutation.mutate({ id: appointmentId, startAt, staffId });
+  };
+
+  const updateTouchPlacementFromPoint = (
+    clientY: number,
+    columnRect: DOMRect,
+    staffId: string,
+    day: Date,
+    rangeStartHour: number,
+    pxPerHour: number,
+  ) => {
+    const slotHeight = pxPerHour / (60 / CALENDAR_SLOT_MINUTES);
+    const relativeY = Math.min(Math.max(clientY - columnRect.top, 0), columnRect.height);
+    const slotIndex = Math.floor(relativeY / slotHeight);
+    const totalMinutes = rangeStartHour * 60 + slotIndex * CALENDAR_SLOT_MINUTES;
+    const nextStart = new Date(day);
+    nextStart.setHours(Math.floor(totalMinutes / 60), totalMinutes % 60, 0, 0);
+    const nextIso = nextStart.toISOString();
+
+    setPendingTouchPlacement({ startAt: nextIso, staffId });
+    setDropPreview({ staffId, startAt: nextIso });
   };
 
   const handleRequestPlacement = async (requestId: string, startAt: string, staffId: string) => {
@@ -1181,6 +1207,32 @@ export default function AdminCalendarPage() {
     window.addEventListener('resize', syncViewportMode);
     return () => window.removeEventListener('resize', syncViewportMode);
   }, []);
+
+  const activePreviewTarget = useMemo(() => {
+    if (touchMoveTarget) return touchMoveTarget;
+    if (draggedAppointmentId) {
+      return appointments.find((appointment) => appointment.id === draggedAppointmentId) ?? null;
+    }
+    if (draggedRequestId) {
+      return inboxItems.find((item) => item.id === draggedRequestId) ?? null;
+    }
+    return null;
+  }, [appointments, draggedAppointmentId, draggedRequestId, inboxItems, touchMoveTarget]);
+
+  const previewDurationMinutes = useMemo(
+    () => getEventDurationMinutes(activePreviewTarget?.start_at, activePreviewTarget?.end_at),
+    [activePreviewTarget],
+  );
+
+  const getPreviewMetrics = useCallback(
+    (startAt: string, rangeStartHour: number, pxPerHour: number, minHeight: number) => {
+      const startOffset = getMinuteOffset(startAt, rangeStartHour);
+      const top = (startOffset / 60) * pxPerHour + 4;
+      const height = Math.max((previewDurationMinutes / 60) * pxPerHour - 8, minHeight);
+      return { top, height };
+    },
+    [previewDurationMinutes],
+  );
 
   useEffect(() => {
     setBlockDraft((current) => ({
@@ -1571,7 +1623,47 @@ export default function AdminCalendarPage() {
             })}
           </div>
 
-          <div className="relative bg-white/80" style={{ height: `${compactCalendarHeight}px` }}>
+          <div
+            className="relative bg-white/80 touch-none"
+            style={{ height: `${compactCalendarHeight}px` }}
+            onTouchMove={(event) => {
+              if (!touchMoveTarget) return;
+              const touch = event.touches[0];
+              if (!touch) return;
+              updateTouchPlacementFromPoint(
+                touch.clientY,
+                event.currentTarget.getBoundingClientRect(),
+                staffMember.id,
+                currentDate,
+                compactCalendarRange.startHour,
+                compactPixelsPerHour,
+              );
+            }}
+            onTouchEnd={(event) => {
+              if (!touchMoveTarget) return;
+              const touch = event.changedTouches[0];
+              if (!touch) return;
+              updateTouchPlacementFromPoint(
+                touch.clientY,
+                event.currentTarget.getBoundingClientRect(),
+                staffMember.id,
+                currentDate,
+                compactCalendarRange.startHour,
+                compactPixelsPerHour,
+              );
+            }}
+            onClick={(event) => {
+              if (!touchMoveTarget) return;
+              updateTouchPlacementFromPoint(
+                event.clientY,
+                event.currentTarget.getBoundingClientRect(),
+                staffMember.id,
+                currentDate,
+                compactCalendarRange.startHour,
+                compactPixelsPerHour,
+              );
+            }}
+          >
             {overlays.map((overlay, index) => (
               <div
                 key={overlay.id || `${staffMember.id}-overlay-${index}`}
@@ -1614,45 +1706,30 @@ export default function AdminCalendarPage() {
             })}
 
             {touchMoveTarget &&
-              compactHourSlots
-                .slice(0, -1)
-                .flatMap((hour) =>
-                  [0, 15, 30, 45].map((minute) => {
-                    const minutesFromStart = hour * 60 + minute - compactCalendarRange.startHour * 60;
-                    if (
-                      minutesFromStart < 0 ||
-                      minutesFromStart >= (compactCalendarRange.endHour - compactCalendarRange.startHour) * 60
-                    ) {
-                      return null;
-                    }
-
-                    const nextStart = new Date(currentDate);
-                    nextStart.setHours(hour, minute, 0, 0);
-                    const top = (minutesFromStart / 60) * compactPixelsPerHour;
-
-                    return (
-                      <button
-                        key={`${staffMember.id}-touch-slot-${hour}-${minute}`}
-                        type="button"
-                        onClick={() => {
-                          setPendingTouchPlacement({ startAt: nextStart.toISOString(), staffId: staffMember.id });
-                          setDropPreview({ staffId: staffMember.id, startAt: nextStart.toISOString() });
-                        }}
-                        className={`absolute left-0 right-0 z-[1] border border-dashed text-left transition-colors ${
-                          pendingTouchPlacement?.staffId === staffMember.id &&
-                          pendingTouchPlacement?.startAt === nextStart.toISOString()
-                            ? 'border-[var(--color-primary)]/45 bg-[var(--color-primary)]/14'
-                            : 'border-[var(--color-primary)]/30 bg-[var(--color-primary)]/8 hover:bg-[var(--color-primary)]/12'
-                        }`}
-                        style={{ top: `${top}px`, height: `${compactPixelsPerHour / (60 / CALENDAR_SLOT_MINUTES)}px` }}
-                      >
-                        <span className="absolute left-2 top-1 rounded-full bg-white/95 px-2 py-1 text-[10px] font-semibold text-[var(--color-primary)] shadow-sm">
-                          {format(nextStart, 'HH:mm')}
-                        </span>
-                      </button>
-                    );
-                  }),
-                )}
+            dropPreview?.staffId === staffMember.id &&
+            (() => {
+              const metrics = getPreviewMetrics(
+                dropPreview.startAt,
+                compactCalendarRange.startHour,
+                compactPixelsPerHour,
+                48,
+              );
+              return (
+                <div
+                  className="pointer-events-none absolute left-2 right-2 z-[2] rounded-2xl border-2 border-[var(--color-primary)] bg-[var(--color-primary)]/14 shadow-[0_10px_30px_rgba(79,70,229,0.18)]"
+                  style={{ top: `${metrics.top}px`, height: `${metrics.height}px` }}
+                >
+                  <div className="absolute inset-x-2 top-2 flex items-center justify-between gap-2">
+                    <span className="rounded-full bg-white/95 px-2 py-1 text-[10px] font-bold text-[var(--color-primary)] shadow-sm">
+                      {format(new Date(dropPreview.startAt), 'HH:mm')}
+                    </span>
+                    <span className="rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-600 shadow-sm">
+                      Нов слот
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
 
             {compactNowIndicatorOffset !== null && (
               <div
@@ -2508,6 +2585,33 @@ export default function AdminCalendarPage() {
                                   );
                                 })}
 
+                                {dropPreview?.staffId === column.staff.id &&
+                                isSameDay(new Date(dropPreview.startAt), column.day) ? (
+                                  (() => {
+                                    const metrics = getPreviewMetrics(
+                                      dropPreview.startAt,
+                                      calendarRange.startHour,
+                                      pixelsPerHour,
+                                      56,
+                                    );
+                                    return (
+                                      <div
+                                        className="pointer-events-none absolute left-2 right-2 z-[2] rounded-2xl border-2 border-[var(--color-primary)] bg-[var(--color-primary)]/14 shadow-[0_12px_32px_rgba(79,70,229,0.18)]"
+                                        style={{ top: `${metrics.top}px`, height: `${metrics.height}px` }}
+                                      >
+                                        <div className="absolute inset-x-2 top-2 flex items-center justify-between gap-2">
+                                          <span className="rounded-full bg-white/95 px-2 py-1 text-[10px] font-bold text-[var(--color-primary)] shadow-sm">
+                                            {format(new Date(dropPreview.startAt), 'HH:mm')}
+                                          </span>
+                                          <span className="rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-600 shadow-sm">
+                                            Нов слот
+                                          </span>
+                                        </div>
+                                      </div>
+                                    );
+                                  })()
+                                ) : null}
+
                                 {moveDropSlots.map((slot) => {
                                   const [, minute] = slot.label.split(':').map(Number);
                                   return (
@@ -2771,6 +2875,33 @@ export default function AdminCalendarPage() {
                                       ) : null}
                                     </div>
 		                              ))}
+
+                                {dropPreview?.staffId === staffMember.id &&
+                                isSameDay(new Date(dropPreview.startAt), currentDate) ? (
+                                  (() => {
+                                    const metrics = getPreviewMetrics(
+                                      dropPreview.startAt,
+                                      calendarRange.startHour,
+                                      pixelsPerHour,
+                                      56,
+                                    );
+                                    return (
+                                      <div
+                                        className="pointer-events-none absolute left-2 right-2 z-[2] rounded-2xl border-2 border-[var(--color-primary)] bg-[var(--color-primary)]/14 shadow-[0_12px_32px_rgba(79,70,229,0.18)]"
+                                        style={{ top: `${metrics.top}px`, height: `${metrics.height}px` }}
+                                      >
+                                        <div className="absolute inset-x-2 top-2 flex items-center justify-between gap-2">
+                                          <span className="rounded-full bg-white/95 px-2 py-1 text-[10px] font-bold text-[var(--color-primary)] shadow-sm">
+                                            {format(new Date(dropPreview.startAt), 'HH:mm')}
+                                          </span>
+                                          <span className="rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-600 shadow-sm">
+                                            Нов слот
+                                          </span>
+                                        </div>
+                                      </div>
+                                    );
+                                  })()
+                                ) : null}
 
 		                              {moveDropSlots.map((slot) => {
                                   const [, minute] = slot.label.split(':').map(Number);

@@ -508,10 +508,12 @@ export default function AdminCalendarPage() {
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const [mobileWorkspace, setMobileWorkspace] = useState<'calendar' | 'inbox'>('calendar');
   const [showMobileDetails, setShowMobileDetails] = useState(false);
+  const [showMoveModal, setShowMoveModal] = useState(false);
   const [calendarView, setCalendarView] = useState<'grid' | 'list' | 'week'>('grid');
   const [staffFilter, setStaffFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'requests' | 'booked' | 'cancelled' | 'completed'>('all');
   const [showUnavailable, setShowUnavailable] = useState(true);
+  const [isCompactViewport, setIsCompactViewport] = useState(false);
   const [draggedAppointmentId, setDraggedAppointmentId] = useState<string | null>(null);
   const [dropPreview, setDropPreview] = useState<{ staffId: string; startAt: string } | null>(null);
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
@@ -898,6 +900,7 @@ export default function AdminCalendarPage() {
     [inboxItems, selectedRecordId],
   );
   const detailedAppointment = selectedContext?.appointment ?? selectedAppointment;
+  const moveTargetAppointment = detailedAppointment ?? null;
   const activeWaitlistEntries = useMemo(
     () => waitlistEntries.filter((entry) => ['waiting', 'notified'].includes(entry.status)),
     [waitlistEntries],
@@ -976,7 +979,29 @@ export default function AdminCalendarPage() {
       ),
     [calendarBoard?.exceptions, calendarView, currentDate, staffFilter],
   );
+  const compactDayAppointments = useMemo(
+    () =>
+      sortByStartAt(
+        appointments.filter(
+          (item) =>
+            isSameDay(new Date(item.start_at), currentDate) &&
+            (staffFilter === 'all' ? true : item.staff_id === staffFilter) &&
+            matchesCalendarStatusFilter(item, statusFilter),
+        ),
+      ),
+    [appointments, currentDate, staffFilter, statusFilter],
+  );
+  const compactDayExceptions = useMemo(
+    () =>
+      (calendarBoard?.exceptions ?? []).filter(
+        (exception) =>
+          isSameDay(new Date(exception.start_at), currentDate) &&
+          (staffFilter === 'all' ? true : exception.staff_id === staffFilter),
+      ),
+    [calendarBoard?.exceptions, currentDate, staffFilter],
+  );
   const calendarRange = useMemo(() => buildCalendarRange(appointmentsInView), [appointmentsInView]);
+  const compactCalendarRange = useMemo(() => buildCalendarRange(compactDayAppointments), [compactDayAppointments]);
   const hourSlots = useMemo(
     () =>
       Array.from({ length: calendarRange.endHour - calendarRange.startHour + 1 }, (_, index) => calendarRange.startHour + index),
@@ -984,6 +1009,9 @@ export default function AdminCalendarPage() {
   );
   const pixelsPerHour = 88;
   const calendarHeight = (calendarRange.endHour - calendarRange.startHour) * pixelsPerHour;
+  const compactPixelsPerHour = 64;
+  const compactCalendarHeight =
+    (compactCalendarRange.endHour - compactCalendarRange.startHour) * compactPixelsPerHour;
   const nowIndicatorOffset = useMemo(() => {
     if (!isToday(currentDate)) return null;
     const now = new Date();
@@ -1007,12 +1035,38 @@ export default function AdminCalendarPage() {
       }),
     [calendarRange.endHour, calendarRange.startHour],
   );
+  const compactHourSlots = useMemo(
+    () =>
+      Array.from(
+        { length: compactCalendarRange.endHour - compactCalendarRange.startHour + 1 },
+        (_, index) => compactCalendarRange.startHour + index,
+      ),
+    [compactCalendarRange.endHour, compactCalendarRange.startHour],
+  );
+  const compactNowIndicatorOffset = useMemo(() => {
+    if (!isToday(currentDate)) return null;
+    const now = new Date();
+    const minutes = now.getHours() * 60 + now.getMinutes();
+    const startMinutes = compactCalendarRange.startHour * 60;
+    const endMinutes = compactCalendarRange.endHour * 60;
+    if (minutes < startMinutes || minutes > endMinutes) return null;
+    return ((minutes - startMinutes) / 60) * compactPixelsPerHour;
+  }, [compactCalendarRange.endHour, compactCalendarRange.startHour, currentDate]);
   const visibleBlockList = useMemo(
     () =>
       [...visibleExceptions].sort(
         (left, right) => new Date(left.start_at).getTime() - new Date(right.start_at).getTime(),
       ),
     [visibleExceptions],
+  );
+  const mobileBoardStaff = useMemo(
+    () =>
+      visibleStaffColumns.map((staffMember) => ({
+        ...staffMember,
+        dayAppointments: compactDayAppointments.filter((appointment) => appointment.staff_id === staffMember.id),
+        dayExceptions: compactDayExceptions.filter((exception) => exception.staff_id === staffMember.id),
+      })),
+    [compactDayAppointments, compactDayExceptions, visibleStaffColumns],
   );
   const weekGridColumns = useMemo(
     () =>
@@ -1115,6 +1169,18 @@ export default function AdminCalendarPage() {
       setStaffFilter('all');
     }
   }, [calendarStaff, staffFilter]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const syncViewportMode = () => {
+      setIsCompactViewport(window.innerWidth < 1280);
+    };
+
+    syncViewportMode();
+    window.addEventListener('resize', syncViewportMode);
+    return () => window.removeEventListener('resize', syncViewportMode);
+  }, []);
 
   useEffect(() => {
     setBlockDraft((current) => ({
@@ -1290,13 +1356,6 @@ export default function AdminCalendarPage() {
     setShowWaitlistModal(true);
   };
 
-  const quickReschedule = (appointment: Appointment, offsetDays: number, offsetMinutes = 0) => {
-    const nextStart = new Date(appointment.start_at);
-    nextStart.setDate(nextStart.getDate() + offsetDays);
-    nextStart.setMinutes(nextStart.getMinutes() + offsetMinutes);
-    handleDropReschedule(appointment.id, nextStart.toISOString(), appointment.staff_id);
-  };
-
   const renderPrimaryActions = (appointment: Appointment) => {
     if (appointment.status === 'pending' || appointment.status === 'proposal_pending') {
       return (
@@ -1306,6 +1365,13 @@ export default function AdminCalendarPage() {
             className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90"
           >
             Потвърди
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowMoveModal(true)}
+            className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-100"
+          >
+            Премести
           </button>
           <button
             onClick={() => {
@@ -1329,6 +1395,13 @@ export default function AdminCalendarPage() {
     if (appointment.status === 'confirmed') {
       return (
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setShowMoveModal(true)}
+            className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-100"
+          >
+            Премести
+          </button>
           <button
             onClick={() => handleStatusChange(appointment.id, 'completed')}
             className="rounded-xl bg-sky-600 px-3 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90"
@@ -1402,6 +1475,195 @@ export default function AdminCalendarPage() {
       <p className="mt-2 text-sm text-gray-400">{calendarEmptyState?.description}</p>
     </div>
   );
+
+  const renderCompactStaffBoard = (staffMember: (typeof mobileBoardStaff)[number]) => {
+    const dayKey = getWorkingDayKey(currentDate);
+    const schedule = staffMember.working_hours?.[dayKey];
+    const overlays: Array<{
+      id?: string;
+      top: number;
+      height: number;
+      label: string;
+      block?: StaffException;
+      kind: 'closed' | 'exception';
+    }> = [];
+
+    if (showUnavailable) {
+      if (!schedule?.isOpen) {
+        overlays.push({
+          top: 0,
+          height: compactCalendarHeight,
+          label: 'Почивен ден',
+          kind: 'closed',
+        });
+      } else {
+        const [openHour, openMinute] = schedule.open.split(':').map(Number);
+        const [closeHour, closeMinute] = schedule.close.split(':').map(Number);
+        const openOffset =
+          ((openHour * 60 + openMinute - compactCalendarRange.startHour * 60) / 60) * compactPixelsPerHour;
+        const closeOffset =
+          ((closeHour * 60 + closeMinute - compactCalendarRange.startHour * 60) / 60) * compactPixelsPerHour;
+
+        if (openOffset > 0) {
+          overlays.push({
+            top: 0,
+            height: openOffset,
+            label: 'Извън работно време',
+            kind: 'closed',
+          });
+        }
+
+        if (closeOffset < compactCalendarHeight) {
+          overlays.push({
+            top: Math.max(closeOffset, 0),
+            height: Math.max(compactCalendarHeight - closeOffset, 0),
+            label: 'Извън работно време',
+            kind: 'closed',
+          });
+        }
+      }
+
+      for (const exception of staffMember.dayExceptions) {
+        const window = getExceptionWindow(exception);
+        const top = Math.max(
+          (getMinuteOffset(window.startAt, compactCalendarRange.startHour) / 60) * compactPixelsPerHour,
+          0,
+        );
+        const bottom = Math.min(
+          (getMinuteOffset(window.endAt, compactCalendarRange.startHour) / 60) * compactPixelsPerHour,
+          compactCalendarHeight,
+        );
+        overlays.push({
+          id: exception.id,
+          top,
+          height: Math.max(bottom - top, 36),
+          label: exception.note || 'Блокиран интервал',
+          block: exception,
+          kind: 'exception',
+        });
+      }
+    }
+
+    return (
+      <div key={staffMember.id} className="rounded-[24px] border border-white/70 bg-white/95 p-3 shadow-sm">
+        <div className="mb-3 flex items-center gap-3">
+          <span
+            className="flex h-10 w-10 items-center justify-center rounded-full text-xs font-black text-white"
+            style={{ backgroundColor: staffMember.color || 'var(--color-primary)' }}
+          >
+            {getInitials(staffMember.name)}
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-black text-gray-900">{staffMember.name}</p>
+            <p className="text-xs text-gray-500">{staffMember.dayAppointments.length} записа за деня</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-[52px_minmax(0,1fr)]">
+          <div className="relative border-r border-gray-100 bg-gray-50/60" style={{ height: `${compactCalendarHeight}px` }}>
+            {compactHourSlots.slice(0, -1).map((hour) => {
+              const top = (hour - compactCalendarRange.startHour) * compactPixelsPerHour;
+              return (
+                <div key={`${staffMember.id}-hour-${hour}`}>
+                  <div className="absolute left-0 right-0 border-t border-dashed border-gray-200" style={{ top: `${top}px` }} />
+                  <div className="absolute left-0 top-0 -translate-y-1/2 px-2 text-[11px] font-semibold text-gray-400" style={{ top: `${top}px` }}>
+                    {String(hour).padStart(2, '0')}:00
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="relative bg-white/80" style={{ height: `${compactCalendarHeight}px` }}>
+            {overlays.map((overlay, index) => (
+              <div
+                key={overlay.id || `${staffMember.id}-overlay-${index}`}
+                className={`absolute left-0 right-0 z-0 border-y ${
+                  overlay.kind === 'exception' ? 'border-slate-300/70' : 'border-gray-200/80'
+                }`}
+                style={{
+                  top: `${overlay.top}px`,
+                  height: `${overlay.height}px`,
+                  background:
+                    overlay.kind === 'exception'
+                      ? 'repeating-linear-gradient(-45deg, rgba(148,163,184,0.14), rgba(148,163,184,0.14) 6px, rgba(148,163,184,0.05) 6px, rgba(148,163,184,0.05) 12px)'
+                      : 'rgba(148,163,184,0.08)',
+                }}
+              >
+                <span className="absolute left-2 top-2 rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-500 shadow-sm">
+                  {overlay.label}
+                </span>
+                {overlay.block && (
+                  <button
+                    type="button"
+                    onClick={() => openBlockEditorForBlock(overlay.block!)}
+                    className="absolute right-2 top-2 rounded-full border border-white/80 bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-600 shadow-sm"
+                  >
+                    Редактирай
+                  </button>
+                )}
+              </div>
+            ))}
+
+            {compactHourSlots.slice(0, -1).map((hour) => {
+              const top = (hour - compactCalendarRange.startHour) * compactPixelsPerHour;
+              return (
+                <div
+                  key={`${staffMember.id}-line-${hour}`}
+                  className="absolute left-0 right-0 border-t border-gray-100"
+                  style={{ top: `${top}px` }}
+                />
+              );
+            })}
+
+            {compactNowIndicatorOffset !== null && (
+              <div
+                className="absolute left-0 right-0 z-[1] border-t-2 border-rose-400"
+                style={{ top: `${compactNowIndicatorOffset}px` }}
+              >
+                <span className="absolute -left-2 -top-2 h-4 w-4 rounded-full border-2 border-white bg-rose-500 shadow" />
+              </div>
+            )}
+
+            {staffMember.dayAppointments.map((appointment) => {
+              const startOffset = getMinuteOffset(appointment.start_at, compactCalendarRange.startHour);
+              const endOffset = getMinuteOffset(appointment.end_at, compactCalendarRange.startHour);
+              const top = (startOffset / 60) * compactPixelsPerHour + 4;
+              const height = Math.max(((endOffset - startOffset) / 60) * compactPixelsPerHour - 8, 48);
+              const ownerState = appointment.owner_view_state || appointment.status;
+              const isSecondary = ['completed', 'no_show', 'cancelled', 'rejected', 'proposal_rejected', 'cancelled_by_owner', 'cancelled_by_client'].includes(ownerState);
+              const accent = appointment.service_color || appointment.staff_color || 'var(--color-primary)';
+              const surface = isSecondary ? 'rgba(248,250,252,0.94)' : colorWithAlpha(accent, '18', 'rgba(14, 165, 233, 0.1)');
+
+              return (
+                <button
+                  key={appointment.id}
+                  type="button"
+                  onClick={() => focusRecord(appointment.id, appointment.start_at)}
+                  className={`absolute left-2 right-2 z-[2] rounded-2xl border px-3 py-2 text-left shadow-sm ${
+                    selectedRecordId === appointment.id ? 'ring-2 ring-[var(--color-primary)]/20' : ''
+                  } ${isSecondary ? 'opacity-60' : ''}`}
+                  style={{
+                    top: `${top}px`,
+                    height: `${height}px`,
+                    borderColor: colorWithAlpha(accent, isSecondary ? '2A' : '50', 'rgba(148, 163, 184, 0.35)'),
+                    backgroundColor: surface,
+                    borderStyle: isSecondary ? 'dashed' : 'solid',
+                  }}
+                >
+                  <p className="text-[11px] font-bold text-gray-700">
+                    {format(new Date(appointment.start_at), 'HH:mm')} - {format(new Date(appointment.end_at), 'HH:mm')}
+                  </p>
+                  <p className="mt-1 line-clamp-1 text-sm font-black text-gray-900">{appointment.client_name}</p>
+                  <p className="mt-1 line-clamp-2 text-[11px] font-semibold text-gray-600">{appointment.service_name}</p>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const renderDesktopDetailsPanel = () => {
     if (!(selectedAppointment || selectedInboxItem)) {
@@ -1481,22 +1743,13 @@ export default function AdminCalendarPage() {
                   Нов час
                 </button>
               )}
-              {detailedAppointment.status === 'confirmed' && (
+              {!['completed', 'cancelled', 'no_show'].includes(detailedAppointment.status) && (
                 <button
                   type="button"
-                  onClick={() => quickReschedule(detailedAppointment, 0, 30)}
+                  onClick={() => setShowMoveModal(true)}
                   className="rounded-2xl border border-sky-200 bg-sky-50 px-3 py-3 text-sm font-semibold text-sky-700 hover:bg-sky-100"
                 >
-                  +30 мин
-                </button>
-              )}
-              {detailedAppointment.status === 'confirmed' && (
-                <button
-                  type="button"
-                  onClick={() => quickReschedule(detailedAppointment, 1, 0)}
-                  className="rounded-2xl border border-sky-200 bg-sky-50 px-3 py-3 text-sm font-semibold text-sky-700 hover:bg-sky-100"
-                >
-                  Утре
+                  Премести
                 </button>
               )}
               {detailedAppointment.status === 'confirmed' && (
@@ -1828,7 +2081,7 @@ export default function AdminCalendarPage() {
         </div>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[300px_minmax(0,1fr)] min-[1600px]:grid-cols-[300px_minmax(0,1fr)_340px]">
+      <div className="grid gap-5 xl:grid-cols-[290px_minmax(0,1fr)_320px] min-[1500px]:grid-cols-[300px_minmax(0,1fr)_340px]">
         <aside
           className={`min-h-0 ${mobileWorkspace === 'inbox' ? 'block' : 'hidden'} xl:block`}
         >
@@ -2020,12 +2273,12 @@ export default function AdminCalendarPage() {
                   </p>
                 </div>
 
-	                <div className="flex flex-wrap items-center gap-2">
-	                  <div className="hidden items-center rounded-2xl border border-gray-200 bg-white p-1 lg:flex">
-	                    <button
-	                      type="button"
-	                      onClick={() => setCalendarView('grid')}
-	                      className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
+		                <div className="flex flex-wrap items-center gap-2">
+		                  <div className="flex w-full items-center rounded-2xl border border-gray-200 bg-white p-1 sm:w-auto">
+		                    <button
+		                      type="button"
+		                      onClick={() => setCalendarView('grid')}
+		                      className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
 	                        calendarView === 'grid'
 	                          ? 'bg-[var(--color-primary)] text-white shadow-lg shadow-[var(--color-primary)]/20'
 	                          : 'text-gray-600'
@@ -2122,24 +2375,24 @@ export default function AdminCalendarPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                <div className="rounded-2xl border border-white/70 bg-white/90 px-4 py-3 shadow-sm">
-                  <div className="text-xl font-black text-gray-900">{appointmentsInView.length}</div>
-                  <div className="mt-1 text-xs text-gray-500">{calendarView === 'week' ? 'Записи в седмицата' : 'Записи за деня'}</div>
-                </div>
-                <div className="rounded-2xl border border-white/70 bg-white/90 px-4 py-3 shadow-sm">
-                  <div className="text-xl font-black text-emerald-700">{confirmedInView}</div>
-                  <div className="mt-1 text-xs text-gray-500">Запазени часове</div>
-                </div>
-                <div className="rounded-2xl border border-white/70 bg-white/90 px-4 py-3 shadow-sm">
-                  <div className="text-xl font-black text-amber-700">{pendingInView}</div>
-                  <div className="mt-1 text-xs text-gray-500">Нови заявки</div>
-                </div>
-                <div className="rounded-2xl border border-white/70 bg-white/90 px-4 py-3 shadow-sm">
-                  <div className="text-xl font-black text-[var(--color-primary)]">{formatEuroAmount(totalRevenue)}</div>
-                  <div className="mt-1 text-xs text-gray-500">Потвърден оборот</div>
-                </div>
-              </div>
+		              <div className="flex flex-wrap gap-2">
+		                <div className="rounded-2xl border border-white/70 bg-white/90 px-3 py-2 shadow-sm">
+		                  <p className="text-lg font-black text-gray-900">{appointmentsInView.length}</p>
+		                  <p className="text-[11px] text-gray-500">{calendarView === 'week' ? 'записа в седмицата' : 'записа за деня'}</p>
+		                </div>
+		                <div className="rounded-2xl border border-white/70 bg-white/90 px-3 py-2 shadow-sm">
+		                  <p className="text-lg font-black text-emerald-700">{confirmedInView}</p>
+		                  <p className="text-[11px] text-gray-500">запазени</p>
+		                </div>
+		                <div className="rounded-2xl border border-white/70 bg-white/90 px-3 py-2 shadow-sm">
+		                  <p className="text-lg font-black text-amber-700">{pendingInView}</p>
+		                  <p className="text-[11px] text-gray-500">нови заявки</p>
+		                </div>
+		                <div className="rounded-2xl border border-white/70 bg-white/90 px-3 py-2 shadow-sm">
+		                  <p className="text-lg font-black text-[var(--color-primary)]">{formatEuroAmount(totalRevenue)}</p>
+		                  <p className="text-[11px] text-gray-500">оборот</p>
+		                </div>
+		              </div>
             </div>
 
 	            <div className="mt-5">
@@ -2257,10 +2510,40 @@ export default function AdminCalendarPage() {
                         </div>
                       </div>
 	                  </div>
-                      {calendarEmptyState ? (
-                        renderCalendarEmptyState()
-                      ) : calendarView === 'week' ? (
-                        <div className="overflow-x-auto rounded-[28px] border border-white/70 bg-white/90 shadow-sm">
+	                      {calendarEmptyState ? (
+	                        renderCalendarEmptyState()
+	                      ) : (
+	                        <>
+	                          {calendarView !== 'list' && (
+	                            <div className="space-y-4 xl:hidden">
+	                              {calendarView === 'week' && (
+	                                <div className="overflow-x-auto pb-1">
+	                                  <div className="flex min-w-max gap-2">
+	                                    {weekDays.map((day) => (
+	                                      <button
+	                                        key={day.toISOString()}
+	                                        type="button"
+	                                        onClick={() => setCurrentDate(day)}
+	                                        className={`rounded-2xl border px-3 py-2 text-sm font-semibold ${
+	                                          isSameDay(day, currentDate)
+	                                            ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
+	                                            : 'border-gray-200 bg-white text-gray-600'
+	                                        }`}
+	                                      >
+	                                        {format(day, 'EEE d MMM', { locale: bg })}
+	                                      </button>
+	                                    ))}
+	                                  </div>
+	                                </div>
+	                              )}
+	                              <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+	                                На телефон преместването е през бутона <span className="font-semibold">„Премести“</span> в детайлите на записа.
+	                              </div>
+	                              {mobileBoardStaff.map((staffMember) => renderCompactStaffBoard(staffMember))}
+	                            </div>
+	                          )}
+	                          {calendarView === 'week' ? (
+	                        <div className="hidden xl:block overflow-x-auto rounded-[28px] border border-white/70 bg-white/90 shadow-sm">
                           <div
                             className="grid min-w-[1680px]"
                             style={{ gridTemplateColumns: `72px repeat(${Math.max(weekGridColumns.length, 1)}, minmax(180px, 1fr))` }}
@@ -2470,48 +2753,41 @@ export default function AdminCalendarPage() {
                                   const endOffset = getMinuteOffset(appointment.end_at, calendarRange.startHour);
                                   const top = (startOffset / 60) * pixelsPerHour + 4;
                                   const height = Math.max(((endOffset - startOffset) / 60) * pixelsPerHour - 8, 56);
-                                  const statusCfg = getOwnerStatusPresentation(appointment);
+                                  const ownerState = appointment.owner_view_state || appointment.status;
                                   const isSelected = selectedRecordId === appointment.id;
+                                  const isSecondary = ['completed', 'no_show', 'cancelled', 'rejected', 'proposal_rejected', 'cancelled_by_owner', 'cancelled_by_client'].includes(ownerState);
                                   const accent = appointment.service_color || appointment.staff_color || 'var(--color-primary)';
-                                  const soft = colorWithAlpha(accent, '22', 'rgba(14, 165, 233, 0.12)');
+                                  const soft = isSecondary
+                                    ? 'rgba(248,250,252,0.95)'
+                                    : colorWithAlpha(accent, '18', 'rgba(14, 165, 233, 0.1)');
 
                                   return (
                                     <button
                                       key={appointment.id}
                                       type="button"
-                                      draggable={!['completed', 'cancelled', 'no_show'].includes(appointment.status)}
+                                      draggable={!isCompactViewport && !['completed', 'cancelled', 'no_show'].includes(appointment.status)}
                                       onDragStart={() => setDraggedAppointmentId(appointment.id)}
                                       onDragEnd={() => {
                                         setDraggedAppointmentId(null);
                                         setDropPreview(null);
                                       }}
                                       onClick={() => focusRecord(appointment.id, appointment.start_at)}
-                                      className={`absolute left-2 right-2 z-[2] rounded-2xl border p-3 text-left shadow-sm transition-transform hover:scale-[1.01] ${
+                                      className={`absolute left-2 right-2 z-[2] rounded-2xl border px-3 py-2 text-left shadow-sm transition-transform hover:scale-[1.01] ${
                                         isSelected ? 'ring-2 ring-[var(--color-primary)]/25' : ''
-                                      }`}
+                                      } ${isSecondary ? 'opacity-60' : ''}`}
                                       style={{
                                         top: `${top}px`,
                                         height: `${height}px`,
-                                        borderColor: colorWithAlpha(accent, '55', 'rgba(14, 165, 233, 0.3)'),
+                                        borderColor: colorWithAlpha(accent, isSecondary ? '28' : '55', 'rgba(14, 165, 233, 0.3)'),
                                         backgroundColor: soft,
+                                        borderStyle: isSecondary ? 'dashed' : 'solid',
                                       }}
                                     >
-                                      <div className="flex items-start justify-between gap-2">
-                                        <p className="text-[11px] font-bold text-gray-700">
-                                          {format(new Date(appointment.start_at), 'HH:mm')} - {format(new Date(appointment.end_at), 'HH:mm')}
-                                        </p>
-                                        <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusCfg.cls}`}>
-                                          {statusCfg.label}
-                                        </span>
-                                      </div>
-                                      <p className="mt-2 line-clamp-2 text-sm font-black text-gray-900">{appointment.client_name}</p>
-                                      <p className="mt-1 line-clamp-2 text-xs font-semibold text-gray-700">{appointment.service_name}</p>
-                                      <p className="mt-2 text-[11px] text-gray-500">{formatBulgarianPhoneForDisplay(appointment.client_phone)}</p>
-                                      {appointment.status === 'confirmed' && (
-                                        <span className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${getVisitProgressClass(appointment.visit_progress)}`}>
-                                          {appointment.visit_progress_label}
-                                        </span>
-                                      )}
+                                      <p className="text-[11px] font-bold text-gray-700">
+                                        {format(new Date(appointment.start_at), 'HH:mm')} - {format(new Date(appointment.end_at), 'HH:mm')}
+                                      </p>
+                                      <p className="mt-1 line-clamp-2 text-sm font-black text-gray-900">{appointment.client_name}</p>
+                                      <p className="mt-1 line-clamp-2 text-xs font-semibold text-gray-600">{appointment.service_name}</p>
                                     </button>
                                   );
                                 })}
@@ -2519,8 +2795,8 @@ export default function AdminCalendarPage() {
                             ))}
                           </div>
                         </div>
-                      ) : calendarView === 'grid' ? (
-		                    <div className="block">
+	                      ) : calendarView === 'grid' ? (
+			                    <div className="hidden xl:block">
 		                      <div className="overflow-x-auto rounded-[28px] border border-white/70 bg-white/90 shadow-sm">
 	                        <div
 	                          className="grid min-w-[880px]"
@@ -2728,64 +3004,59 @@ export default function AdminCalendarPage() {
 		                              {staffMember.appointments.map((appointment) => {
 		                                const startOffset = getMinuteOffset(appointment.start_at, calendarRange.startHour);
 		                                const endOffset = getMinuteOffset(appointment.end_at, calendarRange.startHour);
-	                                const top = (startOffset / 60) * pixelsPerHour + 4;
-	                                const height = Math.max(((endOffset - startOffset) / 60) * pixelsPerHour - 8, 56);
-	                                const statusCfg = getOwnerStatusPresentation(appointment);
-	                                const isSelected = selectedRecordId === appointment.id;
-	                                const accent = appointment.service_color || appointment.staff_color || 'var(--color-primary)';
-	                                const soft = colorWithAlpha(accent, '22', 'rgba(14, 165, 233, 0.12)');
-	                                const startTime = format(new Date(appointment.start_at), 'HH:mm');
-	                                const endTime = format(new Date(appointment.end_at), 'HH:mm');
+		                                const top = (startOffset / 60) * pixelsPerHour + 4;
+		                                const height = Math.max(((endOffset - startOffset) / 60) * pixelsPerHour - 8, 56);
+		                                const ownerState = appointment.owner_view_state || appointment.status;
+		                                const isSelected = selectedRecordId === appointment.id;
+		                                const isSecondary = ['completed', 'no_show', 'cancelled', 'rejected', 'proposal_rejected', 'cancelled_by_owner', 'cancelled_by_client'].includes(ownerState);
+		                                const accent = appointment.service_color || appointment.staff_color || 'var(--color-primary)';
+		                                const soft = isSecondary
+		                                  ? 'rgba(248,250,252,0.95)'
+		                                  : colorWithAlpha(accent, '18', 'rgba(14, 165, 233, 0.1)');
+		                                const startTime = format(new Date(appointment.start_at), 'HH:mm');
+		                                const endTime = format(new Date(appointment.end_at), 'HH:mm');
 
-	                                return (
-		                                  <button
-		                                    key={appointment.id}
-		                                    type="button"
-		                                    draggable={!['completed', 'cancelled', 'no_show'].includes(appointment.status)}
-		                                    onDragStart={() => setDraggedAppointmentId(appointment.id)}
-		                                    onDragEnd={() => {
-		                                      setDraggedAppointmentId(null);
-		                                      setDropPreview(null);
+		                                return (
+			                                  <button
+			                                    key={appointment.id}
+			                                    type="button"
+			                                    draggable={!isCompactViewport && !['completed', 'cancelled', 'no_show'].includes(appointment.status)}
+			                                    onDragStart={() => setDraggedAppointmentId(appointment.id)}
+			                                    onDragEnd={() => {
+			                                      setDraggedAppointmentId(null);
+			                                      setDropPreview(null);
+			                                    }}
+			                                    onClick={() => focusRecord(appointment.id, appointment.start_at)}
+			                                    className={`absolute left-2 right-2 z-[2] rounded-2xl border px-3 py-2 text-left shadow-sm transition-transform hover:scale-[1.01] ${
+			                                      isSelected ? 'ring-2 ring-[var(--color-primary)]/25' : ''
+			                                    } ${isSecondary ? 'opacity-60' : ''}`}
+		                                    style={{
+		                                      top: `${top}px`,
+		                                      height: `${height}px`,
+		                                      borderColor: colorWithAlpha(accent, isSecondary ? '28' : '55', 'rgba(14, 165, 233, 0.3)'),
+		                                      backgroundColor: soft,
+		                                      borderStyle: isSecondary ? 'dashed' : 'solid',
+		                                      boxShadow: isSelected ? '0 0 0 1px rgba(99, 102, 241, 0.2)' : undefined,
 		                                    }}
-		                                    onClick={() => focusRecord(appointment.id, appointment.start_at)}
-		                                    className={`absolute left-2 right-2 z-[2] rounded-2xl border p-3 text-left shadow-sm transition-transform hover:scale-[1.01] ${
-		                                      isSelected ? 'ring-2 ring-[var(--color-primary)]/25' : ''
-		                                    }`}
-	                                    style={{
-	                                      top: `${top}px`,
-	                                      height: `${height}px`,
-	                                      borderColor: colorWithAlpha(accent, '55', 'rgba(14, 165, 233, 0.3)'),
-	                                      backgroundColor: soft,
-	                                      boxShadow: isSelected ? '0 0 0 1px rgba(99, 102, 241, 0.2)' : undefined,
-	                                    }}
-	                                  >
-	                                    <div className="flex items-start justify-between gap-2">
-	                                      <p className="text-[11px] font-bold text-gray-700">
-	                                        {startTime} - {endTime}
-	                                      </p>
-	                                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusCfg.cls}`}>
-	                                        {statusCfg.label}
-	                                      </span>
-	                                    </div>
-	                                    <p className="mt-2 line-clamp-2 text-sm font-black text-gray-900">{appointment.client_name}</p>
-	                                    <p className="mt-1 line-clamp-2 text-xs font-semibold text-gray-700">{appointment.service_name}</p>
-		                                    <p className="mt-2 text-[11px] text-gray-500">{formatBulgarianPhoneForDisplay(appointment.client_phone)}</p>
-                                      {appointment.status === 'confirmed' && (
-                                        <span className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold ${getVisitProgressClass(appointment.visit_progress)}`}>
-                                          {appointment.visit_progress_label}
-                                        </span>
-                                      )}
-		                                  </button>
-		                                );
-		                              })}
+		                                  >
+		                                    <p className="text-[11px] font-bold text-gray-700">
+		                                      {startTime} - {endTime}
+		                                    </p>
+		                                    <p className="mt-1 line-clamp-2 text-sm font-black text-gray-900">{appointment.client_name}</p>
+		                                    <p className="mt-1 line-clamp-2 text-xs font-semibold text-gray-600">{appointment.service_name}</p>
+			                                  </button>
+			                                );
+			                              })}
 	                            </div>
 	                          ))}
 	                        </div>
 	                      </div>
 	                    </div>
-	                  ) : null}
+		                  ) : null}
+	                        </>
+	                      )}
 
-		                  <div className={`${calendarView === 'list' ? 'space-y-4' : 'hidden'}`}>
+			                  <div className={`${calendarView === 'list' ? 'space-y-4' : 'hidden'}`}>
 	                    {filteredDayAppointments.map((appointment) => {
 	                      const startTime = format(new Date(appointment.start_at), 'HH:mm');
 	                      const endTime = format(new Date(appointment.end_at), 'HH:mm');
@@ -2868,15 +3139,15 @@ export default function AdminCalendarPage() {
 
         </section>
 
-        <aside className="hidden min-[1600px]:block">
-          <div className="glass-panel rounded-[28px] border border-white/60 p-5 shadow-xl shadow-black/5 min-[1600px]:sticky min-[1600px]:top-5">
+        <aside className="hidden xl:block">
+          <div className="glass-panel rounded-[28px] border border-white/60 p-5 shadow-xl shadow-black/5 xl:sticky xl:top-5">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Детайлен панел</p>
             {renderDesktopDetailsPanel()}
           </div>
         </aside>
       </div>
 
-      <section className="hidden xl:block min-[1600px]:hidden">
+      <section className="hidden">
         <div className="glass-panel rounded-[28px] border border-white/60 p-5 shadow-xl shadow-black/5">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Детайлен панел</p>
           {renderDesktopDetailsPanel()}
@@ -3464,11 +3735,26 @@ export default function AdminCalendarPage() {
             </div>
           </div>
         </div>
-      )}
+	      )}
 
-      <AdminBookingModal
-        open={showBookingModal}
-        defaultDate={dateKey}
+	      <AppointmentMoveModal
+	        open={showMoveModal}
+	        appointment={moveTargetAppointment}
+	        onClose={() => setShowMoveModal(false)}
+	        onMoved={(startAt) => {
+	          setShowMoveModal(false);
+	          setCurrentDate(new Date(startAt));
+	          refetch();
+	          qc.invalidateQueries({ queryKey: ['appointments-upcoming'] });
+	          qc.invalidateQueries({ queryKey: ['admin-header-upcoming'] });
+	          qc.invalidateQueries({ queryKey: ['appointment-context'] });
+	          qc.invalidateQueries({ queryKey: ['appointments-calendar-board'] });
+	        }}
+	      />
+
+	      <AdminBookingModal
+	        open={showBookingModal}
+	        defaultDate={dateKey}
         proposalTarget={proposalTarget}
         onClose={() => {
           setShowBookingModal(false);
@@ -3476,6 +3762,196 @@ export default function AdminCalendarPage() {
         }}
         onCreated={handleBookingCreated}
       />
+    </div>
+  );
+}
+
+function AppointmentMoveModal({
+  open,
+  appointment,
+  onClose,
+  onMoved,
+}: {
+  open: boolean;
+  appointment: Appointment | (AppointmentContextResponse['appointment'] & Appointment) | null;
+  onClose: () => void;
+  onMoved: (startAt: string) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [staffId, setStaffId] = useState('');
+  const [selectedDate, setSelectedDate] = useState('');
+  const [selectedSlot, setSelectedSlot] = useState('');
+  const appointmentServiceId = appointment?.service_id || '';
+
+  useEffect(() => {
+    if (!open || !appointment) return;
+    setStaffId(appointment.staff_id);
+    setSelectedDate(format(new Date(appointment.start_at), 'yyyy-MM-dd'));
+    setSelectedSlot('');
+  }, [appointment, open]);
+
+  const { data: staffOptions, isLoading: staffLoading } = useQuery({
+    queryKey: ['appointment-move-staff', appointmentServiceId],
+    queryFn: () => apiClient.get<StaffMember[]>('/staff', { serviceId: appointmentServiceId }),
+    enabled: open && Boolean(appointmentServiceId),
+    staleTime: 30 * 1000,
+  });
+
+  const { data: slots, isLoading: slotsLoading } = useQuery({
+    queryKey: ['appointment-move-slots', appointmentServiceId, staffId, selectedDate],
+    queryFn: () =>
+      apiClient.get<Slot[]>('/appointments/slots', {
+        serviceId: appointmentServiceId,
+        staffId,
+        date: selectedDate,
+      }),
+    enabled: open && Boolean(appointmentServiceId) && Boolean(staffId) && Boolean(selectedDate),
+    staleTime: 15 * 1000,
+  });
+
+  const moveMutation = useMutation({
+    mutationFn: async () => {
+      if (!appointment) {
+        throw new Error('Липсва резервация за преместване.');
+      }
+
+      const [year, month, day] = selectedDate.split('-').map(Number);
+      const [hours, minutes] = selectedSlot.split(':').map(Number);
+      const startAt = new Date(year, month - 1, day, hours, minutes, 0, 0).toISOString();
+      await apiClient.patch(`/appointments/${appointment.id}/reschedule`, { startAt, staffId });
+      return startAt;
+    },
+    onSuccess: (startAt) => {
+      toast.success('Часът е преместен.');
+      queryClient.invalidateQueries({ queryKey: ['appointment-context'] });
+      queryClient.invalidateQueries({ queryKey: ['appointments-calendar-board'] });
+      queryClient.invalidateQueries({ queryKey: ['appointments-upcoming'] });
+      onMoved(startAt);
+    },
+    onError: (error: any) => {
+      toast.error(error?.message || 'Неуспешно преместване на часа.');
+    },
+  });
+
+  if (!open || !appointment) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/45 p-4">
+      <div className="mx-auto flex h-full max-w-xl items-center justify-center">
+        <div className="w-full max-h-[92vh] overflow-y-auto rounded-[28px] border border-gray-100 bg-white shadow-2xl">
+          <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-gray-100 bg-white px-5 py-5">
+            <div>
+              <h3 className="text-xl font-black text-gray-900">Премести час</h3>
+              <p className="mt-1 text-sm text-gray-500">
+                Избери нов специалист, дата и свободен слот за {appointment.client_name}.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="space-y-5 p-5">
+            <div className="rounded-2xl border border-gray-100 bg-gray-50/80 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Текущ запис</p>
+              <p className="mt-2 text-sm font-black text-gray-900">{appointment.client_name}</p>
+              <p className="mt-1 text-sm text-gray-600">{appointment.service_name}</p>
+              <p className="mt-1 text-xs text-gray-500">
+                {formatAppointmentDay(appointment.start_at)} · {appointment.staff_name}
+              </p>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="mb-1.5 block text-sm font-semibold text-gray-700">Специалист</label>
+                <select
+                  value={staffId}
+                  onChange={(event) => {
+                    setStaffId(event.target.value);
+                    setSelectedSlot('');
+                  }}
+                  className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-[var(--color-primary)]"
+                >
+                  <option value="">{staffLoading ? 'Зареждане...' : 'Изберете специалист'}</option>
+                  {staffOptions?.map((member) => (
+                    <option key={member.id} value={member.id}>
+                      {member.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-sm font-semibold text-gray-700">Дата</label>
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(event) => {
+                    setSelectedDate(event.target.value);
+                    setSelectedSlot('');
+                  }}
+                  className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-[var(--color-primary)]"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-sm font-semibold text-gray-700">Свободни слотове</label>
+              <div className="min-h-[84px] rounded-2xl border border-gray-200 bg-gray-50 p-3">
+                {!staffId || !selectedDate ? (
+                  <p className="text-sm text-gray-400">Избери специалист и дата.</p>
+                ) : slotsLoading ? (
+                  <div className="flex justify-center py-4">
+                    <Loader2 className="h-5 w-5 animate-spin text-[var(--color-primary)]" />
+                  </div>
+                ) : !slots?.length ? (
+                  <p className="text-sm text-gray-400">Няма свободни слотове за този ден.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {slots.map((slot) => (
+                      <button
+                        key={slot.start}
+                        type="button"
+                        onClick={() => setSelectedSlot(slot.start)}
+                        className={`rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
+                          selectedSlot === slot.start
+                            ? 'bg-[var(--color-primary)] text-white'
+                            : 'border border-gray-200 bg-white text-gray-700 hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]'
+                        }`}
+                      >
+                        {slot.start}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-2xl border border-gray-200 px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+              >
+                Отказ
+              </button>
+              <button
+                type="button"
+                disabled={!staffId || !selectedDate || !selectedSlot || moveMutation.isPending}
+                onClick={() => moveMutation.mutate()}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[var(--color-primary)] px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {moveMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+                Запази новия час
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

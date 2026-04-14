@@ -2,7 +2,7 @@
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format, addDays, subDays, isToday, startOfDay, endOfDay, startOfWeek, endOfWeek, eachDayOfInterval, isSameDay, differenceInMinutes } from 'date-fns';
+import { format, addDays, subDays, isToday, startOfDay, endOfDay, startOfWeek, endOfWeek, eachDayOfInterval, isSameDay, differenceInMinutes, startOfMonth, endOfMonth } from 'date-fns';
 import { bg } from 'date-fns/locale';
 import {
   Ban,
@@ -491,7 +491,7 @@ export default function AdminCalendarPage() {
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [touchMoveTarget, setTouchMoveTarget] = useState<MoveTarget | null>(null);
   const [pendingTouchPlacement, setPendingTouchPlacement] = useState<{ startAt: string; staffId: string } | null>(null);
-  const [calendarView, setCalendarView] = useState<'grid' | 'list' | 'week'>('grid');
+  const [calendarView, setCalendarView] = useState<'grid' | 'list' | 'week' | 'month'>('grid');
   const [calendarZoom, setCalendarZoom] = useState<'compact' | 'comfortable' | 'precise'>('comfortable');
   const [staffFilter, setStaffFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'requests' | 'booked' | 'cancelled'>('all');
@@ -539,13 +539,20 @@ export default function AdminCalendarPage() {
   });
   const dateKey = format(currentDate, 'yyyy-MM-dd');
   const rangeStart = useMemo(
-    () => (calendarView === 'week' ? startOfWeek(currentDate, { weekStartsOn: 1 }) : startOfDay(currentDate)),
+    () =>
+      calendarView === 'week'
+        ? startOfWeek(currentDate, { weekStartsOn: 1 })
+        : calendarView === 'month'
+          ? startOfWeek(startOfMonth(currentDate), { weekStartsOn: 1 })
+          : startOfDay(currentDate),
     [calendarView, currentDate],
   );
   const rangeEndExclusive = useMemo(
     () =>
       calendarView === 'week'
         ? addDays(endOfWeek(currentDate, { weekStartsOn: 1 }), 1)
+        : calendarView === 'month'
+          ? addDays(endOfWeek(endOfMonth(currentDate), { weekStartsOn: 1 }), 1)
         : addDays(endOfDay(currentDate), 1),
     [calendarView, currentDate],
   );
@@ -965,7 +972,7 @@ export default function AdminCalendarPage() {
   );
   const appointmentsInView = useMemo(
     () =>
-      calendarView === 'week'
+      calendarView === 'week' || calendarView === 'month'
         ? sortByStartAt(
             appointments.filter(
               (item) =>
@@ -1010,6 +1017,16 @@ export default function AdminCalendarPage() {
       calendarView === 'week'
         ? eachDayOfInterval({ start: startOfWeek(currentDate, { weekStartsOn: 1 }), end: endOfWeek(currentDate, { weekStartsOn: 1 }) })
         : [currentDate],
+    [calendarView, currentDate],
+  );
+  const monthDays = useMemo(
+    () =>
+      calendarView === 'month'
+        ? eachDayOfInterval({
+            start: startOfWeek(startOfMonth(currentDate), { weekStartsOn: 1 }),
+            end: endOfWeek(endOfMonth(currentDate), { weekStartsOn: 1 }),
+          })
+        : [],
     [calendarView, currentDate],
   );
   const visibleStaffColumns = useMemo(
@@ -1138,7 +1155,39 @@ export default function AdminCalendarPage() {
       ),
     [appointments, calendarBoard?.exceptions, statusFilter, visibleStaffColumns, weekDays],
   );
+  const monthCells = useMemo(
+    () =>
+      monthDays.map((day) => {
+        const dayAppointments = sortByStartAt(
+          appointments.filter(
+            (appointment) =>
+              isSameDay(new Date(appointment.start_at), day) &&
+              (staffFilter === 'all' ? true : appointment.staff_id === staffFilter) &&
+              matchesCalendarStatusFilter(appointment, statusFilter),
+          ),
+        );
+
+        const requests = dayAppointments.filter((appointment) =>
+          ['pending', 'requested'].includes(appointment.owner_view_state || appointment.status),
+        ).length;
+        const booked = dayAppointments.filter((appointment) =>
+          ['confirmed', 'approved', 'booked_direct'].includes(appointment.owner_view_state || appointment.status),
+        ).length;
+        const cancelled = dayAppointments.filter((appointment) =>
+          ['cancelled', 'rejected', 'cancelled_by_owner', 'cancelled_by_client', 'no_show'].includes(
+            appointment.owner_view_state || appointment.status,
+          ),
+        ).length;
+
+        return { day, appointments: dayAppointments, requests, booked, cancelled };
+      }),
+    [appointments, monthDays, staffFilter, statusFilter],
+  );
   const calendarTitle = useMemo(() => {
+    if (calendarView === 'month') {
+      return format(currentDate, "LLLL yyyy 'г.'", { locale: bg });
+    }
+
     if (calendarView !== 'week') {
       return format(currentDate, "d MMMM yyyy 'г.'", { locale: bg });
     }
@@ -1147,6 +1196,10 @@ export default function AdminCalendarPage() {
     return `${format(rangeStart, 'd MMM', { locale: bg })} – ${format(weekEnd, "d MMMM yyyy 'г.'", { locale: bg })}`;
   }, [calendarView, currentDate, rangeEndExclusive, rangeStart]);
   const calendarSubtitle = useMemo(() => {
+    if (calendarView === 'month') {
+      return 'Месечен преглед на натовареността';
+    }
+
     if (calendarView !== 'week') {
       return format(currentDate, 'EEEE', { locale: bg });
     }
@@ -1171,7 +1224,9 @@ export default function AdminCalendarPage() {
       title:
         calendarView === 'week'
           ? 'Няма записани часове за тази седмица'
-          : 'Няма записани часове за този ден',
+          : calendarView === 'month'
+            ? 'Няма записани часове за този месец'
+            : 'Няма записани часове за този ден',
       description: 'Изберете друга дата или добавете ръчна резервация.',
     };
   }, [appointmentsInView.length, calendarView, staffFilter, statusFilter, visibleExceptions.length]);
@@ -2134,9 +2189,9 @@ export default function AdminCalendarPage() {
 	                      <Rows3 className="h-4 w-4" />
 	                      Списък
 	                    </button>
-	                    <button
-	                      type="button"
-	                      onClick={() => setCalendarView('week')}
+		                    <button
+		                      type="button"
+		                      onClick={() => setCalendarView('week')}
 	                      className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
 	                        calendarView === 'week'
 	                          ? 'bg-[var(--color-primary)] text-white shadow-lg shadow-[var(--color-primary)]/20'
@@ -2146,7 +2201,19 @@ export default function AdminCalendarPage() {
 		                      <CalendarDays className="h-4 w-4" />
 		                      Седмица
 		                    </button>
-		                  </div>
+                        <button
+                          type="button"
+                          onClick={() => setCalendarView('month')}
+                          className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
+                            calendarView === 'month'
+                              ? 'bg-[var(--color-primary)] text-white shadow-lg shadow-[var(--color-primary)]/20'
+                              : 'text-gray-600'
+                          }`}
+                        >
+                          <CalendarDays className="h-4 w-4" />
+                          Месец
+                        </button>
+			                  </div>
                       <div className="flex w-full items-center rounded-2xl border border-gray-200 bg-white p-1 sm:w-auto">
                         {[
                           { key: 'compact', label: 'Стегнат' },
@@ -2176,13 +2243,21 @@ export default function AdminCalendarPage() {
                         Заявки ({actionItems.length})
                       </button>
 	                  <button
-	                    onClick={() => setCurrentDate(subDays(currentDate, calendarView === 'week' ? 7 : 1))}
+		                    onClick={() =>
+                          setCurrentDate(
+                            subDays(currentDate, calendarView === 'week' ? 7 : calendarView === 'month' ? 30 : 1),
+                          )
+                        }
 	                    className="flex h-11 w-11 items-center justify-center rounded-2xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
 	                  >
                     <ChevronLeft className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={() => setCurrentDate(addDays(currentDate, calendarView === 'week' ? 7 : 1))}
+                    onClick={() =>
+                      setCurrentDate(
+                        addDays(currentDate, calendarView === 'week' ? 7 : calendarView === 'month' ? 30 : 1),
+                      )
+                    }
                     className="flex h-11 w-11 items-center justify-center rounded-2xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
                   >
                     <ChevronRight className="w-4 h-4" />
@@ -2230,7 +2305,7 @@ export default function AdminCalendarPage() {
 		              <div className="flex flex-wrap gap-2">
 		                <div className="rounded-2xl border border-white/70 bg-white/90 px-3 py-2 shadow-sm">
 		                  <p className="text-base font-black text-gray-900">{appointmentsInView.length}</p>
-		                  <p className="text-[11px] text-gray-500">{calendarView === 'week' ? 'записа' : 'за деня'}</p>
+		                  <p className="text-[11px] text-gray-500">{calendarView === 'week' ? 'записа' : calendarView === 'month' ? 'за месеца' : 'за деня'}</p>
 		                </div>
 		                <div className="rounded-2xl border border-white/70 bg-white/90 px-3 py-2 shadow-sm">
 		                  <p className="text-base font-black text-emerald-700">{confirmedInView}</p>
@@ -2408,7 +2483,79 @@ export default function AdminCalendarPage() {
 	                              {mobileBoardStaff.map((staffMember) => renderCompactStaffBoard(staffMember))}
 	                            </div>
 	                          )}
-	                          {calendarView === 'week' ? (
+                            {calendarView === 'month' ? (
+                              <div className="rounded-[28px] border border-white/70 bg-white/90 p-3 shadow-sm">
+                                <div className="mb-3 grid grid-cols-7 gap-2 px-1">
+                                  {['Пон', 'Вт', 'Сря', 'Чет', 'Пет', 'Съб', 'Нед'].map((label) => (
+                                    <div key={label} className="px-2 py-1 text-center text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
+                                      {label}
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="grid grid-cols-7 gap-2">
+                                  {monthCells.map((cell) => {
+                                    const isCurrentMonth = cell.day.getMonth() === currentDate.getMonth();
+                                    const isSelectedDay = isSameDay(cell.day, currentDate);
+                                    return (
+                                      <button
+                                        key={cell.day.toISOString()}
+                                        type="button"
+                                        onClick={() => {
+                                          setCurrentDate(cell.day);
+                                          setCalendarView('grid');
+                                        }}
+                                        className={`min-h-[136px] rounded-[22px] border p-3 text-left transition ${
+                                          isSelectedDay
+                                            ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/8 shadow-sm'
+                                            : 'border-gray-200 bg-white hover:border-[var(--color-primary)]/25 hover:bg-gray-50/80'
+                                        } ${!isCurrentMonth ? 'opacity-45' : ''}`}
+                                      >
+                                        <div className="flex items-center justify-between gap-2">
+                                          <span className={`text-sm font-black ${isToday(cell.day) ? 'text-[var(--color-primary)]' : 'text-gray-900'}`}>
+                                            {format(cell.day, 'd')}
+                                          </span>
+                                          <span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-semibold text-gray-500">
+                                            {cell.appointments.length}
+                                          </span>
+                                        </div>
+                                        <div className="mt-3 flex flex-wrap gap-1.5">
+                                          {cell.requests > 0 && (
+                                            <span className="rounded-full bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">
+                                              {cell.requests} заявки
+                                            </span>
+                                          )}
+                                          {cell.booked > 0 && (
+                                            <span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700">
+                                              {cell.booked} запазени
+                                            </span>
+                                          )}
+                                          {cell.cancelled > 0 && (
+                                            <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-600">
+                                              {cell.cancelled} вторични
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="mt-3 space-y-1.5">
+                                          {cell.appointments.slice(0, 3).map((appointment) => (
+                                            <div
+                                              key={appointment.id}
+                                              className="truncate rounded-xl border border-gray-100 bg-gray-50/80 px-2 py-1.5 text-[11px] font-semibold text-gray-700"
+                                            >
+                                              {format(new Date(appointment.start_at), 'HH:mm')} · {appointment.client_name}
+                                            </div>
+                                          ))}
+                                          {cell.appointments.length > 3 && (
+                                            <div className="text-[11px] font-semibold text-gray-400">
+                                              +{cell.appointments.length - 3} още
+                                            </div>
+                                          )}
+                                        </div>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ) : calendarView === 'week' ? (
 	                        <div className="hidden lg:block overflow-x-auto rounded-[28px] border border-white/70 bg-white/90 shadow-sm">
                           <div
                             className="grid min-w-[1480px]"
@@ -2681,7 +2828,9 @@ export default function AdminCalendarPage() {
                                       onClick={() => focusRecord(appointment.id, appointment.start_at)}
                                       className={`absolute left-2 right-2 z-[2] rounded-2xl border px-3 py-2 text-left shadow-sm transition-transform hover:scale-[1.01] ${
                                         isSelected ? 'ring-2 ring-[var(--color-primary)]/25' : ''
-                                      } ${isSecondary ? 'opacity-45 saturate-50' : ''} overflow-hidden`}
+                                      } ${isSecondary ? 'opacity-45 saturate-50' : ''} ${
+                                        draggedAppointmentId === appointment.id ? 'opacity-20 scale-[0.99]' : ''
+                                      } overflow-hidden`}
                                       style={{
                                         top: `${top}px`,
                                         height: `${height}px`,
@@ -2977,7 +3126,9 @@ export default function AdminCalendarPage() {
 	                                      onTouchCancel={clearLongPressTimer}
 			                                    className={`absolute left-2 right-2 z-[2] rounded-2xl border px-3 py-2 text-left shadow-sm transition-transform hover:scale-[1.01] ${
 			                                      isSelected ? 'ring-2 ring-[var(--color-primary)]/25' : ''
-			                                    } ${isSecondary ? 'opacity-45 saturate-50' : ''} overflow-hidden`}
+			                                    } ${isSecondary ? 'opacity-45 saturate-50' : ''} ${
+                                        draggedAppointmentId === appointment.id ? 'opacity-20 scale-[0.99]' : ''
+                                      } overflow-hidden`}
 		                                    style={{
 		                                      top: `${top}px`,
 		                                      height: `${height}px`,

@@ -605,15 +605,12 @@ export class TenantController {
       accentColor: dto.accentColor || currentTheme.accentColor || dto.primaryColor,
       borderRadius: dto.borderRadius,
       surfaceStyle: dto.surfaceStyle || currentTheme.surfaceStyle || 'light',
-      logoUrl: this.nullable(dto.logoUrl),
-      coverImageUrl: this.nullable(dto.coverImageUrl),
-      faviconUrl: this.nullable(dto.faviconUrl),
+      logoUrl: this.resolveThemeAsset(dto.logoUrl, currentTheme.logoUrl),
+      coverImageUrl: this.resolveThemeAsset(dto.coverImageUrl, currentTheme.coverImageUrl),
+      faviconUrl: this.resolveThemeAsset(dto.faviconUrl, currentTheme.faviconUrl),
       coverText: this.nullable(dto.coverText),
       logoShape: dto.logoShape || currentTheme.logoShape || 'rounded',
-      poweredByText:
-        this.nullable(dto.poweredByText) ||
-        currentTheme.poweredByText ||
-        'Powered by SalonIQ',
+      poweredByText: currentTheme.poweredByText || 'Powered by SalonIQ',
       serviceCategories: this.normalizeServiceCategories(dto.serviceCategories ?? currentTheme.serviceCategories),
     };
 
@@ -1153,12 +1150,120 @@ export class TenantController {
       return palette[0];
     }
 
-    const index = categories.findIndex((entry) => entry === normalizedCategory);
+    const nextCategories = this.normalizeServiceCategories([...categories, normalizedCategory]);
+    const index = nextCategories.findIndex((entry) => entry === normalizedCategory);
     return palette[Math.max(index, 0) % palette.length];
   }
 
   private buildThemeCategoryPalette(primary: string, secondary: string) {
-    return [primary, secondary, '#22c55e', '#f59e0b', '#ec4899', '#3b82f6', '#8b5cf6', '#14b8a6'];
+    const primaryHsl = this.hexToHsl(primary) || { h: 265, s: 74, l: 55 };
+    const secondaryHsl = this.hexToHsl(secondary) || { h: 290, s: 68, l: 62 };
+    const hues = [
+      primaryHsl.h,
+      secondaryHsl.h,
+      primaryHsl.h + 18,
+      secondaryHsl.h - 18,
+      primaryHsl.h + 36,
+      secondaryHsl.h + 24,
+      primaryHsl.h - 24,
+      secondaryHsl.h + 46,
+      primaryHsl.h + 58,
+      secondaryHsl.h - 42,
+    ];
+
+    return hues.map((hue, index) =>
+      this.hslToHex({
+        h: this.normalizeHue(hue),
+        s: this.clamp(primaryHsl.s + (index % 2 === 0 ? 2 : -4), 58, 78),
+        l: this.clamp(54 + ((index % 4) - 1.5) * 4, 42, 66),
+      }),
+    );
+  }
+
+  private resolveThemeAsset(value: string | undefined | null, currentValue: string | null | undefined) {
+    if (value === '__REMOVE_ASSET__') return null;
+    if (value === undefined) return currentValue ?? null;
+    const normalized = this.nullable(value);
+    if (normalized === null) {
+      return currentValue ?? null;
+    }
+    return normalized;
+  }
+
+  private hexToHsl(hex: string) {
+    const rgb = this.parseHex(hex);
+    if (!rgb) return null;
+    const r = rgb.r / 255;
+    const g = rgb.g / 255;
+    const b = rgb.b / 255;
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const delta = max - min;
+    let h = 0;
+    const l = (max + min) / 2;
+    const s = delta === 0 ? 0 : delta / (1 - Math.abs(2 * l - 1));
+
+    if (delta !== 0) {
+      if (max === r) h = ((g - b) / delta) % 6;
+      else if (max === g) h = (b - r) / delta + 2;
+      else h = (r - g) / delta + 4;
+    }
+
+    return {
+      h: this.normalizeHue(h * 60),
+      s: Math.round(s * 100),
+      l: Math.round(l * 100),
+    };
+  }
+
+  private hslToHex({ h, s, l }: { h: number; s: number; l: number }) {
+    const saturation = s / 100;
+    const lightness = l / 100;
+    const c = (1 - Math.abs(2 * lightness - 1)) * saturation;
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = lightness - c / 2;
+    let r = 0;
+    let g = 0;
+    let b = 0;
+
+    if (h < 60) [r, g, b] = [c, x, 0];
+    else if (h < 120) [r, g, b] = [x, c, 0];
+    else if (h < 180) [r, g, b] = [0, c, x];
+    else if (h < 240) [r, g, b] = [0, x, c];
+    else if (h < 300) [r, g, b] = [x, 0, c];
+    else [r, g, b] = [c, 0, x];
+
+    return `#${[r, g, b]
+      .map((channel) => Math.round((channel + m) * 255).toString(16).padStart(2, '0'))
+      .join('')}`;
+  }
+
+  private parseHex(value: string) {
+    const normalized = value.trim();
+    if (/^#[0-9a-f]{6}$/i.test(normalized)) {
+      return {
+        r: parseInt(normalized.slice(1, 3), 16),
+        g: parseInt(normalized.slice(3, 5), 16),
+        b: parseInt(normalized.slice(5, 7), 16),
+      };
+    }
+    if (/^#[0-9a-f]{3}$/i.test(normalized)) {
+      return {
+        r: parseInt(`${normalized[1]}${normalized[1]}`, 16),
+        g: parseInt(`${normalized[2]}${normalized[2]}`, 16),
+        b: parseInt(`${normalized[3]}${normalized[3]}`, 16),
+      };
+    }
+    return null;
+  }
+
+  private normalizeHue(value: number) {
+    const normalized = value % 360;
+    return normalized < 0 ? normalized + 360 : normalized;
+  }
+
+  private clamp(value: number, min: number, max: number) {
+    return Math.min(max, Math.max(min, value));
   }
 
   private async persistTelegramCredentialsFromAction(

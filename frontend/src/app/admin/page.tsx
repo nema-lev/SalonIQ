@@ -226,6 +226,8 @@ const SECONDARY_OWNER_STATES = [
   'cancelled_by_client',
 ] as const;
 
+const CALENDAR_SLOT_MINUTES = 15;
+
 type InboxBucket = 'actions' | 'updates';
 
 interface InboxItemView extends UpcomingAppointment {
@@ -974,15 +976,15 @@ export default function AdminCalendarPage() {
     if (minutes < startMinutes || minutes > endMinutes) return null;
     return ((minutes - startMinutes) / 60) * pixelsPerHour;
   }, [calendarRange.endHour, calendarRange.startHour, currentDate]);
-  const halfHourDropSlots = useMemo(
+  const moveDropSlots = useMemo(
     () =>
-      Array.from({ length: (calendarRange.endHour - calendarRange.startHour) * 2 }, (_, index) => {
-        const totalMinutes = calendarRange.startHour * 60 + index * 30;
+      Array.from({ length: (calendarRange.endHour - calendarRange.startHour) * (60 / CALENDAR_SLOT_MINUTES) }, (_, index) => {
+        const totalMinutes = calendarRange.startHour * 60 + index * CALENDAR_SLOT_MINUTES;
         const hour = Math.floor(totalMinutes / 60);
         const minute = totalMinutes % 60;
         return {
           key: `${hour}-${minute}`,
-          top: index * (pixelsPerHour / 2),
+          top: index * (pixelsPerHour / (60 / CALENDAR_SLOT_MINUTES)),
           label: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
         };
       }),
@@ -1045,21 +1047,6 @@ export default function AdminCalendarPage() {
       ),
     [appointments, calendarBoard?.exceptions, statusFilter, visibleStaffColumns, weekDays],
   );
-  const matchingWaitlistEntries = useMemo(() => {
-    if (selectedContext?.waitlist_candidates?.length) {
-      return selectedContext.waitlist_candidates;
-    }
-
-    if (!detailedAppointment) {
-      return activeWaitlistEntries;
-    }
-
-    return activeWaitlistEntries.filter(
-      (entry) =>
-        entry.service_id === detailedAppointment.service_id &&
-        (!entry.staff_id || entry.staff_id === detailedAppointment.staff_id),
-    );
-  }, [activeWaitlistEntries, detailedAppointment, selectedContext?.waitlist_candidates]);
   const calendarTitle = useMemo(() => {
     if (calendarView !== 'week') {
       return format(currentDate, "d MMMM yyyy 'г.'", { locale: bg });
@@ -1185,12 +1172,11 @@ export default function AdminCalendarPage() {
   const focusRecord = (id: string, startAt: string) => {
     setSelectedRecordId(id);
     setCurrentDate(new Date(startAt));
-    if (typeof window !== 'undefined' && window.innerWidth >= 1024) {
-      setShowDesktopDetails(true);
-      setShowMobileDetails(false);
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      setShowMobileDetails(true);
       return;
     }
-    setShowMobileDetails(true);
+    setShowMobileDetails(false);
   };
 
   useEffect(() => {
@@ -1200,20 +1186,20 @@ export default function AdminCalendarPage() {
       setResizingBlock((current) => {
         if (!current) return current;
 
-        const snappedHalfHours = Math.round(
-          Math.min(Math.max(event.clientY - current.columnTop, 0), current.columnHeight) / (pixelsPerHour / 2),
+        const snappedQuarterSteps = Math.round(
+          Math.min(Math.max(event.clientY - current.columnTop, 0), current.columnHeight) / (pixelsPerHour / (60 / CALENDAR_SLOT_MINUTES)),
         );
-        const totalMinutes = calendarRange.startHour * 60 + snappedHalfHours * 30;
+        const totalMinutes = calendarRange.startHour * 60 + snappedQuarterSteps * CALENDAR_SLOT_MINUTES;
         const nextPoint = new Date(current.dayIso);
         nextPoint.setHours(Math.floor(totalMinutes / 60), totalMinutes % 60, 0, 0);
 
         if (current.edge === 'start') {
-          const latestAllowed = new Date(new Date(current.previewEndAt).getTime() - 30 * 60 * 1000);
+          const latestAllowed = new Date(new Date(current.previewEndAt).getTime() - CALENDAR_SLOT_MINUTES * 60 * 1000);
           if (nextPoint >= latestAllowed) return current;
           return { ...current, previewStartAt: nextPoint.toISOString() };
         }
 
-        const earliestAllowed = new Date(new Date(current.previewStartAt).getTime() + 30 * 60 * 1000);
+        const earliestAllowed = new Date(new Date(current.previewStartAt).getTime() + CALENDAR_SLOT_MINUTES * 60 * 1000);
         if (nextPoint <= earliestAllowed) return current;
         return { ...current, previewEndAt: nextPoint.toISOString() };
       });
@@ -1290,21 +1276,6 @@ export default function AdminCalendarPage() {
     };
   };
 
-  const prefillBlockAroundAppointment = (appointment: Appointment, offsetMinutes: 0 | 30 = 30) => {
-    const start = new Date(appointment.end_at);
-    const end = new Date(start.getTime() + offsetMinutes * 60 * 1000);
-    setEditingBlockId(null);
-    setBlockDraft({
-      staffId: appointment.staff_id,
-      date: format(new Date(appointment.start_at), 'yyyy-MM-dd'),
-      startTime: format(start, 'HH:mm'),
-      endTime: format(end, 'HH:mm'),
-      type: 'blocked',
-      note: 'Буфер след часа',
-    });
-    setShowBlockEditor(true);
-  };
-
   const prefillWaitlistFromAppointment = (appointment: Appointment) => {
     setWaitlistDraft({
       clientName: appointment.client_name,
@@ -1315,7 +1286,7 @@ export default function AdminCalendarPage() {
       desiredDate: format(new Date(appointment.start_at), 'yyyy-MM-dd'),
       desiredFrom: format(new Date(appointment.start_at), 'HH:mm'),
       desiredTo: format(new Date(appointment.end_at), 'HH:mm'),
-      notes: `Чака при освобождаване на слот за ${appointment.service_name}.`,
+      notes: `Резервен клиент при освобождаване на слот за ${appointment.service_name}.`,
     });
     setShowWaitlistModal(true);
   };
@@ -1534,13 +1505,13 @@ export default function AdminCalendarPage() {
               </div>
             ))}
 
-            {compactHourSlots.slice(0, -1).map((hour) => {
-              const top = (hour - compactCalendarRange.startHour) * compactPixelsPerHour;
+            {moveDropSlots.map((slot) => {
+              const [, minute] = slot.label.split(':').map(Number);
               return (
                 <div
-                  key={`${staffMember.id}-line-${hour}`}
-                  className="absolute left-0 right-0 border-t border-gray-100"
-                  style={{ top: `${top}px` }}
+                  key={`${staffMember.id}-line-${slot.key}`}
+                  className={`absolute left-0 right-0 ${minute === 0 ? 'border-t border-gray-100' : 'border-t border-dashed border-gray-100/80'}`}
+                  style={{ top: `${slot.top}px` }}
                 />
               );
             })}
@@ -1549,7 +1520,7 @@ export default function AdminCalendarPage() {
               compactHourSlots
                 .slice(0, -1)
                 .flatMap((hour) =>
-                  [0, 30].map((minute) => {
+                  [0, 15, 30, 45].map((minute) => {
                     const minutesFromStart = hour * 60 + minute - compactCalendarRange.startHour * 60;
                     if (
                       minutesFromStart < 0 ||
@@ -1567,11 +1538,11 @@ export default function AdminCalendarPage() {
                         key={`${staffMember.id}-touch-slot-${hour}-${minute}`}
                         type="button"
                         onClick={() => handleDropReschedule(touchMoveTarget.id, nextStart.toISOString(), staffMember.id)}
-                        className="absolute left-0 right-0 z-[1] border-t border-dashed border-[var(--color-primary)]/20 bg-[var(--color-primary)]/5 text-left"
-                        style={{ top: `${top}px`, height: `${compactPixelsPerHour / 2}px` }}
+                        className="absolute left-0 right-0 z-[1] border border-dashed border-[var(--color-primary)]/30 bg-[var(--color-primary)]/8 text-left transition-colors hover:bg-[var(--color-primary)]/12"
+                        style={{ top: `${top}px`, height: `${compactPixelsPerHour / (60 / CALENDAR_SLOT_MINUTES)}px` }}
                       >
-                        <span className="absolute right-2 top-1 rounded-full bg-white/95 px-2 py-1 text-[10px] font-semibold text-[var(--color-primary)] shadow-sm">
-                          Премести тук
+                        <span className="absolute left-2 top-1 rounded-full bg-white/95 px-2 py-1 text-[10px] font-semibold text-[var(--color-primary)] shadow-sm">
+                          {format(nextStart, 'HH:mm')}
                         </span>
                       </button>
                     );
@@ -1682,7 +1653,7 @@ export default function AdminCalendarPage() {
                   onClick={() => prefillWaitlistFromAppointment(detailedAppointment)}
                   className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-semibold text-amber-700 hover:bg-amber-100"
                 >
-                  В чакащи
+                  Резервен списък
                 </button>
               )}
               {!['completed', 'cancelled', 'no_show'].includes(detailedAppointment.status) && (
@@ -1692,15 +1663,6 @@ export default function AdminCalendarPage() {
                   className="rounded-2xl border border-sky-200 bg-sky-50 px-3 py-3 text-sm font-semibold text-sky-700 hover:bg-sky-100"
                 >
                   Премести
-                </button>
-              )}
-              {detailedAppointment.status === 'confirmed' && (
-                <button
-                  type="button"
-                  onClick={() => prefillBlockAroundAppointment(detailedAppointment)}
-                  className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-                >
-                  Буфер след часа
                 </button>
               )}
               {detailedAppointment.status === 'confirmed' && (
@@ -1786,120 +1748,6 @@ export default function AdminCalendarPage() {
                   Първо въведено име: {selectedContext.appointment.original_client_name}
                 </p>
               )}
-          </div>
-        )}
-
-        {selectedContext?.delivery_profile && (
-          <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Канали</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <span
-                className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${
-                  selectedContext.delivery_profile.owner_telegram
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                    : 'border-gray-200 bg-gray-50 text-gray-500'
-                }`}
-              >
-                Собственик Telegram
-              </span>
-              <span
-                className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${
-                  selectedContext.delivery_profile.client_telegram
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                    : 'border-gray-200 bg-gray-50 text-gray-500'
-                }`}
-              >
-                Клиент Telegram
-              </span>
-              <span
-                className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${
-                  selectedContext.delivery_profile.client_sms_fallback
-                    ? 'border-sky-200 bg-sky-50 text-sky-700'
-                    : 'border-gray-200 bg-gray-50 text-gray-500'
-                }`}
-              >
-                Резервен SMS
-              </span>
-              <span
-                className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${
-                  selectedContext.delivery_profile.client_consent
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                    : 'border-rose-200 bg-rose-50 text-rose-700'
-                }`}
-              >
-                {selectedContext.delivery_profile.client_consent ? 'Има consent' : 'Няма consent'}
-              </span>
-            </div>
-          </div>
-        )}
-
-        {matchingWaitlistEntries.length > 0 && (
-          <div className="rounded-3xl border border-gray-100 bg-white/80 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Waitlist</p>
-                <h4 className="mt-1 text-sm font-black text-gray-900">Резервен списък за услугата</h4>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowWaitlistModal(true)}
-                className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50"
-              >
-                Отвори списъка
-              </button>
-            </div>
-
-            <div className="mt-4 space-y-3">
-              {matchingWaitlistEntries.slice(0, 2).map((entry) => {
-                const status = getWaitlistStatusPresentation(entry.status);
-                return (
-                  <div key={entry.id} className="rounded-2xl border border-gray-100 bg-gray-50/80 px-3 py-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-gray-900">{entry.client_name}</p>
-                        <p className="mt-1 text-xs text-gray-500">
-                          {entry.service_name}
-                          {entry.staff_name ? ` · ${entry.staff_name}` : ''}
-                        </p>
-                      </div>
-                      <span className={`rounded-full border px-2 py-1 text-[10px] font-bold ${status.cls}`}>
-                        {status.label}
-                      </span>
-                    </div>
-                    <p className="mt-2 text-xs text-gray-500">{formatBulgarianPhoneForDisplay(entry.client_phone)}</p>
-                    {entry.desired_date && (
-                      <p className="mt-1 text-xs text-gray-500">
-                        Желан слот: {entry.desired_date}
-                        {entry.desired_from ? ` · ${entry.desired_from.slice(0, 5)}` : ''}
-                      </p>
-                    )}
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          waitlistNotifyMutation.mutate({
-                            id: entry.id,
-                            slotStartAt: detailedAppointment?.start_at || entry.last_notified_slot_start_at || null,
-                            slotStaffId: detailedAppointment?.staff_id || entry.staff_id || null,
-                            appointmentId: detailedAppointment?.id || null,
-                          })
-                        }
-                        className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-100"
-                      >
-                        Изпрати слот
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => waitlistStatusMutation.mutate({ id: entry.id, status: 'booked', bookedAppointmentId: detailedAppointment?.id || null })}
-                        className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
-                      >
-                        Маркирай записан
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
           </div>
         )}
 
@@ -2007,7 +1855,7 @@ export default function AdminCalendarPage() {
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="grid gap-5">
         <section className="min-w-0">
           <div className="glass-panel rounded-[32px] border border-white/60 p-4 shadow-xl shadow-black/5 sm:p-5">
             <div className="flex flex-col gap-3 border-b border-gray-100 pb-4">
@@ -2064,7 +1912,8 @@ export default function AdminCalendarPage() {
                       <button
                         type="button"
                         onClick={() => setShowDesktopDetails((current) => !current)}
-                        className="hidden h-11 items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 lg:inline-flex xl:hidden"
+                        disabled={!selectedRecordId}
+                        className="hidden h-11 items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-45 lg:inline-flex"
                       >
                         <ClipboardList className="h-4 w-4" />
                         {showDesktopDetails ? 'Скрий детайли' : 'Покажи детайли'}
@@ -2124,7 +1973,7 @@ export default function AdminCalendarPage() {
                     className="inline-flex items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700 hover:bg-amber-100"
                   >
                     <ClipboardList className="w-4 h-4" />
-                    Чакащи ({activeWaitlistEntries.length})
+                    Резервен списък ({activeWaitlistEntries.length})
                   </button>
                 </div>
               </div>
@@ -2293,7 +2142,7 @@ export default function AdminCalendarPage() {
 	                                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 	                                    <div>
 	                                      <p className="font-semibold">Изберете нов слот за {touchMoveTarget.client_name}</p>
-	                                      <p className="text-xs text-sky-700/80">Докоснете свободен half-hour слот в графика.</p>
+	                                      <p className="text-xs text-sky-700/80">Докоснете точния 15-минутен слот в графика.</p>
 	                                    </div>
 	                                    <button
 	                                      type="button"
@@ -2468,7 +2317,7 @@ export default function AdminCalendarPage() {
                                   ));
                                 })()}
 
-                                {halfHourDropSlots.map((slot) => {
+                                {moveDropSlots.map((slot) => {
                                   const [hour, minute] = slot.label.split(':').map(Number);
                                   const nextStart = new Date(column.day);
                                   nextStart.setHours(hour, minute, 0, 0);
@@ -2478,10 +2327,10 @@ export default function AdminCalendarPage() {
                                       className={`absolute left-0 right-0 z-[1] transition-colors ${
                                         dropPreview?.staffId === column.staff.id &&
                                         dropPreview?.startAt === nextStart.toISOString()
-                                          ? 'bg-[var(--color-primary)]/8'
+                                          ? 'border border-[var(--color-primary)]/45 bg-[var(--color-primary)]/12 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.7)]'
                                           : ''
                                       }`}
-                                      style={{ top: `${slot.top}px`, height: `${pixelsPerHour / 2}px` }}
+                                      style={{ top: `${slot.top}px`, height: `${pixelsPerHour / (60 / CALENDAR_SLOT_MINUTES)}px` }}
                                       onDragOver={(event) => {
                                         if (!draggedAppointmentId) return;
                                         event.preventDefault();
@@ -2492,17 +2341,26 @@ export default function AdminCalendarPage() {
                                         if (!draggedAppointmentId) return;
                                         handleDropReschedule(draggedAppointmentId, nextStart.toISOString(), column.staff.id);
                                       }}
-                                    />
+                                    >
+                                      {dropPreview?.staffId === column.staff.id &&
+                                      dropPreview?.startAt === nextStart.toISOString() ? (
+                                        <span className="absolute left-2 top-1 rounded-full bg-white/95 px-2 py-1 text-[10px] font-bold text-[var(--color-primary)] shadow-sm">
+                                          {slot.label}
+                                        </span>
+                                      ) : null}
+                                    </div>
                                   );
                                 })}
 
-                                {hourSlots.slice(0, -1).map((hour) => {
-                                  const top = (hour - calendarRange.startHour) * pixelsPerHour;
+                                {moveDropSlots.map((slot) => {
+                                  const [, minute] = slot.label.split(':').map(Number);
                                   return (
                                     <div
-                                      key={hour}
-                                      className="absolute left-0 right-0 border-t border-gray-100"
-                                      style={{ top: `${top}px` }}
+                                      key={`line-${column.key}-${slot.key}`}
+                                      className={`absolute left-0 right-0 ${
+                                        minute === 0 ? 'border-t border-gray-100' : 'border-t border-dashed border-gray-100/80'
+                                      }`}
+                                      style={{ top: `${slot.top}px` }}
                                     />
                                   );
                                 })}
@@ -2715,17 +2573,17 @@ export default function AdminCalendarPage() {
                                 ));
                               })()}
 
-		                              {halfHourDropSlots.map((slot) => (
+		                              {moveDropSlots.map((slot) => (
 		                                <div
 		                                  key={`${staffMember.id}-${slot.key}`}
 		                                  className={`absolute left-0 right-0 z-[1] transition-colors ${
 		                                    dropPreview?.staffId === staffMember.id &&
 		                                    dropPreview?.startAt &&
 		                                    format(new Date(dropPreview.startAt), 'HH:mm') === slot.label
-		                                      ? 'bg-[var(--color-primary)]/8'
+		                                      ? 'border border-[var(--color-primary)]/45 bg-[var(--color-primary)]/12 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.7)]'
 		                                      : ''
 		                                  }`}
-		                                  style={{ top: `${slot.top}px`, height: `${pixelsPerHour / 2}px` }}
+		                                  style={{ top: `${slot.top}px`, height: `${pixelsPerHour / (60 / CALENDAR_SLOT_MINUTES)}px` }}
 		                                  onDragOver={(event) => {
 		                                    if (!draggedAppointmentId) return;
 		                                    event.preventDefault();
@@ -2742,19 +2600,29 @@ export default function AdminCalendarPage() {
 		                                    nextStart.setHours(hour, minute, 0, 0);
 		                                    handleDropReschedule(draggedAppointmentId, nextStart.toISOString(), staffMember.id);
 		                                  }}
-		                                />
+		                                >
+                                      {dropPreview?.staffId === staffMember.id &&
+                                      dropPreview?.startAt &&
+                                      format(new Date(dropPreview.startAt), 'HH:mm') === slot.label ? (
+                                        <span className="absolute left-2 top-1 rounded-full bg-white/95 px-2 py-1 text-[10px] font-bold text-[var(--color-primary)] shadow-sm">
+                                          {slot.label}
+                                        </span>
+                                      ) : null}
+                                    </div>
 		                              ))}
 
-		                              {hourSlots.slice(0, -1).map((hour) => {
-		                                const top = (hour - calendarRange.startHour) * pixelsPerHour;
-		                                return (
+		                              {moveDropSlots.map((slot) => {
+                                  const [, minute] = slot.label.split(':').map(Number);
+                                  return (
 	                                  <div
-	                                    key={hour}
-	                                    className="absolute left-0 right-0 border-t border-gray-100"
-	                                    style={{ top: `${top}px` }}
+	                                    key={`line-${staffMember.id}-${slot.key}`}
+	                                    className={`absolute left-0 right-0 ${
+                                        minute === 0 ? 'border-t border-gray-100' : 'border-t border-dashed border-gray-100/80'
+                                      }`}
+	                                    style={{ top: `${slot.top}px` }}
 	                                  />
 	                                );
-	                              })}
+                                })}
 
 	                              {nowIndicatorOffset !== null && (
 	                                <div
@@ -2891,16 +2759,10 @@ export default function AdminCalendarPage() {
 
         </section>
 
-        <aside className="hidden xl:block">
-          <div className="glass-panel rounded-[28px] border border-white/60 p-5 shadow-xl shadow-black/5 xl:sticky xl:top-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Детайлен панел</p>
-            {renderDesktopDetailsPanel()}
-          </div>
-        </aside>
       </div>
 
       {showDesktopDetails && (selectedAppointment || selectedInboxItem) && (
-        <div className="fixed inset-0 z-30 hidden bg-black/20 lg:block xl:hidden" onClick={() => setShowDesktopDetails(false)}>
+        <div className="fixed inset-0 z-30 hidden bg-black/20 lg:block" onClick={() => setShowDesktopDetails(false)}>
           <div
             className="absolute inset-y-4 right-4 w-[340px] overflow-y-auto rounded-[28px] border border-white/70 bg-white/95 p-5 shadow-2xl shadow-black/10 backdrop-blur"
             onClick={(event) => event.stopPropagation()}
@@ -2919,13 +2781,6 @@ export default function AdminCalendarPage() {
           </div>
         </div>
       )}
-
-      <section className="hidden">
-        <div className="glass-panel rounded-[28px] border border-white/60 p-5 shadow-xl shadow-black/5">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Детайлен панел</p>
-          {renderDesktopDetailsPanel()}
-        </div>
-      </section>
 
       {selectedRecordId && !showMobileDetails && (
         <button

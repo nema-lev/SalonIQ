@@ -2,6 +2,7 @@
 
 import { Clock, MapPin, ExternalLink } from 'lucide-react';
 import { useTenant } from '@/lib/tenant-context';
+import { ClientUpcomingLookup } from './client-upcoming-lookup';
 
 const DAY_NAMES: Record<string, string> = {
   mon: 'Понеделник',
@@ -37,6 +38,8 @@ export function BusinessInfo() {
             'linear-gradient(90deg, transparent 0%, rgba(124,58,237,0.18) 20%, rgba(124,58,237,0.18) 80%, transparent 100%)',
         }}
       />
+
+      <ClientUpcomingLookup />
 
       {hasWorkingHours && (
         <div className="bg-white rounded-2xl border border-gray-100 p-5" style={{ background: 'var(--bg-card)', border: '1px solid var(--line-soft)', borderRadius: 28, padding: 22, boxShadow: 'var(--shadow-soft)', backdropFilter: 'blur(24px) saturate(140%)', WebkitBackdropFilter: 'blur(24px) saturate(140%)' }}>

@@ -630,10 +630,12 @@ export class NotificationProcessor extends WorkerHost {
     profileDataRaw: unknown,
   ) {
     const profileData = this.parseProfileData(profileDataRaw);
+    const submittedClientName =
+      typeof profileData.clientName === 'string' ? profileData.clientName.trim() : '';
     const originalClientName =
       typeof profileData.originalClientName === 'string' ? profileData.originalClientName.trim() : '';
-    const preferred = this.pickNonGenericName(currentName, originalClientName, salutation);
-    return preferred || currentName || salutation || 'Клиент';
+    const preferred = this.pickNonGenericName(currentName, originalClientName, submittedClientName, salutation);
+    return preferred || 'Клиент';
   }
 
   private parseProfileData(value: unknown) {

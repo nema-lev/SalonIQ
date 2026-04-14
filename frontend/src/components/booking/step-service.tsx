@@ -98,7 +98,7 @@ export function StepService({ onNext }: StepServiceProps) {
             <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3 px-1" style={{ margin: '0 0 12px', padding: '0 4px', fontSize: 12, fontWeight: 800, letterSpacing: '0.14em', color: '#8b84a6' }}>
               {category}
             </h3>
-            <div className="space-y-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 18 }}>
+            <div className="space-y-2" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 18, justifyItems: 'start' }}>
               {svcs.map((service) => (
                 <button
                   key={service.id}
@@ -109,6 +109,8 @@ export function StepService({ onNext }: StepServiceProps) {
                     active:scale-[0.99] transition-all duration-150 text-left group
                   "
                   style={{
+                    width: '100%',
+                    maxWidth: 360,
                     display: 'flex',
                     alignItems: 'stretch',
                     gap: 14,
@@ -120,7 +122,7 @@ export function StepService({ onNext }: StepServiceProps) {
                     textAlign: 'left',
                     cursor: 'pointer',
                     boxShadow: 'var(--shadow-soft)',
-                    minHeight: 152,
+                    minHeight: 132,
                     position: 'relative',
                     overflow: 'hidden',
                     backdropFilter: 'blur(24px) saturate(140%)',

@@ -81,20 +81,25 @@ export function TenantProvider({
   useEffect(() => {
     const theme = resolveTheme(tenantState.businessType, tenantState.theme);
     const root = document.documentElement;
+    const primarySoft = toRgba(theme.primaryColor, 0.12);
+    const secondarySoft = toRgba(theme.secondaryColor, 0.1);
+    const primaryGlow = toRgba(theme.primaryColor, 0.18);
+    const secondaryGlow = toRgba(theme.secondaryColor, 0.14);
+    const lightGradient = buildSoftSurfaceGradient(theme.primaryColor, theme.secondaryColor);
     const surfacePalettes = {
       light: {
-        bgSurface: '#f6f4ff',
+        bgSurface: '#f8fafc',
         bgCard: 'rgba(255,255,255,0.78)',
         textStrong: '#1c1535',
         textSoft: '#675f84',
-        lineSoft: 'rgba(124, 58, 237, 0.12)',
+        lineSoft: primarySoft,
         shadowSoft: '0 18px 48px rgba(73, 39, 142, 0.08)',
         shadowStrong: '0 28px 80px rgba(73, 39, 142, 0.18)',
-        bgOrb1: 'rgba(168, 85, 247, 0.18)',
-        bgOrb2: 'rgba(124, 58, 237, 0.14)',
-        bgGradientStart: '#faf8ff',
-        bgGradientMid: '#f6f4ff',
-        bgGradientEnd: '#f4f2fb',
+        bgOrb1: secondaryGlow,
+        bgOrb2: primaryGlow,
+        bgGradientStart: lightGradient.start,
+        bgGradientMid: lightGradient.mid,
+        bgGradientEnd: lightGradient.end,
       },
       graphite: {
         bgSurface: '#eef2f6',
@@ -104,25 +109,25 @@ export function TenantProvider({
         lineSoft: 'rgba(15, 23, 42, 0.12)',
         shadowSoft: '0 18px 48px rgba(15, 23, 42, 0.10)',
         shadowStrong: '0 28px 80px rgba(15, 23, 42, 0.16)',
-        bgOrb1: 'rgba(30, 41, 59, 0.12)',
-        bgOrb2: 'rgba(71, 85, 105, 0.12)',
+        bgOrb1: toRgba(theme.primaryColor, 0.08),
+        bgOrb2: toRgba(theme.secondaryColor, 0.09),
         bgGradientStart: '#f8fafc',
-        bgGradientMid: '#eef2f6',
-        bgGradientEnd: '#e7ecf3',
+        bgGradientMid: mixHex(theme.primaryColor, '#eef2f6', 0.1),
+        bgGradientEnd: mixHex(theme.secondaryColor, '#e7ecf3', 0.16),
       },
       dark: {
         bgSurface: '#090c14',
         bgCard: 'rgba(15,23,42,0.62)',
         textStrong: '#f8fafc',
         textSoft: '#cbd5e1',
-        lineSoft: 'rgba(148,163,184,0.18)',
+        lineSoft: toRgba(theme.secondaryColor, 0.22),
         shadowSoft: '0 18px 48px rgba(2, 6, 23, 0.34)',
         shadowStrong: '0 28px 80px rgba(2, 6, 23, 0.54)',
-        bgOrb1: 'rgba(56, 189, 248, 0.12)',
-        bgOrb2: 'rgba(124, 58, 237, 0.18)',
+        bgOrb1: toRgba(theme.secondaryColor, 0.12),
+        bgOrb2: toRgba(theme.primaryColor, 0.18),
         bgGradientStart: '#0b1020',
-        bgGradientMid: '#090c14',
-        bgGradientEnd: '#06080f',
+        bgGradientMid: mixHex(theme.primaryColor, '#090c14', 0.18),
+        bgGradientEnd: mixHex(theme.secondaryColor, '#06080f', 0.12),
       },
     } as const;
     const surface = surfacePalettes[theme.surfaceStyle] ?? surfacePalettes.light;
@@ -191,4 +196,50 @@ export function useTenantActions() {
   const ctx = useContext(TenantContext);
   if (!ctx) throw new Error('useTenantActions must be used within TenantProvider');
   return { updateTenant: ctx.updateTenant };
+}
+
+function toRgba(hex: string, alpha: number) {
+  const rgb = parseHexColor(hex);
+  if (!rgb) return `rgba(124, 58, 237, ${alpha})`;
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
+}
+
+function mixHex(first: string, second: string, ratio: number) {
+  const a = parseHexColor(first);
+  const b = parseHexColor(second);
+  if (!a || !b) return first;
+  const clampedRatio = Math.max(0, Math.min(1, ratio));
+  const mixed = {
+    r: Math.round(a.r * clampedRatio + b.r * (1 - clampedRatio)),
+    g: Math.round(a.g * clampedRatio + b.g * (1 - clampedRatio)),
+    b: Math.round(a.b * clampedRatio + b.b * (1 - clampedRatio)),
+  };
+  return `#${[mixed.r, mixed.g, mixed.b].map((value) => value.toString(16).padStart(2, '0')).join('')}`;
+}
+
+function buildSoftSurfaceGradient(primary: string, secondary: string) {
+  return {
+    start: mixHex(primary, '#ffffff', 0.06),
+    mid: mixHex(secondary, '#f8fafc', 0.1),
+    end: mixHex(primary, '#f1f5f9', 0.08),
+  };
+}
+
+function parseHexColor(value: string) {
+  const normalized = value.trim();
+  if (/^#[0-9a-f]{6}$/i.test(normalized)) {
+    return {
+      r: parseInt(normalized.slice(1, 3), 16),
+      g: parseInt(normalized.slice(3, 5), 16),
+      b: parseInt(normalized.slice(5, 7), 16),
+    };
+  }
+  if (/^#[0-9a-f]{3}$/i.test(normalized)) {
+    return {
+      r: parseInt(`${normalized[1]}${normalized[1]}`, 16),
+      g: parseInt(`${normalized[2]}${normalized[2]}`, 16),
+      b: parseInt(`${normalized[3]}${normalized[3]}`, 16),
+    };
+  }
+  return null;
 }

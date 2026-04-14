@@ -1767,7 +1767,6 @@ function ThemeSettings() {
       faviconUrl: tenant.theme.faviconUrl || '',
       coverText: tenant.theme.coverText || '',
       logoShape: tenant.theme.logoShape || 'rounded',
-      poweredByText: tenant.theme.poweredByText || 'Powered by SalonIQ',
     },
   });
 
@@ -1783,7 +1782,6 @@ function ThemeSettings() {
       faviconUrl: tenant.theme.faviconUrl || '',
       coverText: tenant.theme.coverText || '',
       logoShape: tenant.theme.logoShape || 'rounded',
-      poweredByText: tenant.theme.poweredByText || 'Powered by SalonIQ',
     });
   }, [tenant.theme, reset]);
 
@@ -1847,7 +1845,6 @@ function ThemeSettings() {
         faviconUrl: result.theme.faviconUrl || '',
         coverText: result.theme.coverText || '',
         logoShape: result.theme.logoShape || 'rounded',
-        poweredByText: result.theme.poweredByText || 'Powered by SalonIQ',
       });
       toast.success('Обликът е запазен.');
     } catch (error: any) {
@@ -1927,7 +1924,7 @@ function ThemeSettings() {
               hint="Празно = буквеният аватар остава."
               loading={readingAsset === 'logoUrl'}
               onUpload={() => logoInputRef.current?.click()}
-              onClear={() => setValue('logoUrl', '', { shouldDirty: true })}
+              onClear={() => setValue('logoUrl', '__REMOVE_ASSET__', { shouldDirty: true })}
             />
             <AssetUpload
               label="Корица"
@@ -1935,7 +1932,7 @@ function ThemeSettings() {
               hint="Голямата корица в клиентския портал."
               loading={readingAsset === 'coverImageUrl'}
               onUpload={() => coverInputRef.current?.click()}
-              onClear={() => setValue('coverImageUrl', '', { shouldDirty: true })}
+              onClear={() => setValue('coverImageUrl', '__REMOVE_ASSET__', { shouldDirty: true })}
             />
             <AssetUpload
               label="Favicon"
@@ -1943,7 +1940,7 @@ function ThemeSettings() {
               hint="Малката иконка в таба на браузъра."
               loading={readingAsset === 'faviconUrl'}
               onUpload={() => faviconInputRef.current?.click()}
-              onClear={() => setValue('faviconUrl', '', { shouldDirty: true })}
+              onClear={() => setValue('faviconUrl', '__REMOVE_ASSET__', { shouldDirty: true })}
             />
           </div>
 
@@ -1964,12 +1961,9 @@ function ThemeSettings() {
               {...register('coverText')}
               hint="Текстът се показва над или вместо наименованието в клиентския портал."
             />
-            <Input
-              label="Текст под клиентския портал"
-              placeholder="Powered by ..."
-              {...register('poweredByText')}
-              hint="Изписва се в долната част на клиентския портал."
-            />
+            <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-500">
+              Текстът под клиентския портал се управлява само от super admin.
+            </div>
           </div>
 
           <div className="rounded-2xl border border-gray-200 p-4">

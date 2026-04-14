@@ -29,7 +29,7 @@ export function BusinessHeader() {
               radial-gradient(circle at bottom right, rgba(255,255,255,0.16), transparent 28%),
               linear-gradient(135deg, ${theme.primaryColor}, ${theme.secondaryColor})
             `,
-          boxShadow: '0 28px 90px rgba(124,58,237,0.28)',
+          boxShadow: 'var(--shadow-strong)',
         }}
       >
         {theme.coverImageUrl && (
@@ -50,6 +50,32 @@ export function BusinessHeader() {
               'linear-gradient(180deg, rgba(10,10,20,0.18) 0%, rgba(10,10,20,0.36) 100%)',
           }}
         />
+        {theme.coverText && (
+          <div
+            style={{
+              position: 'absolute',
+              left: 22,
+              right: 22,
+              bottom: 22,
+              zIndex: 2,
+            }}
+          >
+            <p
+              style={{
+                margin: 0,
+                fontSize: 'clamp(1.35rem, 3.4vw, 2.4rem)',
+                lineHeight: 1.05,
+                fontWeight: 900,
+                color: '#fff',
+                letterSpacing: '-0.04em',
+                textShadow: '0 10px 30px rgba(15,23,42,0.35)',
+                maxWidth: 680,
+              }}
+            >
+              {theme.coverText}
+            </p>
+          </div>
+        )}
       </div>
 
       <div
@@ -150,26 +176,12 @@ export function BusinessHeader() {
                 {profile.label}
               </span>
             </div>
-            {theme.coverText && (
-              <p
-                style={{
-                  margin: 0,
-                  fontSize: 'clamp(1.2rem, 3.4vw, 2rem)',
-                  lineHeight: 1.1,
-                  fontWeight: 900,
-                  color: 'var(--text-strong)',
-                  letterSpacing: '-0.04em',
-                }}
-              >
-                {theme.coverText}
-              </p>
-            )}
             {showBusinessNameInPortal && (
               <h1
                 className="text-2xl font-black text-gray-900 leading-tight"
                 style={{
-                  margin: theme.coverText ? '8px 0 0' : 0,
-                  fontSize: theme.coverText ? 'clamp(1.35rem, 3.2vw, 2.2rem)' : 'clamp(2.1rem, 5vw, 3.75rem)',
+                  margin: 0,
+                  fontSize: 'clamp(2.1rem, 5vw, 3.75rem)',
                   lineHeight: 0.96,
                   fontWeight: 900,
                   color: 'var(--text-strong)',
@@ -185,7 +197,7 @@ export function BusinessHeader() {
                 flexWrap: 'wrap',
                 alignItems: 'center',
                 gap: 10,
-                marginTop: theme.coverText || showBusinessNameInPortal ? 14 : 0,
+                marginTop: showBusinessNameInPortal ? 14 : 0,
               }}
             >
               {location && (

@@ -222,6 +222,16 @@ const STATUS_FILTER_OPTIONS = [
   { key: 'completed', label: 'Приключени' },
 ] as const;
 
+const SECONDARY_OWNER_STATES = [
+  'completed',
+  'no_show',
+  'cancelled',
+  'rejected',
+  'proposal_rejected',
+  'cancelled_by_owner',
+  'cancelled_by_client',
+] as const;
+
 type InboxBucket = 'actions' | 'updates';
 
 interface InboxItemView extends UpcomingAppointment {
@@ -498,6 +508,10 @@ function matchesCalendarStatusFilter(
   return ['completed', 'no_show'].includes(key);
 }
 
+function isSecondaryOwnerState(ownerState?: string) {
+  return SECONDARY_OWNER_STATES.includes((ownerState || 'pending') as (typeof SECONDARY_OWNER_STATES)[number]);
+}
+
 export default function AdminCalendarPage() {
   const qc = useQueryClient();
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -507,7 +521,9 @@ export default function AdminCalendarPage() {
   const [proposalTarget, setProposalTarget] = useState<Appointment | null>(null);
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const [mobileWorkspace, setMobileWorkspace] = useState<'calendar' | 'inbox'>('calendar');
+  const [inboxTab, setInboxTab] = useState<'all' | 'actions' | 'updates'>('all');
   const [showMobileDetails, setShowMobileDetails] = useState(false);
+  const [showDesktopDetails, setShowDesktopDetails] = useState(false);
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [calendarView, setCalendarView] = useState<'grid' | 'list' | 'week'>('grid');
   const [staffFilter, setStaffFilter] = useState<string>('all');
@@ -891,6 +907,14 @@ export default function AdminCalendarPage() {
     () => inboxItems.filter((item) => item.bucket === 'updates'),
     [inboxItems],
   );
+  const visibleActionItems = useMemo(
+    () => (inboxTab === 'updates' ? [] : actionItems),
+    [actionItems, inboxTab],
+  );
+  const visibleUpdateItems = useMemo(
+    () => (inboxTab === 'actions' ? [] : updateItems),
+    [inboxTab, updateItems],
+  );
   const selectedAppointment = useMemo(
     () => dayAppointments.find((appointment) => appointment.id === selectedRecordId) ?? null,
     [dayAppointments, selectedRecordId],
@@ -1175,6 +1199,13 @@ export default function AdminCalendarPage() {
 
     const syncViewportMode = () => {
       setIsCompactViewport(window.innerWidth < 1280);
+      if (window.innerWidth < 1024) {
+        setShowDesktopDetails(false);
+        return;
+      }
+      if (window.innerWidth >= 1536) {
+        setShowDesktopDetails(true);
+      }
     };
 
     syncViewportMode();
@@ -1226,6 +1257,11 @@ export default function AdminCalendarPage() {
     setSelectedRecordId(id);
     setCurrentDate(new Date(startAt));
     setMobileWorkspace(workspace);
+    if (typeof window !== 'undefined' && window.innerWidth >= 1024) {
+      setShowDesktopDetails(true);
+      setShowMobileDetails(false);
+      return;
+    }
     setShowMobileDetails(true);
   };
 
@@ -1476,6 +1512,28 @@ export default function AdminCalendarPage() {
     </div>
   );
 
+  const renderAppointmentCardBody = (appointment: Appointment, height: number) => {
+    const startTime = format(new Date(appointment.start_at), 'HH:mm');
+    const endTime = format(new Date(appointment.end_at), 'HH:mm');
+    const mode = height < 72 ? 'tiny' : height < 104 ? 'compact' : 'full';
+
+    return (
+      <>
+        <p className="text-[11px] font-bold text-gray-700">
+          {startTime} - {endTime}
+        </p>
+        <p className={`mt-1 font-black text-gray-900 ${mode === 'tiny' ? 'line-clamp-1 text-[13px]' : 'line-clamp-2 text-sm'}`}>
+          {appointment.client_name}
+        </p>
+        {mode !== 'tiny' && (
+          <p className={`mt-1 font-semibold text-gray-600 ${mode === 'compact' ? 'line-clamp-1 text-[11px]' : 'line-clamp-2 text-xs'}`}>
+            {appointment.service_name}
+          </p>
+        )}
+      </>
+    );
+  };
+
   const renderCompactStaffBoard = (staffMember: (typeof mobileBoardStaff)[number]) => {
     const dayKey = getWorkingDayKey(currentDate);
     const schedule = staffMember.working_hours?.[dayKey];
@@ -1631,7 +1689,7 @@ export default function AdminCalendarPage() {
               const top = (startOffset / 60) * compactPixelsPerHour + 4;
               const height = Math.max(((endOffset - startOffset) / 60) * compactPixelsPerHour - 8, 48);
               const ownerState = appointment.owner_view_state || appointment.status;
-              const isSecondary = ['completed', 'no_show', 'cancelled', 'rejected', 'proposal_rejected', 'cancelled_by_owner', 'cancelled_by_client'].includes(ownerState);
+              const isSecondary = isSecondaryOwnerState(ownerState);
               const accent = appointment.service_color || appointment.staff_color || 'var(--color-primary)';
               const surface = isSecondary ? 'rgba(248,250,252,0.94)' : colorWithAlpha(accent, '18', 'rgba(14, 165, 233, 0.1)');
 
@@ -1642,7 +1700,7 @@ export default function AdminCalendarPage() {
                   onClick={() => focusRecord(appointment.id, appointment.start_at)}
                   className={`absolute left-2 right-2 z-[2] rounded-2xl border px-3 py-2 text-left shadow-sm ${
                     selectedRecordId === appointment.id ? 'ring-2 ring-[var(--color-primary)]/20' : ''
-                  } ${isSecondary ? 'opacity-60' : ''}`}
+                  } ${isSecondary ? 'opacity-45 saturate-50' : ''} overflow-hidden`}
                   style={{
                     top: `${top}px`,
                     height: `${height}px`,
@@ -1651,11 +1709,7 @@ export default function AdminCalendarPage() {
                     borderStyle: isSecondary ? 'dashed' : 'solid',
                   }}
                 >
-                  <p className="text-[11px] font-bold text-gray-700">
-                    {format(new Date(appointment.start_at), 'HH:mm')} - {format(new Date(appointment.end_at), 'HH:mm')}
-                  </p>
-                  <p className="mt-1 line-clamp-1 text-sm font-black text-gray-900">{appointment.client_name}</p>
-                  <p className="mt-1 line-clamp-2 text-[11px] font-semibold text-gray-600">{appointment.service_name}</p>
+                  {renderAppointmentCardBody(appointment, height)}
                 </button>
               );
             })}
@@ -2054,7 +2108,7 @@ export default function AdminCalendarPage() {
 
   return (
     <div className="space-y-5">
-      <div className="sticky top-0 z-20 -mx-1 rounded-3xl border border-white/70 bg-white/80 px-2 py-2 shadow-lg shadow-black/5 backdrop-blur xl:hidden">
+      <div className="sticky top-0 z-20 -mx-1 rounded-3xl border border-white/70 bg-white/80 px-2 py-2 shadow-lg shadow-black/5 backdrop-blur lg:hidden">
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
@@ -2081,16 +2135,16 @@ export default function AdminCalendarPage() {
         </div>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[290px_minmax(0,1fr)_320px] min-[1500px]:grid-cols-[300px_minmax(0,1fr)_340px]">
+      <div className="grid gap-5 lg:grid-cols-[250px_minmax(0,1fr)] 2xl:grid-cols-[250px_minmax(0,1fr)_320px] min-[1700px]:grid-cols-[260px_minmax(0,1fr)_340px]">
         <aside
-          className={`min-h-0 ${mobileWorkspace === 'inbox' ? 'block' : 'hidden'} xl:block`}
+          className={`min-h-0 ${mobileWorkspace === 'inbox' ? 'block' : 'hidden'} lg:block`}
         >
-          <div className="glass-panel flex max-h-[calc(100vh-120px)] flex-col rounded-[28px] border border-white/60 p-4 shadow-xl shadow-black/5 xl:sticky xl:top-5">
-            <div className="flex items-start justify-between gap-3 border-b border-gray-100 pb-4">
+          <div className="glass-panel flex max-h-[calc(100vh-112px)] flex-col rounded-[28px] border border-white/60 p-3 shadow-xl shadow-black/5 lg:sticky lg:top-5">
+            <div className="flex items-start justify-between gap-3 border-b border-gray-100 pb-3">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Action inbox</p>
-                <h3 className="mt-1 text-lg font-black text-gray-900">Какво чака решение</h3>
-                <p className="mt-1 text-sm text-gray-500">Всичко, което иска внимание, е тук. Календарът остава отделно и не изчезва при филтриране.</p>
+                <h3 className="mt-1 text-base font-black text-gray-900">Какво чака решение</h3>
+                <p className="mt-1 text-xs text-gray-500">Заявките и обновленията са отделени от календара.</p>
               </div>
               <button
                 type="button"
@@ -2106,7 +2160,29 @@ export default function AdminCalendarPage() {
               </button>
             </div>
 
-            <div className="mt-4 min-h-0 space-y-5 overflow-y-auto pr-1">
+            <div className="mt-3 flex flex-wrap gap-2">
+              {[
+                { key: 'all', label: `Всички (${attentionCount + updateCount})` },
+                { key: 'actions', label: `Действия (${attentionCount})` },
+                { key: 'updates', label: `Обновления (${updateCount})` },
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setInboxTab(tab.key as typeof inboxTab)}
+                  className={`rounded-2xl px-3 py-2 text-xs font-semibold transition-colors ${
+                    inboxTab === tab.key
+                      ? 'bg-gray-900 text-white'
+                      : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-4 min-h-0 space-y-4 overflow-y-auto pr-1">
+              {(inboxTab === 'all' || inboxTab === 'actions') && (
               <div>
                 <div className="mb-3 flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -2122,13 +2198,13 @@ export default function AdminCalendarPage() {
                   <div className="flex justify-center py-8">
                     <Loader2 className="h-5 w-5 animate-spin text-[var(--color-primary)]" />
                   </div>
-                ) : !actionItems.length ? (
+                ) : !visibleActionItems.length ? (
                   <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-4 py-5 text-sm text-gray-400">
                     Няма нови заявки за решение.
                   </div>
                 ) : (
-                  <div className="space-y-3">
-                    {actionItems.map((item) => (
+                  <div className="space-y-2">
+                    {visibleActionItems.map((item) => (
                       <div
                         key={item.id}
                         className={`rounded-3xl border p-3 shadow-sm transition-all ${selectedRecordId === item.id ? 'border-[var(--color-primary)] bg-white ring-2 ring-[var(--color-primary)]/10' : 'border-gray-100 bg-white/90'} `}
@@ -2151,10 +2227,9 @@ export default function AdminCalendarPage() {
                               <p>{format(new Date(item.start_at), 'd MMM', { locale: bg })}</p>
                             </div>
                           </div>
-                          <div className="mt-3 space-y-1 text-xs text-gray-500">
+                          <div className="mt-2 space-y-1 text-[11px] text-gray-500">
                             <p>{item.service_name}</p>
                             <p>{item.staff_name}</p>
-                            <p>{formatBulgarianPhoneForDisplay(item.client_phone)}</p>
                           </div>
                         </button>
 
@@ -2196,7 +2271,9 @@ export default function AdminCalendarPage() {
                   </div>
                 )}
               </div>
+              )}
 
+              {(inboxTab === 'all' || inboxTab === 'updates') && (
               <div>
                 <div className="mb-3 flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -2212,13 +2289,13 @@ export default function AdminCalendarPage() {
                   <div className="flex justify-center py-8">
                     <Loader2 className="h-5 w-5 animate-spin text-[var(--color-primary)]" />
                   </div>
-                ) : !updateItems.length ? (
+                ) : !visibleUpdateItems.length ? (
                   <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-4 py-5 text-sm text-gray-400">
                     Няма нови клиентски действия.
                   </div>
                 ) : (
-                  <div className="space-y-3">
-                    {updateItems.map((item) => (
+                  <div className="space-y-2">
+                    {visibleUpdateItems.map((item) => (
                       <div
                         key={item.id}
                         className={`rounded-3xl border p-3 shadow-sm transition-all ${selectedRecordId === item.id ? 'border-[var(--color-primary)] bg-white ring-2 ring-[var(--color-primary)]/10' : 'border-gray-100 bg-white/90'}`}
@@ -2255,20 +2332,21 @@ export default function AdminCalendarPage() {
                   </div>
                 )}
               </div>
+              )}
             </div>
           </div>
         </aside>
 
-        <section className={`${mobileWorkspace === 'calendar' ? 'block' : 'hidden'} xl:block`}>
+        <section className={`${mobileWorkspace === 'calendar' ? 'block' : 'hidden'} lg:block`}>
           <div className="glass-panel rounded-[32px] border border-white/60 p-4 shadow-xl shadow-black/5 sm:p-5">
-            <div className="flex flex-col gap-4 border-b border-gray-100 pb-5">
+            <div className="flex flex-col gap-3 border-b border-gray-100 pb-4">
 	              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
 	                <div>
 	                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Календар</p>
-	                  <h3 className="mt-1 text-xl font-black text-gray-900">
+	                  <h3 className="mt-1 text-lg font-black text-gray-900 sm:text-xl">
 	                    {calendarTitle}
                   </h3>
-                  <p className="mt-1 text-sm capitalize text-gray-500">
+                  <p className="mt-1 text-xs capitalize text-gray-500 sm:text-sm">
                     {calendarSubtitle}
                   </p>
                 </div>
@@ -2308,10 +2386,18 @@ export default function AdminCalendarPage() {
 	                          : 'text-gray-600'
 	                      }`}
 	                    >
-	                      <CalendarDays className="h-4 w-4" />
-	                      Седмица
-	                    </button>
-	                  </div>
+		                      <CalendarDays className="h-4 w-4" />
+		                      Седмица
+		                    </button>
+		                  </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowDesktopDetails((current) => !current)}
+                        className="hidden h-11 items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 lg:inline-flex 2xl:hidden"
+                      >
+                        <ClipboardList className="h-4 w-4" />
+                        {showDesktopDetails ? 'Скрий детайли' : 'Покажи детайли'}
+                      </button>
 	                  <button
 	                    onClick={() => setCurrentDate(subDays(currentDate, calendarView === 'week' ? 7 : 1))}
 	                    className="flex h-11 w-11 items-center justify-center rounded-2xl border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
@@ -2377,19 +2463,19 @@ export default function AdminCalendarPage() {
 
 		              <div className="flex flex-wrap gap-2">
 		                <div className="rounded-2xl border border-white/70 bg-white/90 px-3 py-2 shadow-sm">
-		                  <p className="text-lg font-black text-gray-900">{appointmentsInView.length}</p>
-		                  <p className="text-[11px] text-gray-500">{calendarView === 'week' ? 'записа в седмицата' : 'записа за деня'}</p>
+		                  <p className="text-base font-black text-gray-900">{appointmentsInView.length}</p>
+		                  <p className="text-[11px] text-gray-500">{calendarView === 'week' ? 'записа' : 'за деня'}</p>
 		                </div>
 		                <div className="rounded-2xl border border-white/70 bg-white/90 px-3 py-2 shadow-sm">
-		                  <p className="text-lg font-black text-emerald-700">{confirmedInView}</p>
+		                  <p className="text-base font-black text-emerald-700">{confirmedInView}</p>
 		                  <p className="text-[11px] text-gray-500">запазени</p>
 		                </div>
 		                <div className="rounded-2xl border border-white/70 bg-white/90 px-3 py-2 shadow-sm">
-		                  <p className="text-lg font-black text-amber-700">{pendingInView}</p>
+		                  <p className="text-base font-black text-amber-700">{pendingInView}</p>
 		                  <p className="text-[11px] text-gray-500">нови заявки</p>
 		                </div>
 		                <div className="rounded-2xl border border-white/70 bg-white/90 px-3 py-2 shadow-sm">
-		                  <p className="text-lg font-black text-[var(--color-primary)]">{formatEuroAmount(totalRevenue)}</p>
+		                  <p className="text-base font-black text-[var(--color-primary)]">{formatEuroAmount(totalRevenue)}</p>
 		                  <p className="text-[11px] text-gray-500">оборот</p>
 		                </div>
 		              </div>
@@ -2402,22 +2488,20 @@ export default function AdminCalendarPage() {
 	                </div>
 	              ) : (
 	                <div className="space-y-4">
-	                  <div className="flex flex-col gap-3 rounded-[28px] border border-white/70 bg-white/80 p-4 shadow-sm">
+	                  <div className="flex flex-col gap-3 rounded-[28px] border border-white/70 bg-white/80 p-3 shadow-sm">
 	                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-	                      <div>
+	                      <div className="min-w-0">
 	                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
 		                          {calendarView === 'week' ? 'Седмичен борд' : 'Дневен борд'}
 		                        </p>
-		                        <h4 className="mt-1 text-base font-black text-gray-900">
+		                        <h4 className="mt-1 text-sm font-black text-gray-900">
 		                          {calendarView === 'week' ? 'Седмичен преглед' : 'Дневен график'}
 		                        </h4>
-		                        <p className="mt-1 text-sm text-gray-500">
-		                          {calendarView === 'week'
-		                            ? 'Седмичен изглед по дни и специалисти.'
-		                            : 'Разпределение по специалисти и часове.'}
+		                        <p className="mt-1 text-xs text-gray-500">
+		                          {calendarView === 'week' ? 'Дни × специалисти' : 'Специалисти × часове'}
 		                        </p>
 	                      </div>
-	                      <div className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-600">
+	                      <div className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 text-[11px] font-semibold text-gray-600">
 	                        <SlidersHorizontal className="h-4 w-4" />
 	                        {staffFilter === 'all' ? 'Показани са всички специалисти' : `Филтър: ${visibleStaffColumns[0]?.name ?? 'специалист'}`}
 	                      </div>
@@ -2515,7 +2599,7 @@ export default function AdminCalendarPage() {
 	                      ) : (
 	                        <>
 	                          {calendarView !== 'list' && (
-	                            <div className="space-y-4 xl:hidden">
+	                            <div className="space-y-4 lg:hidden">
 	                              {calendarView === 'week' && (
 	                                <div className="overflow-x-auto pb-1">
 	                                  <div className="flex min-w-max gap-2">
@@ -2543,7 +2627,7 @@ export default function AdminCalendarPage() {
 	                            </div>
 	                          )}
 	                          {calendarView === 'week' ? (
-	                        <div className="hidden xl:block overflow-x-auto rounded-[28px] border border-white/70 bg-white/90 shadow-sm">
+	                        <div className="hidden lg:block overflow-x-auto rounded-[28px] border border-white/70 bg-white/90 shadow-sm">
                           <div
                             className="grid min-w-[1680px]"
                             style={{ gridTemplateColumns: `72px repeat(${Math.max(weekGridColumns.length, 1)}, minmax(180px, 1fr))` }}
@@ -2755,7 +2839,7 @@ export default function AdminCalendarPage() {
                                   const height = Math.max(((endOffset - startOffset) / 60) * pixelsPerHour - 8, 56);
                                   const ownerState = appointment.owner_view_state || appointment.status;
                                   const isSelected = selectedRecordId === appointment.id;
-                                  const isSecondary = ['completed', 'no_show', 'cancelled', 'rejected', 'proposal_rejected', 'cancelled_by_owner', 'cancelled_by_client'].includes(ownerState);
+                                  const isSecondary = isSecondaryOwnerState(ownerState);
                                   const accent = appointment.service_color || appointment.staff_color || 'var(--color-primary)';
                                   const soft = isSecondary
                                     ? 'rgba(248,250,252,0.95)'
@@ -2774,7 +2858,7 @@ export default function AdminCalendarPage() {
                                       onClick={() => focusRecord(appointment.id, appointment.start_at)}
                                       className={`absolute left-2 right-2 z-[2] rounded-2xl border px-3 py-2 text-left shadow-sm transition-transform hover:scale-[1.01] ${
                                         isSelected ? 'ring-2 ring-[var(--color-primary)]/25' : ''
-                                      } ${isSecondary ? 'opacity-60' : ''}`}
+                                      } ${isSecondary ? 'opacity-45 saturate-50' : ''} overflow-hidden`}
                                       style={{
                                         top: `${top}px`,
                                         height: `${height}px`,
@@ -2783,11 +2867,7 @@ export default function AdminCalendarPage() {
                                         borderStyle: isSecondary ? 'dashed' : 'solid',
                                       }}
                                     >
-                                      <p className="text-[11px] font-bold text-gray-700">
-                                        {format(new Date(appointment.start_at), 'HH:mm')} - {format(new Date(appointment.end_at), 'HH:mm')}
-                                      </p>
-                                      <p className="mt-1 line-clamp-2 text-sm font-black text-gray-900">{appointment.client_name}</p>
-                                      <p className="mt-1 line-clamp-2 text-xs font-semibold text-gray-600">{appointment.service_name}</p>
+                                      {renderAppointmentCardBody(appointment, height)}
                                     </button>
                                   );
                                 })}
@@ -2796,7 +2876,7 @@ export default function AdminCalendarPage() {
                           </div>
                         </div>
 	                      ) : calendarView === 'grid' ? (
-			                    <div className="hidden xl:block">
+			                    <div className="hidden lg:block">
 		                      <div className="overflow-x-auto rounded-[28px] border border-white/70 bg-white/90 shadow-sm">
 	                        <div
 	                          className="grid min-w-[880px]"
@@ -3008,13 +3088,11 @@ export default function AdminCalendarPage() {
 		                                const height = Math.max(((endOffset - startOffset) / 60) * pixelsPerHour - 8, 56);
 		                                const ownerState = appointment.owner_view_state || appointment.status;
 		                                const isSelected = selectedRecordId === appointment.id;
-		                                const isSecondary = ['completed', 'no_show', 'cancelled', 'rejected', 'proposal_rejected', 'cancelled_by_owner', 'cancelled_by_client'].includes(ownerState);
+		                                const isSecondary = isSecondaryOwnerState(ownerState);
 		                                const accent = appointment.service_color || appointment.staff_color || 'var(--color-primary)';
 		                                const soft = isSecondary
 		                                  ? 'rgba(248,250,252,0.95)'
 		                                  : colorWithAlpha(accent, '18', 'rgba(14, 165, 233, 0.1)');
-		                                const startTime = format(new Date(appointment.start_at), 'HH:mm');
-		                                const endTime = format(new Date(appointment.end_at), 'HH:mm');
 
 		                                return (
 			                                  <button
@@ -3029,7 +3107,7 @@ export default function AdminCalendarPage() {
 			                                    onClick={() => focusRecord(appointment.id, appointment.start_at)}
 			                                    className={`absolute left-2 right-2 z-[2] rounded-2xl border px-3 py-2 text-left shadow-sm transition-transform hover:scale-[1.01] ${
 			                                      isSelected ? 'ring-2 ring-[var(--color-primary)]/25' : ''
-			                                    } ${isSecondary ? 'opacity-60' : ''}`}
+			                                    } ${isSecondary ? 'opacity-45 saturate-50' : ''} overflow-hidden`}
 		                                    style={{
 		                                      top: `${top}px`,
 		                                      height: `${height}px`,
@@ -3039,11 +3117,7 @@ export default function AdminCalendarPage() {
 		                                      boxShadow: isSelected ? '0 0 0 1px rgba(99, 102, 241, 0.2)' : undefined,
 		                                    }}
 		                                  >
-		                                    <p className="text-[11px] font-bold text-gray-700">
-		                                      {startTime} - {endTime}
-		                                    </p>
-		                                    <p className="mt-1 line-clamp-2 text-sm font-black text-gray-900">{appointment.client_name}</p>
-		                                    <p className="mt-1 line-clamp-2 text-xs font-semibold text-gray-600">{appointment.service_name}</p>
+		                                    {renderAppointmentCardBody(appointment, height)}
 			                                  </button>
 			                                );
 			                              })}
@@ -3062,6 +3136,7 @@ export default function AdminCalendarPage() {
 	                      const endTime = format(new Date(appointment.end_at), 'HH:mm');
 	                      const statusCfg = getOwnerStatusPresentation(appointment);
 	                      const isSelected = selectedRecordId === appointment.id;
+                        const isSecondary = isSecondaryOwnerState(appointment.owner_view_state || appointment.status);
 
 	                      return (
 	                        <div
@@ -3070,7 +3145,7 @@ export default function AdminCalendarPage() {
 	                            isSelected
 	                              ? 'border-[var(--color-primary)] bg-white ring-2 ring-[var(--color-primary)]/10'
 	                              : 'border-gray-100 bg-white/90 hover:border-[var(--color-primary)]/25 hover:bg-white'
-	                          }`}
+	                          } ${isSecondary ? 'opacity-55 saturate-50' : ''}`}
 	                        >
 	                          <button
 	                            type="button"
@@ -3102,10 +3177,6 @@ export default function AdminCalendarPage() {
 	                                      {appointment.staff_name}
 	                                    </span>
 	                                    <span className="flex items-center gap-1">
-	                                      <Phone className="w-3.5 h-3.5" />
-	                                      {formatBulgarianPhoneForDisplay(appointment.client_phone)}
-	                                    </span>
-	                                    <span className="flex items-center gap-1">
 	                                      <Clock className="w-3.5 h-3.5" />
 	                                      {startTime} – {endTime}
 	                                    </span>
@@ -3121,7 +3192,7 @@ export default function AdminCalendarPage() {
 	                                </div>
 
 	                                <div className="max-w-sm text-xs text-gray-500 lg:text-right">
-	                                  <p>{appointment.internal_notes || 'Няма вътрешна бележка за този запис.'}</p>
+	                                  <p>{appointment.internal_notes || 'Без вътрешна бележка.'}</p>
 	                                </div>
 	                              </div>
 	                            </div>
@@ -3139,13 +3210,34 @@ export default function AdminCalendarPage() {
 
         </section>
 
-        <aside className="hidden xl:block">
-          <div className="glass-panel rounded-[28px] border border-white/60 p-5 shadow-xl shadow-black/5 xl:sticky xl:top-5">
+        <aside className="hidden 2xl:block">
+          <div className="glass-panel rounded-[28px] border border-white/60 p-5 shadow-xl shadow-black/5 2xl:sticky 2xl:top-5">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Детайлен панел</p>
             {renderDesktopDetailsPanel()}
           </div>
         </aside>
       </div>
+
+      {showDesktopDetails && (selectedAppointment || selectedInboxItem) && (
+        <div className="fixed inset-0 z-30 hidden bg-black/20 lg:block 2xl:hidden" onClick={() => setShowDesktopDetails(false)}>
+          <div
+            className="absolute inset-y-4 right-4 w-[340px] overflow-y-auto rounded-[28px] border border-white/70 bg-white/95 p-5 shadow-2xl shadow-black/10 backdrop-blur"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Детайлен панел</p>
+              <button
+                type="button"
+                onClick={() => setShowDesktopDetails(false)}
+                className="flex h-10 w-10 items-center justify-center rounded-2xl border border-gray-200 bg-white text-gray-600"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            {renderDesktopDetailsPanel()}
+          </div>
+        </div>
+      )}
 
       <section className="hidden">
         <div className="glass-panel rounded-[28px] border border-white/60 p-5 shadow-xl shadow-black/5">
@@ -3158,14 +3250,14 @@ export default function AdminCalendarPage() {
         <button
           type="button"
           onClick={() => setShowMobileDetails(true)}
-          className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+96px)] right-4 z-30 rounded-full bg-gray-900 px-4 py-3 text-sm font-semibold text-white shadow-xl xl:hidden"
+          className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+96px)] right-4 z-30 rounded-full bg-gray-900 px-4 py-3 text-sm font-semibold text-white shadow-xl lg:hidden"
         >
           Отвори детайли
         </button>
       )}
 
       {showMobileDetails && (selectedAppointment || selectedInboxItem) && (
-        <div className="fixed inset-0 z-40 bg-black/40 xl:hidden" onClick={() => setShowMobileDetails(false)}>
+        <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={() => setShowMobileDetails(false)}>
           <div
             className="absolute inset-x-0 bottom-0 max-h-[82vh] overflow-y-auto rounded-t-[32px] bg-white px-4 pb-[calc(env(safe-area-inset-bottom,0px)+24px)] pt-3 shadow-2xl"
             onClick={(event) => event.stopPropagation()}

@@ -1729,7 +1729,7 @@ export default function AdminCalendarPage() {
     }
 
     return (
-      <div className="mt-4 space-y-4">
+        <div className="mt-4 space-y-4">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             {selectedInboxItem && (
@@ -1837,42 +1837,55 @@ export default function AdminCalendarPage() {
           </div>
         )}
 
-        <div className="grid gap-3 sm:grid-cols-2 min-[1600px]:grid-cols-1">
-          <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Дата и слот</p>
-            <p className="mt-2 text-sm font-semibold text-gray-900">
-              {formatAppointmentDay(detailedAppointment?.start_at || selectedInboxItem!.start_at)}
-            </p>
-          </div>
-          <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Телефон</p>
-            <p className="mt-2 text-sm font-semibold text-gray-900">
-              {formatBulgarianPhoneForDisplay(
-                detailedAppointment?.client_phone || selectedInboxItem!.client_phone,
-              )}
-            </p>
-          </div>
-          <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Стойност</p>
-            <p className="mt-2 text-sm font-semibold text-gray-900">
-              {detailedAppointment?.price != null ? formatEuroAmount(detailedAppointment.price) : 'Няма цена'}
-            </p>
-          </div>
-          {detailedAppointment && (
-            <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Резюме</p>
-              <div className="mt-2 space-y-1.5 text-sm text-gray-700">
-                <p><span className="font-semibold text-gray-900">Услуга:</span> {detailedAppointment.service_name}</p>
-                <p><span className="font-semibold text-gray-900">Специалист:</span> {detailedAppointment.staff_name}</p>
-                <p><span className="font-semibold text-gray-900">Статус:</span> {getOwnerStatusPresentation(detailedAppointment).label}</p>
-              </div>
+        <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-400">Дата и слот</p>
+              <p className="mt-1.5 text-sm font-semibold text-gray-900">
+                {formatAppointmentDay(detailedAppointment?.start_at || selectedInboxItem!.start_at)}
+              </p>
             </div>
-          )}
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-400">Телефон</p>
+              <p className="mt-1.5 text-sm font-semibold text-gray-900">
+                {formatBulgarianPhoneForDisplay(
+                  detailedAppointment?.client_phone || selectedInboxItem!.client_phone,
+                )}
+              </p>
+            </div>
+            {detailedAppointment && (
+              <>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-400">Услуга</p>
+                  <p className="mt-1.5 text-sm font-semibold text-gray-900">{detailedAppointment.service_name}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-400">Специалист</p>
+                  <p className="mt-1.5 text-sm font-semibold text-gray-900">{detailedAppointment.staff_name}</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-400">Стойност</p>
+                  <p className="mt-1.5 text-sm font-semibold text-gray-900">
+                    {detailedAppointment.price != null ? formatEuroAmount(detailedAppointment.price) : 'Няма цена'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-400">Статус</p>
+                  <p className="mt-1.5 text-sm font-semibold text-gray-900">
+                    {getOwnerStatusPresentation(detailedAppointment).label}
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {detailedAppointment && renderVisitProgressControls(detailedAppointment)}
 
-        {selectedContext?.appointment && (
+        {selectedContext?.appointment &&
+          (selectedContext.appointment.client_name_source === 'owner' ||
+            (selectedContext.appointment.original_client_name &&
+              selectedContext.appointment.original_client_name !== selectedContext.appointment.client_name)) && (
           <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Име в клиентската база</p>
             <p className="mt-2 text-sm font-semibold text-gray-900">{selectedContext.appointment.client_name}</p>
@@ -1892,7 +1905,7 @@ export default function AdminCalendarPage() {
 
         {selectedContext?.delivery_profile && (
           <div className="rounded-2xl border border-gray-100 bg-white/80 px-4 py-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Канали за известия</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Канали</p>
             <div className="mt-3 flex flex-wrap gap-2">
               <span
                 className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${
@@ -1901,7 +1914,7 @@ export default function AdminCalendarPage() {
                     : 'border-gray-200 bg-gray-50 text-gray-500'
                 }`}
               >
-                Owner Telegram
+                Собственик Telegram
               </span>
               <span
                 className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${
@@ -1919,7 +1932,7 @@ export default function AdminCalendarPage() {
                     : 'border-gray-200 bg-gray-50 text-gray-500'
                 }`}
               >
-                SMS fallback
+                Резервен SMS
               </span>
               <span
                 className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${
@@ -1951,7 +1964,7 @@ export default function AdminCalendarPage() {
             </div>
 
             <div className="mt-4 space-y-3">
-              {matchingWaitlistEntries.slice(0, 4).map((entry) => {
+              {matchingWaitlistEntries.slice(0, 2).map((entry) => {
                 const status = getWaitlistStatusPresentation(entry.status);
                 return (
                   <div key={entry.id} className="rounded-2xl border border-gray-100 bg-gray-50/80 px-3 py-3">
@@ -2021,8 +2034,8 @@ export default function AdminCalendarPage() {
         <div className="rounded-3xl border border-gray-100 bg-white/80 p-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Notification center</p>
-              <h4 className="mt-1 text-sm font-black text-gray-900">История на известията</h4>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Известия</p>
+              <h4 className="mt-1 text-sm font-black text-gray-900">Статус на доставката</h4>
             </div>
             <div className="flex items-center gap-2">
               {(selectedContext?.notification_summary?.failed ?? 0) > 0 && detailedAppointment && (
@@ -2055,9 +2068,9 @@ export default function AdminCalendarPage() {
             </div>
           )}
 
-          <div className="mt-4 space-y-3">
+          <div className="mt-4 space-y-2">
             {selectedContext?.notifications?.length ? (
-              selectedContext.notifications.map((entry) => (
+              selectedContext.notifications.slice(0, 4).map((entry) => (
                 <div key={entry.id} className="rounded-2xl border border-gray-100 bg-gray-50/80 px-3 py-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -2629,8 +2642,8 @@ export default function AdminCalendarPage() {
 	                          {calendarView === 'week' ? (
 	                        <div className="hidden lg:block overflow-x-auto rounded-[28px] border border-white/70 bg-white/90 shadow-sm">
                           <div
-                            className="grid min-w-[1680px]"
-                            style={{ gridTemplateColumns: `72px repeat(${Math.max(weekGridColumns.length, 1)}, minmax(180px, 1fr))` }}
+                            className="grid min-w-[1480px]"
+                            style={{ gridTemplateColumns: `64px repeat(${Math.max(weekGridColumns.length, 1)}, minmax(156px, 1fr))` }}
                           >
                             <div className="sticky top-0 z-10 border-b border-r border-gray-100 bg-white/95 px-3 py-4 backdrop-blur">
                               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">Час</p>
@@ -2638,23 +2651,23 @@ export default function AdminCalendarPage() {
                             {weekGridColumns.map((column, index) => (
                               <div
                                 key={column.key}
-                                className={`sticky top-0 z-10 border-b border-r border-gray-100 bg-white/95 px-3 py-4 backdrop-blur last:border-r-0 ${
+                                className={`sticky top-0 z-10 border-b border-r border-gray-100 bg-white/95 px-2.5 py-3 backdrop-blur last:border-r-0 ${
                                   index % Math.max(visibleStaffColumns.length, 1) === 0 ? 'border-l-2 border-l-gray-200' : ''
                                 } ${isToday(column.day) ? 'bg-[var(--color-primary)]/5' : ''}`}
                               >
-                                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+                                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-400">
                                   {format(column.day, 'EEE d MMM', { locale: bg })}
                                 </p>
                                 <div className="mt-2 flex items-center gap-2">
                                   <span
-                                    className="flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-black text-white"
+                                    className="flex h-7 w-7 items-center justify-center rounded-full text-[9px] font-black text-white"
                                     style={{ backgroundColor: column.staff.color || 'var(--color-primary)' }}
                                   >
                                     {getInitials(column.staff.name)}
                                   </span>
                                   <div className="min-w-0">
-                                    <p className="truncate text-sm font-black text-gray-900">{column.staff.name}</p>
-                                    <p className="text-[11px] text-gray-500">{column.appointments.length} записа</p>
+                                    <p className="truncate text-xs font-black text-gray-900">{column.staff.name}</p>
+                                    <p className="text-[10px] text-gray-500">{column.appointments.length} записа</p>
                                   </div>
                                 </div>
                               </div>
@@ -2879,8 +2892,8 @@ export default function AdminCalendarPage() {
 			                    <div className="hidden lg:block">
 		                      <div className="overflow-x-auto rounded-[28px] border border-white/70 bg-white/90 shadow-sm">
 	                        <div
-	                          className="grid min-w-[880px]"
-	                          style={{ gridTemplateColumns: `72px repeat(${Math.max(visibleStaffColumns.length, 1)}, minmax(220px, 1fr))` }}
+	                          className="grid min-w-[760px]"
+	                          style={{ gridTemplateColumns: `64px repeat(${Math.max(visibleStaffColumns.length, 1)}, minmax(190px, 1fr))` }}
 	                        >
 	                          <div className="sticky top-0 z-10 border-b border-r border-gray-100 bg-white/95 px-3 py-4 backdrop-blur">
 	                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">Час</p>
@@ -2888,18 +2901,18 @@ export default function AdminCalendarPage() {
 	                          {visibleStaffColumns.map((staffMember) => (
 	                            <div
 	                              key={staffMember.id}
-	                              className="sticky top-0 z-10 border-b border-r border-gray-100 bg-white/95 px-4 py-4 backdrop-blur last:border-r-0"
+	                              className="sticky top-0 z-10 border-b border-r border-gray-100 bg-white/95 px-3 py-3 backdrop-blur last:border-r-0"
 	                            >
 	                              <div className="flex items-center gap-3">
 	                                <span
-	                                  className="flex h-10 w-10 items-center justify-center rounded-full text-xs font-black text-white shadow-sm"
+	                                  className="flex h-8 w-8 items-center justify-center rounded-full text-[10px] font-black text-white shadow-sm"
 	                                  style={{ backgroundColor: staffMember.color || 'var(--color-primary)' }}
 	                                >
 	                                  {getInitials(staffMember.name)}
 	                                </span>
 	                                <div className="min-w-0">
-	                                  <p className="truncate text-sm font-black text-gray-900">{staffMember.name}</p>
-	                                  <p className="text-xs text-gray-500">{staffMember.appointments.length} записа</p>
+	                                  <p className="truncate text-xs font-black text-gray-900">{staffMember.name}</p>
+	                                  <p className="text-[10px] text-gray-500">{staffMember.appointments.length} записа</p>
 	                                </div>
 	                              </div>
 	                            </div>
@@ -3130,7 +3143,7 @@ export default function AdminCalendarPage() {
 	                        </>
 	                      )}
 
-			                  <div className={`${calendarView === 'list' ? 'space-y-4' : 'hidden'}`}>
+			                  <div className={`${calendarView === 'list' ? 'space-y-3' : 'hidden'}`}>
 	                    {filteredDayAppointments.map((appointment) => {
 	                      const startTime = format(new Date(appointment.start_at), 'HH:mm');
 	                      const endTime = format(new Date(appointment.end_at), 'HH:mm');
@@ -3141,7 +3154,7 @@ export default function AdminCalendarPage() {
 	                      return (
 	                        <div
 	                          key={appointment.id}
-	                          className={`group flex w-full gap-4 rounded-[28px] border p-4 text-left shadow-sm transition-all sm:p-5 ${
+	                          className={`group flex w-full gap-3 rounded-[24px] border p-3 text-left shadow-sm transition-all sm:p-4 ${
 	                            isSelected
 	                              ? 'border-[var(--color-primary)] bg-white ring-2 ring-[var(--color-primary)]/10'
 	                              : 'border-gray-100 bg-white/90 hover:border-[var(--color-primary)]/25 hover:bg-white'
@@ -3150,28 +3163,28 @@ export default function AdminCalendarPage() {
 	                          <button
 	                            type="button"
 	                            onClick={() => focusRecord(appointment.id, appointment.start_at)}
-	                            className="flex w-full gap-4 text-left"
+	                            className="flex w-full gap-3 text-left"
 	                          >
-	                            <div className="flex w-20 flex-shrink-0 flex-col items-center gap-2 rounded-[24px] border border-gray-100 bg-gray-50/80 px-3 py-4">
-	                              <span className="text-base font-black text-gray-900">{startTime}</span>
+	                            <div className="flex w-16 flex-shrink-0 flex-col items-center gap-1.5 rounded-[20px] border border-gray-100 bg-gray-50/80 px-2 py-3">
+	                              <span className="text-sm font-black text-gray-900">{startTime}</span>
 	                              <div
-	                                className="h-full min-h-[36px] w-1.5 rounded-full"
+	                                className="h-full min-h-[28px] w-1.5 rounded-full"
 	                                style={{ backgroundColor: appointment.service_color || appointment.staff_color || 'var(--color-primary)' }}
 	                              />
-	                              <span className="text-xs font-semibold text-gray-400">{endTime}</span>
+	                              <span className="text-[11px] font-semibold text-gray-400">{endTime}</span>
 	                            </div>
 
 	                            <div className="min-w-0 flex-1">
-	                              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+	                              <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
 	                                <div className="min-w-0">
 	                                  <div className="flex flex-wrap items-center gap-2">
-	                                    <p className="truncate text-lg font-black text-gray-900">{appointment.client_name}</p>
+	                                    <p className="truncate text-base font-black text-gray-900">{appointment.client_name}</p>
 	                                    <span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${statusCfg.cls}`}>
 	                                      {statusCfg.label}
 	                                    </span>
 	                                  </div>
 	                                  <p className="mt-1 text-sm font-semibold text-gray-700">{appointment.service_name}</p>
-		                                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-xs text-gray-500">
+		                                  <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-gray-500">
 	                                    <span className="flex items-center gap-1">
 	                                      <User className="w-3.5 h-3.5" />
 	                                      {appointment.staff_name}
@@ -3191,14 +3204,16 @@ export default function AdminCalendarPage() {
 		                                  </div>
 	                                </div>
 
-	                                <div className="max-w-sm text-xs text-gray-500 lg:text-right">
-	                                  <p>{appointment.internal_notes || 'Без вътрешна бележка.'}</p>
-	                                </div>
+	                                {appointment.internal_notes ? (
+	                                  <div className="max-w-sm text-[11px] text-gray-500 lg:text-right">
+	                                    <p className="line-clamp-2">{appointment.internal_notes}</p>
+	                                  </div>
+	                                ) : null}
 	                              </div>
 	                            </div>
 	                          </button>
 
-	                          <div className="mt-4">{renderPrimaryActions(appointment)}</div>
+	                          <div className="mt-1 self-center">{renderPrimaryActions(appointment)}</div>
 	                        </div>
 	                      );
 	                    })}

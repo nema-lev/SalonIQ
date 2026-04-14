@@ -56,6 +56,9 @@ interface Appointment {
 interface UpcomingAppointment {
   id: string;
   start_at: string;
+  end_at: string;
+  staff_id: string;
+  service_id: string;
   intake_data?: unknown;
   client_name: string;
   client_phone: string;
@@ -98,6 +101,20 @@ interface ClientSuggestion {
   email: string | null;
   total_visits: number;
 }
+
+type MoveTarget = {
+  id: string;
+  start_at: string;
+  end_at: string;
+  status: string;
+  staff_id: string;
+  service_id: string;
+  client_name: string;
+  client_phone: string;
+  service_name: string;
+  staff_name: string;
+  source: 'appointment' | 'request';
+};
 
 interface NotificationLogEntry {
   id: string;
@@ -461,17 +478,20 @@ export default function AdminCalendarPage() {
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [showBlockEditor, setShowBlockEditor] = useState(false);
   const [showWaitlistModal, setShowWaitlistModal] = useState(false);
+  const [showRequestsPanel, setShowRequestsPanel] = useState(false);
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const [showMobileDetails, setShowMobileDetails] = useState(false);
   const [showDesktopDetails, setShowDesktopDetails] = useState(false);
   const [showMoveModal, setShowMoveModal] = useState(false);
-  const [touchMoveTarget, setTouchMoveTarget] = useState<Appointment | null>(null);
+  const [touchMoveTarget, setTouchMoveTarget] = useState<MoveTarget | null>(null);
+  const [pendingTouchPlacement, setPendingTouchPlacement] = useState<{ startAt: string; staffId: string } | null>(null);
   const [calendarView, setCalendarView] = useState<'grid' | 'list' | 'week'>('grid');
   const [staffFilter, setStaffFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'requests' | 'booked' | 'cancelled'>('all');
   const [showUnavailable, setShowUnavailable] = useState(true);
   const [isCompactViewport, setIsCompactViewport] = useState(false);
   const [draggedAppointmentId, setDraggedAppointmentId] = useState<string | null>(null);
+  const [draggedRequestId, setDraggedRequestId] = useState<string | null>(null);
   const [dropPreview, setDropPreview] = useState<{ staffId: string; startAt: string } | null>(null);
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [resizingBlock, setResizingBlock] = useState<{
@@ -489,6 +509,7 @@ export default function AdminCalendarPage() {
     dayIso: string;
   } | null>(null);
   const dateInputRef = useRef<HTMLInputElement | null>(null);
+  const longPressTimeoutRef = useRef<number | null>(null);
   const [blockDraft, setBlockDraft] = useState({
     staffId: 'all',
     date: format(new Date(), 'yyyy-MM-dd'),
@@ -574,6 +595,7 @@ export default function AdminCalendarPage() {
       qc.invalidateQueries({ queryKey: ['admin-header-upcoming'] });
       qc.invalidateQueries({ queryKey: ['appointment-context'] });
       setTouchMoveTarget(null);
+      setPendingTouchPlacement(null);
       toast.success('Часът е преместен.');
     },
     onError: (error: any) => {
@@ -787,9 +809,7 @@ export default function AdminCalendarPage() {
 
   const openAppointmentMove = (appointment: Appointment) => {
     if (typeof window !== 'undefined' && window.innerWidth < 1024) {
-      setTouchMoveTarget(appointment);
-      setCurrentDate(new Date(appointment.start_at));
-      setShowMobileDetails(false);
+      startTouchMoveMode(toMoveTarget(appointment, 'appointment'));
       return;
     }
 
@@ -799,6 +819,49 @@ export default function AdminCalendarPage() {
 
   const handleDropReschedule = (appointmentId: string, startAt: string, staffId: string) => {
     rescheduleMutation.mutate({ id: appointmentId, startAt, staffId });
+  };
+
+  const handleRequestPlacement = async (requestId: string, startAt: string, staffId: string) => {
+    const request = inboxItems.find((item) => item.id === requestId);
+    if (!request) {
+      toast.error('Заявката не е намерена.');
+      return;
+    }
+
+    try {
+      const sameSlot =
+        request.staff_id === staffId &&
+        new Date(request.start_at).toISOString() === new Date(startAt).toISOString();
+
+      if (!sameSlot) {
+        await apiClient.patch(`/appointments/${requestId}/reschedule`, { startAt, staffId });
+      }
+
+      await apiClient.patch(`/appointments/${requestId}/status`, { status: 'confirmed' });
+      await refetch();
+      qc.invalidateQueries({ queryKey: ['appointments-upcoming'] });
+      qc.invalidateQueries({ queryKey: ['admin-header-upcoming'] });
+      qc.invalidateQueries({ queryKey: ['appointment-context'] });
+      setDraggedRequestId(null);
+      setDropPreview(null);
+      setTouchMoveTarget(null);
+      setPendingTouchPlacement(null);
+      setShowRequestsPanel(false);
+      toast.success(sameSlot ? 'Заявката е потвърдена.' : 'Часът е преместен и потвърден.');
+    } catch (error: any) {
+      toast.error(error?.message || 'Неуспешно потвърждение на заявката.');
+    }
+  };
+
+  const confirmTouchMove = async () => {
+    if (!touchMoveTarget || !pendingTouchPlacement) return;
+
+    if (touchMoveTarget.source === 'request') {
+      await handleRequestPlacement(touchMoveTarget.id, pendingTouchPlacement.startAt, pendingTouchPlacement.staffId);
+      return;
+    }
+
+    handleDropReschedule(touchMoveTarget.id, pendingTouchPlacement.startAt, pendingTouchPlacement.staffId);
   };
 
   const appointments = calendarBoard?.appointments ?? [];
@@ -1086,22 +1149,14 @@ export default function AdminCalendarPage() {
   }, [appointmentsInView.length, calendarView, staffFilter, statusFilter, visibleExceptions.length]);
 
   useEffect(() => {
-    if (selectedRecordId) return;
-    const nextSelection = actionItems[0]?.id || updateItems[0]?.id || dayAppointments[0]?.id || null;
-    if (nextSelection) {
-      setSelectedRecordId(nextSelection);
-    }
-  }, [actionItems, dayAppointments, selectedRecordId, updateItems]);
-
-  useEffect(() => {
     if (!selectedRecordId) return;
     const existsInDay = dayAppointments.some((appointment) => appointment.id === selectedRecordId);
     const existsInInbox = inboxItems.some((item) => item.id === selectedRecordId);
     if (existsInDay || existsInInbox) return;
-
-    const nextSelection = actionItems[0]?.id || updateItems[0]?.id || dayAppointments[0]?.id || null;
-    setSelectedRecordId(nextSelection);
-  }, [actionItems, dayAppointments, inboxItems, selectedRecordId, updateItems]);
+    setSelectedRecordId(null);
+    setShowDesktopDetails(false);
+    setShowMobileDetails(false);
+  }, [dayAppointments, inboxItems, selectedRecordId]);
 
   useEffect(() => {
     if (staffFilter === 'all') return;
@@ -1118,9 +1173,6 @@ export default function AdminCalendarPage() {
       if (window.innerWidth < 1024) {
         setShowDesktopDetails(false);
         return;
-      }
-      if (window.innerWidth >= 1536) {
-        setShowDesktopDetails(true);
       }
     };
 
@@ -1169,6 +1221,44 @@ export default function AdminCalendarPage() {
     });
   };
 
+  const toMoveTarget = (
+    record: Pick<
+      Appointment,
+      'id' | 'start_at' | 'end_at' | 'status' | 'staff_id' | 'service_id' | 'client_name' | 'client_phone' | 'service_name' | 'staff_name'
+    >,
+    source: MoveTarget['source'],
+  ): MoveTarget => ({
+    ...record,
+    source,
+  });
+
+  const clearLongPressTimer = () => {
+    if (longPressTimeoutRef.current) {
+      window.clearTimeout(longPressTimeoutRef.current);
+      longPressTimeoutRef.current = null;
+    }
+  };
+
+  const startTouchMoveMode = (target: MoveTarget) => {
+    setTouchMoveTarget(target);
+    setPendingTouchPlacement(null);
+    setDropPreview(null);
+    setCurrentDate(new Date(target.start_at));
+    setShowMobileDetails(false);
+    setShowDesktopDetails(false);
+    setShowRequestsPanel(false);
+    toast.message('Изберете нов 15-минутен слот и потвърдете преместването.');
+  };
+
+  const beginLongPressMove = (target: MoveTarget) => {
+    if (typeof window === 'undefined') return;
+    clearLongPressTimer();
+    longPressTimeoutRef.current = window.setTimeout(() => {
+      startTouchMoveMode(target);
+      longPressTimeoutRef.current = null;
+    }, 320);
+  };
+
   const focusRecord = (id: string, startAt: string) => {
     setSelectedRecordId(id);
     setCurrentDate(new Date(startAt));
@@ -1177,6 +1267,8 @@ export default function AdminCalendarPage() {
       return;
     }
     setShowMobileDetails(false);
+    setShowDesktopDetails(true);
+    setShowRequestsPanel(false);
   };
 
   useEffect(() => {
@@ -1537,8 +1629,16 @@ export default function AdminCalendarPage() {
                       <button
                         key={`${staffMember.id}-touch-slot-${hour}-${minute}`}
                         type="button"
-                        onClick={() => handleDropReschedule(touchMoveTarget.id, nextStart.toISOString(), staffMember.id)}
-                        className="absolute left-0 right-0 z-[1] border border-dashed border-[var(--color-primary)]/30 bg-[var(--color-primary)]/8 text-left transition-colors hover:bg-[var(--color-primary)]/12"
+                        onClick={() => {
+                          setPendingTouchPlacement({ startAt: nextStart.toISOString(), staffId: staffMember.id });
+                          setDropPreview({ staffId: staffMember.id, startAt: nextStart.toISOString() });
+                        }}
+                        className={`absolute left-0 right-0 z-[1] border border-dashed text-left transition-colors ${
+                          pendingTouchPlacement?.staffId === staffMember.id &&
+                          pendingTouchPlacement?.startAt === nextStart.toISOString()
+                            ? 'border-[var(--color-primary)]/45 bg-[var(--color-primary)]/14'
+                            : 'border-[var(--color-primary)]/30 bg-[var(--color-primary)]/8 hover:bg-[var(--color-primary)]/12'
+                        }`}
                         style={{ top: `${top}px`, height: `${compactPixelsPerHour / (60 / CALENDAR_SLOT_MINUTES)}px` }}
                       >
                         <span className="absolute left-2 top-1 rounded-full bg-white/95 px-2 py-1 text-[10px] font-semibold text-[var(--color-primary)] shadow-sm">
@@ -1573,6 +1673,9 @@ export default function AdminCalendarPage() {
                   key={appointment.id}
                   type="button"
                   onClick={() => focusRecord(appointment.id, appointment.start_at)}
+                  onTouchStart={() => beginLongPressMove(toMoveTarget(appointment, 'appointment'))}
+                  onTouchEnd={clearLongPressTimer}
+                  onTouchCancel={clearLongPressTimer}
                   className={`absolute left-2 right-2 z-[2] rounded-2xl border px-3 py-2 text-left shadow-sm ${
                     selectedRecordId === appointment.id ? 'ring-2 ring-[var(--color-primary)]/20' : ''
                   } ${isSecondary ? 'opacity-45 saturate-50' : ''} overflow-hidden`}
@@ -1647,15 +1750,6 @@ export default function AdminCalendarPage() {
                     Потвърди
                   </button>
                 )}
-              {['pending', 'confirmed', 'proposal_pending'].includes(detailedAppointment.status) && (
-                <button
-                  type="button"
-                  onClick={() => prefillWaitlistFromAppointment(detailedAppointment)}
-                  className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-semibold text-amber-700 hover:bg-amber-100"
-                >
-                  Резервен списък
-                </button>
-              )}
               {!['completed', 'cancelled', 'no_show'].includes(detailedAppointment.status) && (
                 <button
                   type="button"
@@ -1853,6 +1947,65 @@ export default function AdminCalendarPage() {
     );
   };
 
+  const renderRequestCard = (request: UpcomingAppointment) => (
+    <div
+      key={request.id}
+      draggable={!isCompactViewport}
+      onDragStart={() => setDraggedRequestId(request.id)}
+      onDragEnd={() => {
+        setDraggedRequestId(null);
+        setDropPreview(null);
+      }}
+      onTouchStart={() => beginLongPressMove(toMoveTarget(request as unknown as Appointment, 'request'))}
+      onTouchEnd={clearLongPressTimer}
+      onTouchCancel={clearLongPressTimer}
+      className="rounded-3xl border border-amber-100 bg-white p-4 shadow-sm"
+    >
+      <button type="button" onClick={() => focusRecord(request.id, request.start_at)} className="w-full text-left">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber-700">
+              Нова заявка
+            </span>
+            <p className="mt-3 text-base font-black text-gray-900">{request.client_name}</p>
+            <p className="mt-1 text-sm text-gray-600">{request.service_name}</p>
+            <p className="mt-1 text-xs text-gray-500">
+              {request.staff_name} · {formatAppointmentDay(request.start_at)}
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Дръпни</p>
+            <p className="mt-2 text-xs text-gray-500">към календара</p>
+          </div>
+        </div>
+      </button>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => handleStatusChange(request.id, 'confirmed')}
+          className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:opacity-90"
+        >
+          Потвърди
+        </button>
+        <button
+          type="button"
+          onClick={() => startTouchMoveMode(toMoveTarget(request as unknown as Appointment, 'request'))}
+          className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-100"
+        >
+          Постави в календара
+        </button>
+        <button
+          type="button"
+          onClick={() => handleStatusChange(request.id, 'cancelled')}
+          className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+        >
+          Откажи
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-5">
       <div className="grid gap-5">
@@ -1911,12 +2064,11 @@ export default function AdminCalendarPage() {
 		                  </div>
                       <button
                         type="button"
-                        onClick={() => setShowDesktopDetails((current) => !current)}
-                        disabled={!selectedRecordId}
-                        className="hidden h-11 items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-45 lg:inline-flex"
+                        onClick={() => setShowRequestsPanel((current) => !current)}
+                        className="hidden h-11 items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 text-sm font-semibold text-amber-700 hover:bg-amber-100 lg:inline-flex"
                       >
                         <ClipboardList className="h-4 w-4" />
-                        {showDesktopDetails ? 'Скрий детайли' : 'Покажи детайли'}
+                        Заявки ({actionItems.length})
                       </button>
 	                  <button
 	                    onClick={() => setCurrentDate(subDays(currentDate, calendarView === 'week' ? 7 : 1))}
@@ -1966,14 +2118,6 @@ export default function AdminCalendarPage() {
                   >
                     <Plus className="w-4 h-4" />
                     Нова резервация
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowWaitlistModal(true)}
-                    className="inline-flex items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-700 hover:bg-amber-100"
-                  >
-                    <ClipboardList className="w-4 h-4" />
-                    Резервен списък ({activeWaitlistEntries.length})
                   </button>
                 </div>
               </div>
@@ -2332,14 +2476,19 @@ export default function AdminCalendarPage() {
                                       }`}
                                       style={{ top: `${slot.top}px`, height: `${pixelsPerHour / (60 / CALENDAR_SLOT_MINUTES)}px` }}
                                       onDragOver={(event) => {
-                                        if (!draggedAppointmentId) return;
+                                        if (!draggedAppointmentId && !draggedRequestId) return;
                                         event.preventDefault();
                                         setDropPreview({ staffId: column.staff.id, startAt: nextStart.toISOString() });
                                       }}
                                       onDrop={(event) => {
                                         event.preventDefault();
-                                        if (!draggedAppointmentId) return;
-                                        handleDropReschedule(draggedAppointmentId, nextStart.toISOString(), column.staff.id);
+                                        if (draggedAppointmentId) {
+                                          handleDropReschedule(draggedAppointmentId, nextStart.toISOString(), column.staff.id);
+                                          return;
+                                        }
+                                        if (draggedRequestId) {
+                                          void handleRequestPlacement(draggedRequestId, nextStart.toISOString(), column.staff.id);
+                                        }
                                       }}
                                     >
                                       {dropPreview?.staffId === column.staff.id &&
@@ -2585,7 +2734,7 @@ export default function AdminCalendarPage() {
 		                                  }`}
 		                                  style={{ top: `${slot.top}px`, height: `${pixelsPerHour / (60 / CALENDAR_SLOT_MINUTES)}px` }}
 		                                  onDragOver={(event) => {
-		                                    if (!draggedAppointmentId) return;
+		                                    if (!draggedAppointmentId && !draggedRequestId) return;
 		                                    event.preventDefault();
 		                                    const [hour, minute] = slot.label.split(':').map(Number);
 		                                    const nextStart = new Date(currentDate);
@@ -2594,11 +2743,16 @@ export default function AdminCalendarPage() {
 		                                  }}
 		                                  onDrop={(event) => {
 		                                    event.preventDefault();
-		                                    if (!draggedAppointmentId) return;
 		                                    const [hour, minute] = slot.label.split(':').map(Number);
 		                                    const nextStart = new Date(currentDate);
 		                                    nextStart.setHours(hour, minute, 0, 0);
-		                                    handleDropReschedule(draggedAppointmentId, nextStart.toISOString(), staffMember.id);
+		                                    if (draggedAppointmentId) {
+                                      handleDropReschedule(draggedAppointmentId, nextStart.toISOString(), staffMember.id);
+                                      return;
+                                    }
+                                    if (draggedRequestId) {
+                                      void handleRequestPlacement(draggedRequestId, nextStart.toISOString(), staffMember.id);
+                                    }
 		                                  }}
 		                                >
                                       {dropPreview?.staffId === staffMember.id &&
@@ -2654,9 +2808,13 @@ export default function AdminCalendarPage() {
 			                                    onDragStart={() => setDraggedAppointmentId(appointment.id)}
 			                                    onDragEnd={() => {
 			                                      setDraggedAppointmentId(null);
+                                          setDraggedRequestId(null);
 			                                      setDropPreview(null);
 			                                    }}
 			                                    onClick={() => focusRecord(appointment.id, appointment.start_at)}
+                                      onTouchStart={() => beginLongPressMove(toMoveTarget(appointment, 'appointment'))}
+                                      onTouchEnd={clearLongPressTimer}
+                                      onTouchCancel={clearLongPressTimer}
 			                                    className={`absolute left-2 right-2 z-[2] rounded-2xl border px-3 py-2 text-left shadow-sm transition-transform hover:scale-[1.01] ${
 			                                      isSelected ? 'ring-2 ring-[var(--color-primary)]/25' : ''
 			                                    } ${isSecondary ? 'opacity-45 saturate-50' : ''} overflow-hidden`}
@@ -2702,6 +2860,9 @@ export default function AdminCalendarPage() {
 	                          <button
 	                            type="button"
 	                            onClick={() => focusRecord(appointment.id, appointment.start_at)}
+                              onTouchStart={() => beginLongPressMove(toMoveTarget(appointment, 'appointment'))}
+                              onTouchEnd={clearLongPressTimer}
+                              onTouchCancel={clearLongPressTimer}
 	                            className="flex w-full gap-3 text-left"
 	                          >
 	                            <div className="flex w-16 flex-shrink-0 flex-col items-center gap-1.5 rounded-[20px] border border-gray-100 bg-gray-50/80 px-2 py-3">
@@ -2761,6 +2922,39 @@ export default function AdminCalendarPage() {
 
       </div>
 
+      {showRequestsPanel && (
+        <div className="fixed inset-0 z-30 bg-black/20" onClick={() => setShowRequestsPanel(false)}>
+          <div
+            className="absolute inset-y-4 left-4 w-[360px] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-[28px] border border-white/70 bg-white/95 p-5 shadow-2xl shadow-black/10 backdrop-blur"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Заявки</p>
+                <h3 className="mt-1 text-lg font-black text-gray-900">Чакат решение</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRequestsPanel(false)}
+                className="flex h-10 w-10 items-center justify-center rounded-2xl border border-gray-200 bg-white text-gray-600"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {actionItems.length ? (
+                actionItems.map((item) => renderRequestCard(item))
+              ) : (
+                <div className="rounded-3xl border border-dashed border-gray-200 bg-gray-50 px-4 py-8 text-sm text-gray-400">
+                  Няма чакащи заявки за решение.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {showDesktopDetails && (selectedAppointment || selectedInboxItem) && (
         <div className="fixed inset-0 z-30 hidden bg-black/20 lg:block" onClick={() => setShowDesktopDetails(false)}>
           <div
@@ -2789,6 +2983,50 @@ export default function AdminCalendarPage() {
           className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+96px)] right-4 z-30 rounded-full bg-gray-900 px-4 py-3 text-sm font-semibold text-white shadow-xl lg:hidden"
         >
           Отвори детайли
+        </button>
+      )}
+
+      {touchMoveTarget && (
+        <div className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+20px)] left-4 right-4 z-40 lg:hidden">
+          <div className="rounded-[24px] border border-white/70 bg-white/95 p-3 shadow-2xl shadow-black/10 backdrop-blur">
+            <p className="text-sm font-semibold text-gray-900">{touchMoveTarget.client_name}</p>
+            <p className="mt-1 text-xs text-gray-500">
+              {pendingTouchPlacement
+                ? `Нов слот: ${formatAppointmentDay(pendingTouchPlacement.startAt)}`
+                : 'Докоснете 15-минутен слот в календара.'}
+            </p>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={confirmTouchMove}
+                disabled={!pendingTouchPlacement || rescheduleMutation.isPending}
+                className="flex-1 rounded-2xl bg-[var(--color-primary)] px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Потвърди преместването
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTouchMoveTarget(null);
+                  setPendingTouchPlacement(null);
+                  setDropPreview(null);
+                }}
+                className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700"
+              >
+                Отказ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!showRequestsPanel && actionItems.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowRequestsPanel(true)}
+          className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+152px)] left-4 z-30 rounded-full bg-amber-500 px-4 py-3 text-sm font-semibold text-white shadow-xl lg:hidden"
+        >
+          Заявки ({actionItems.length})
         </button>
       )}
 

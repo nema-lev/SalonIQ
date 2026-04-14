@@ -413,6 +413,8 @@ export class AppointmentsService {
         a.end_at,
         a.status,
         a.price,
+        a.staff_id,
+        a.service_id,
         a.intake_data,
         a.cancelled_by,
         COALESCE(NULLIF(a.intake_data->>'ownerActionAlert', ''), NULLIF(a.intake_data->'proposal'->>'ownerAlertState', ''), '') as owner_alert_state,
@@ -662,7 +664,7 @@ export class AppointmentsService {
 
     if (!services.length) throw new NotFoundException('Услугата не е намерена');
     const service = services[0];
-    const totalDuration = service.duration_minutes + service.buffer_before_min + service.buffer_after_min;
+    const totalDuration = service.duration_minutes;
 
     // 2. Вземи работното време на служителя за този ден
     const dayOfWeek = format(toZonedTime(date, TIMEZONE), 'EEE').toLowerCase(); // mon, tue, ...
@@ -864,7 +866,7 @@ export class AppointmentsService {
 
     // 2. Изчисли края на резервацията
     const startAt = new Date(dto.startAt);
-    const endAt = addMinutes(startAt, service.duration_minutes + service.buffer_before_min + service.buffer_after_min);
+    const endAt = addMinutes(startAt, service.duration_minutes);
 
     // 3. Провери/създай клиент
     const clientId = await this.findOrCreateClient(tenant.schemaName, dto);
@@ -1624,10 +1626,7 @@ export class AppointmentsService {
       throw new BadRequestException('Невалиден нов час.');
     }
 
-    const totalDuration =
-      Number(appointment.duration_minutes || 0) +
-      Number(appointment.buffer_before_min || 0) +
-      Number(appointment.buffer_after_min || 0);
+    const totalDuration = Number(appointment.duration_minutes || 0);
     const nextEndAt = addMinutes(nextStartAt, totalDuration);
 
     const dayOfWeek = format(toZonedTime(nextStartAt, TIMEZONE), 'EEE').toLowerCase();

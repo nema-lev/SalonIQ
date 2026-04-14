@@ -492,6 +492,7 @@ export default function AdminCalendarPage() {
   const [touchMoveTarget, setTouchMoveTarget] = useState<MoveTarget | null>(null);
   const [pendingTouchPlacement, setPendingTouchPlacement] = useState<{ startAt: string; staffId: string } | null>(null);
   const [calendarView, setCalendarView] = useState<'grid' | 'list' | 'week'>('grid');
+  const [calendarZoom, setCalendarZoom] = useState<'compact' | 'comfortable' | 'precise'>('comfortable');
   const [staffFilter, setStaffFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'requests' | 'booked' | 'cancelled'>('all');
   const [showUnavailable, setShowUnavailable] = useState(true);
@@ -1052,9 +1053,9 @@ export default function AdminCalendarPage() {
       Array.from({ length: calendarRange.endHour - calendarRange.startHour + 1 }, (_, index) => calendarRange.startHour + index),
     [calendarRange.endHour, calendarRange.startHour],
   );
-  const pixelsPerHour = 88;
+  const pixelsPerHour = calendarZoom === 'compact' ? 72 : calendarZoom === 'precise' ? 112 : 88;
   const calendarHeight = (calendarRange.endHour - calendarRange.startHour) * pixelsPerHour;
-  const compactPixelsPerHour = 64;
+  const compactPixelsPerHour = calendarZoom === 'compact' ? 56 : calendarZoom === 'precise' ? 84 : 64;
   const compactCalendarHeight =
     (compactCalendarRange.endHour - compactCalendarRange.startHour) * compactPixelsPerHour;
   const nowIndicatorOffset = useMemo(() => {
@@ -2108,7 +2109,7 @@ export default function AdminCalendarPage() {
                 </div>
 
 		                <div className="flex flex-wrap items-center gap-2">
-		                  <div className="flex w-full items-center rounded-2xl border border-gray-200 bg-white p-1 sm:w-auto">
+		                <div className="flex w-full items-center rounded-2xl border border-gray-200 bg-white p-1 sm:w-auto">
 		                    <button
 		                      type="button"
 		                      onClick={() => setCalendarView('grid')}
@@ -2146,6 +2147,26 @@ export default function AdminCalendarPage() {
 		                      Седмица
 		                    </button>
 		                  </div>
+                      <div className="flex w-full items-center rounded-2xl border border-gray-200 bg-white p-1 sm:w-auto">
+                        {[
+                          { key: 'compact', label: 'Стегнат' },
+                          { key: 'comfortable', label: 'Нормален' },
+                          { key: 'precise', label: 'Прецизен' },
+                        ].map((option) => (
+                          <button
+                            key={option.key}
+                            type="button"
+                            onClick={() => setCalendarZoom(option.key as 'compact' | 'comfortable' | 'precise')}
+                            className={`rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
+                              calendarZoom === option.key
+                                ? 'bg-gray-900 text-white shadow-sm'
+                                : 'text-gray-600 hover:bg-gray-50'
+                            }`}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
                       <button
                         type="button"
                         onClick={() => setShowRequestsPanel((current) => !current)}

@@ -146,4 +146,20 @@ export function setPlatformAuthToken(token: string) {
   localStorage.setItem('saloniq_platform_token', token);
 }
 
+export function getOrCreatePublicDeviceToken(tenantSlug?: string) {
+  if (typeof window === 'undefined') return '';
+  const suffix = tenantSlug?.trim() ? `_${tenantSlug.trim()}` : '';
+  const storageKey = `saloniq_public_device_token${suffix}`;
+  const existing = localStorage.getItem(storageKey);
+  if (existing) return existing;
+
+  const next =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+
+  localStorage.setItem(storageKey, next);
+  return next;
+}
+
 export const apiClient = new ApiClient();

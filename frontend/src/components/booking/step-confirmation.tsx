@@ -6,7 +6,7 @@ import {
   ChevronLeft, Calendar, Clock, User, Phone, Mail,
   Scissors, MapPin, AlertCircle, Loader2, CheckCircle2,
 } from 'lucide-react';
-import { apiClient } from '@/lib/api-client';
+import { apiClient, getOrCreatePublicDeviceToken } from '@/lib/api-client';
 import { formatBulgarianPhoneForDisplay } from '@/lib/phone';
 import { useTenant } from '@/lib/tenant-context';
 import { getBusinessCopy } from '@/lib/business-copy';
@@ -40,6 +40,7 @@ export function StepConfirmation({ formData, onBack, onSuccess }: StepConfirmati
         notes: formData.notes || undefined,
         consentGiven: true,
         publicBaseUrl: typeof window !== 'undefined' ? window.location.origin : undefined,
+        deviceToken: getOrCreatePublicDeviceToken(tenant.slug),
       }),
     onSuccess: (data) => {
       onSuccess(data);

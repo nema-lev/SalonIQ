@@ -8,7 +8,7 @@ import { ChevronLeft, User, Phone, Mail, MessageSquare } from 'lucide-react';
 import { useTenant } from '@/lib/tenant-context';
 import { getBusinessCopy } from '@/lib/business-copy';
 import { formatBulgarianPhoneForDisplay, normalizeBulgarianPhone } from '@/lib/phone';
-import { apiClient } from '@/lib/api-client';
+import { apiClient, getOrCreatePublicDeviceToken } from '@/lib/api-client';
 import type { BookingFormData } from '@/types/booking';
 
 const buildSchema = (collectClientEmail: boolean) =>
@@ -156,7 +156,10 @@ export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
 
     try {
       setUpcomingLoading(true);
-      const result = await apiClient.get<UpcomingLookupResult>('/tenants/client-upcoming', { phone: normalizedPhone });
+      const result = await apiClient.get<UpcomingLookupResult>('/tenants/client-upcoming', {
+        phone: normalizedPhone,
+        deviceToken: getOrCreatePublicDeviceToken(tenant.slug),
+      });
       setUpcomingLookup(result);
     } catch {
       setUpcomingLookup({ phone: normalizedPhone, appointments: [] });

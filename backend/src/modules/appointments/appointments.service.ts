@@ -953,6 +953,7 @@ export class AppointmentsService {
     const intakeData = {
       ...(dto.intakeData || {}),
       ...(dto.publicBaseUrl ? { publicBaseUrl: dto.publicBaseUrl.trim().replace(/\/$/, '') } : {}),
+      ...(dto.deviceToken ? { clientDeviceToken: dto.deviceToken.trim() } : {}),
       stateMeta: this.buildOwnerStateMeta(
         null,
         status,

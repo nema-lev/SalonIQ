@@ -628,6 +628,8 @@ export class TenantController {
       tenant.id,
     );
 
+    await this.applyThemeColorsToServices(tenant.schemaName, nextTheme);
+
     return { updated: true, theme: nextTheme };
   }
 
@@ -914,10 +916,15 @@ export class TenantController {
   async clientUpcoming(
     @CurrentTenant() tenant: any,
     @Query('phone') rawPhone?: string,
+    @Query('deviceToken') deviceToken?: string,
   ) {
     const normalizedPhone = normalizeBulgarianPhone(rawPhone || '');
     if (!normalizedPhone) {
       throw new BadRequestException('Липсва валиден телефон.');
+    }
+    const normalizedDeviceToken = (deviceToken || '').trim();
+    if (!normalizedDeviceToken) {
+      throw new BadRequestException('Липсва device token.');
     }
 
     const phoneVariants = buildBulgarianPhoneVariants(normalizedPhone);
@@ -936,12 +943,13 @@ export class TenantController {
       JOIN services sv ON sv.id = a.service_id
       JOIN staff s ON s.id = a.staff_id
       WHERE c.phone = ANY($1::text[])
+        AND COALESCE(a.intake_data->>'clientDeviceToken', '') = $2::text
         AND a.start_at >= NOW()
         AND a.status NOT IN ('cancelled', 'completed', 'no_show')
       ORDER BY a.start_at ASC
       LIMIT 12
       `,
-      [phoneVariants],
+      [phoneVariants, normalizedDeviceToken],
     );
 
     return {
@@ -1103,6 +1111,54 @@ export class TenantController {
     }
 
     return [...unique];
+  }
+
+  private async applyThemeColorsToServices(schemaName: string, theme: any) {
+    await this.prisma.ensureServiceGroupColumns(schemaName);
+
+    const categories = this.normalizeServiceCategories(theme?.serviceCategories);
+    const palette = this.buildThemeCategoryPalette(
+      typeof theme?.primaryColor === 'string' ? theme.primaryColor : '#7c3aed',
+      typeof theme?.secondaryColor === 'string' ? theme.secondaryColor : '#a855f7',
+    );
+
+    const services = await this.prisma.queryInSchema<{ id: string; category: string | null }[]>(
+      schemaName,
+      `
+      SELECT id, category
+      FROM services
+      WHERE color_mode = 'theme'
+      `,
+      [],
+    );
+
+    for (const service of services) {
+      const color = this.resolveCategoryColor(service.category, categories, palette);
+      await this.prisma.queryInSchema(
+        schemaName,
+        `
+        UPDATE services
+        SET color = $1::text,
+            updated_at = NOW()
+        WHERE id = $2::uuid
+        `,
+        [color, service.id],
+      );
+    }
+  }
+
+  private resolveCategoryColor(category: string | null, categories: string[], palette: string[]) {
+    const normalizedCategory = typeof category === 'string' ? category.trim() : '';
+    if (!normalizedCategory) {
+      return palette[0];
+    }
+
+    const index = categories.findIndex((entry) => entry === normalizedCategory);
+    return palette[Math.max(index, 0) % palette.length];
+  }
+
+  private buildThemeCategoryPalette(primary: string, secondary: string) {
+    return [primary, secondary, '#22c55e', '#f59e0b', '#ec4899', '#3b82f6', '#8b5cf6', '#14b8a6'];
   }
 
   private async persistTelegramCredentialsFromAction(

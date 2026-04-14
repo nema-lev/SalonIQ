@@ -77,4 +77,10 @@ export class CreateAppointmentDto {
   @IsOptional()
   @Transform(({ value }) => value?.trim())
   publicBaseUrl?: string;
+
+  @ApiPropertyOptional({ description: 'Локален идентификатор на устройството за публичен клиентски portal lookup' })
+  @IsString()
+  @IsOptional()
+  @Transform(({ value }) => value?.trim())
+  deviceToken?: string;
 }

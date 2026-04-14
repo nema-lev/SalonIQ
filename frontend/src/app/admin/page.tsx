@@ -525,6 +525,7 @@ export default function AdminCalendarPage() {
   const [showMobileDetails, setShowMobileDetails] = useState(false);
   const [showDesktopDetails, setShowDesktopDetails] = useState(false);
   const [showMoveModal, setShowMoveModal] = useState(false);
+  const [touchMoveTarget, setTouchMoveTarget] = useState<Appointment | null>(null);
   const [calendarView, setCalendarView] = useState<'grid' | 'list' | 'week'>('grid');
   const [staffFilter, setStaffFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'requests' | 'booked' | 'cancelled' | 'completed'>('all');
@@ -632,6 +633,7 @@ export default function AdminCalendarPage() {
       qc.invalidateQueries({ queryKey: ['appointments-upcoming'] });
       qc.invalidateQueries({ queryKey: ['admin-header-upcoming'] });
       qc.invalidateQueries({ queryKey: ['appointment-context'] });
+      setTouchMoveTarget(null);
       toast.success('Часът е преместен.');
     },
     onError: (error: any) => {
@@ -856,6 +858,19 @@ export default function AdminCalendarPage() {
     qc.invalidateQueries({ queryKey: ['appointment-context'] });
     qc.invalidateQueries({ queryKey: ['appointments-calendar-board'] });
     qc.invalidateQueries({ queryKey: ['appointments-waitlist'] });
+  };
+
+  const openAppointmentMove = (appointment: Appointment) => {
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      setTouchMoveTarget(appointment);
+      setCurrentDate(new Date(appointment.start_at));
+      setShowMobileDetails(false);
+      setMobileWorkspace('calendar');
+      return;
+    }
+
+    setTouchMoveTarget(null);
+    setShowMoveModal(true);
   };
 
   const handleDropReschedule = (appointmentId: string, startAt: string, staffId: string) => {
@@ -1404,7 +1419,7 @@ export default function AdminCalendarPage() {
           </button>
           <button
             type="button"
-            onClick={() => setShowMoveModal(true)}
+            onClick={() => openAppointmentMove(appointment)}
             className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-100"
           >
             Премести
@@ -1433,7 +1448,7 @@ export default function AdminCalendarPage() {
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => setShowMoveModal(true)}
+            onClick={() => openAppointmentMove(appointment)}
             className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-100"
           >
             Премести
@@ -1626,6 +1641,39 @@ export default function AdminCalendarPage() {
               );
             })}
 
+            {touchMoveTarget &&
+              compactHourSlots
+                .slice(0, -1)
+                .flatMap((hour) =>
+                  [0, 30].map((minute) => {
+                    const minutesFromStart = hour * 60 + minute - compactCalendarRange.startHour * 60;
+                    if (
+                      minutesFromStart < 0 ||
+                      minutesFromStart >= (compactCalendarRange.endHour - compactCalendarRange.startHour) * 60
+                    ) {
+                      return null;
+                    }
+
+                    const nextStart = new Date(currentDate);
+                    nextStart.setHours(hour, minute, 0, 0);
+                    const top = (minutesFromStart / 60) * compactPixelsPerHour;
+
+                    return (
+                      <button
+                        key={`${staffMember.id}-touch-slot-${hour}-${minute}`}
+                        type="button"
+                        onClick={() => handleDropReschedule(touchMoveTarget.id, nextStart.toISOString(), staffMember.id)}
+                        className="absolute left-0 right-0 z-[1] border-t border-dashed border-[var(--color-primary)]/20 bg-[var(--color-primary)]/5 text-left"
+                        style={{ top: `${top}px`, height: `${compactPixelsPerHour / 2}px` }}
+                      >
+                        <span className="absolute right-2 top-1 rounded-full bg-white/95 px-2 py-1 text-[10px] font-semibold text-[var(--color-primary)] shadow-sm">
+                          Премести тук
+                        </span>
+                      </button>
+                    );
+                  }),
+                )}
+
             {compactNowIndicatorOffset !== null && (
               <div
                 className="absolute left-0 right-0 z-[1] border-t-2 border-rose-400"
@@ -1749,7 +1797,7 @@ export default function AdminCalendarPage() {
               {!['completed', 'cancelled', 'no_show'].includes(detailedAppointment.status) && (
                 <button
                   type="button"
-                  onClick={() => setShowMoveModal(true)}
+                  onClick={() => openAppointmentMove(detailedAppointment)}
                   className="rounded-2xl border border-sky-200 bg-sky-50 px-3 py-3 text-sm font-semibold text-sky-700 hover:bg-sky-100"
                 >
                   Премести
@@ -2581,7 +2629,23 @@ export default function AdminCalendarPage() {
 	                                </div>
 	                              )}
 	                              <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
-	                                На телефон преместването е през бутона <span className="font-semibold">„Премести“</span> в детайлите на записа.
+	                                {touchMoveTarget ? (
+	                                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+	                                    <div>
+	                                      <p className="font-semibold">Изберете нов слот за {touchMoveTarget.client_name}</p>
+	                                      <p className="text-xs text-sky-700/80">Докоснете свободен half-hour слот в графика.</p>
+	                                    </div>
+	                                    <button
+	                                      type="button"
+	                                      onClick={() => setTouchMoveTarget(null)}
+	                                      className="rounded-2xl border border-sky-300 bg-white px-3 py-2 text-xs font-semibold text-sky-700"
+	                                    >
+	                                      Откажи преместването
+	                                    </button>
+	                                  </div>
+	                                ) : (
+	                                  <>На телефон преместването е през бутона <span className="font-semibold">„Премести“</span> в детайлите на записа.</>
+	                                )}
 	                              </div>
 	                              {mobileBoardStaff.map((staffMember) => renderCompactStaffBoard(staffMember))}
 	                            </div>

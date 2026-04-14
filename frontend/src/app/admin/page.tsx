@@ -1183,6 +1183,10 @@ export default function AdminCalendarPage() {
       }),
     [appointments, monthDays, staffFilter, statusFilter],
   );
+  const monthMaxLoad = useMemo(
+    () => Math.max(...monthCells.map((cell) => cell.appointments.length), 1),
+    [monthCells],
+  );
   const calendarTitle = useMemo(() => {
     if (calendarView === 'month') {
       return format(currentDate, "LLLL yyyy 'г.'", { locale: bg });
@@ -1278,6 +1282,10 @@ export default function AdminCalendarPage() {
   const previewDurationMinutes = useMemo(
     () => getEventDurationMinutes(activePreviewTarget?.start_at, activePreviewTarget?.end_at),
     [activePreviewTarget],
+  );
+  const previewStaffName = useMemo(
+    () => calendarStaff.find((staff) => staff.id === dropPreview?.staffId)?.name ?? null,
+    [calendarStaff, dropPreview?.staffId],
   );
 
   const getPreviewMetrics = useCallback(
@@ -2496,6 +2504,15 @@ export default function AdminCalendarPage() {
                                   {monthCells.map((cell) => {
                                     const isCurrentMonth = cell.day.getMonth() === currentDate.getMonth();
                                     const isSelectedDay = isSameDay(cell.day, currentDate);
+                                    const loadRatio = cell.appointments.length / monthMaxLoad;
+                                    const heatClass =
+                                      loadRatio >= 0.8
+                                        ? 'bg-rose-500'
+                                        : loadRatio >= 0.55
+                                          ? 'bg-amber-400'
+                                          : loadRatio >= 0.25
+                                            ? 'bg-emerald-400'
+                                            : 'bg-gray-200';
                                     return (
                                       <button
                                         key={cell.day.toISOString()}
@@ -2504,12 +2521,18 @@ export default function AdminCalendarPage() {
                                           setCurrentDate(cell.day);
                                           setCalendarView('grid');
                                         }}
-                                        className={`min-h-[136px] rounded-[22px] border p-3 text-left transition ${
+                                        className={`min-h-[128px] rounded-[22px] border p-3 text-left transition ${
                                           isSelectedDay
                                             ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/8 shadow-sm'
                                             : 'border-gray-200 bg-white hover:border-[var(--color-primary)]/25 hover:bg-gray-50/80'
                                         } ${!isCurrentMonth ? 'opacity-45' : ''}`}
                                       >
+                                        <div className="mb-3 h-1.5 overflow-hidden rounded-full bg-gray-100">
+                                          <div
+                                            className={`h-full rounded-full ${heatClass}`}
+                                            style={{ width: `${Math.max(loadRatio * 100, cell.appointments.length ? 12 : 0)}%` }}
+                                          />
+                                        </div>
                                         <div className="flex items-center justify-between gap-2">
                                           <span className={`text-sm font-black ${isToday(cell.day) ? 'text-[var(--color-primary)]' : 'text-gray-900'}`}>
                                             {format(cell.day, 'd')}
@@ -2521,22 +2544,22 @@ export default function AdminCalendarPage() {
                                         <div className="mt-3 flex flex-wrap gap-1.5">
                                           {cell.requests > 0 && (
                                             <span className="rounded-full bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">
-                                              {cell.requests} заявки
+                                              {cell.requests} заяв.
                                             </span>
                                           )}
                                           {cell.booked > 0 && (
                                             <span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700">
-                                              {cell.booked} запазени
+                                              {cell.booked} запаз.
                                             </span>
                                           )}
                                           {cell.cancelled > 0 && (
                                             <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-600">
-                                              {cell.cancelled} вторични
+                                              {cell.cancelled} втор.
                                             </span>
                                           )}
                                         </div>
                                         <div className="mt-3 space-y-1.5">
-                                          {cell.appointments.slice(0, 3).map((appointment) => (
+                                          {cell.appointments.slice(0, 2).map((appointment) => (
                                             <div
                                               key={appointment.id}
                                               className="truncate rounded-xl border border-gray-100 bg-gray-50/80 px-2 py-1.5 text-[11px] font-semibold text-gray-700"
@@ -2544,9 +2567,9 @@ export default function AdminCalendarPage() {
                                               {format(new Date(appointment.start_at), 'HH:mm')} · {appointment.client_name}
                                             </div>
                                           ))}
-                                          {cell.appointments.length > 3 && (
+                                          {cell.appointments.length > 2 && (
                                             <div className="text-[11px] font-semibold text-gray-400">
-                                              +{cell.appointments.length - 3} още
+                                              +{cell.appointments.length - 2} още
                                             </div>
                                           )}
                                         </div>
@@ -3329,6 +3352,21 @@ export default function AdminCalendarPage() {
                 Отказ
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {(draggedAppointmentId || draggedRequestId) && activePreviewTarget && (
+        <div className="pointer-events-none fixed bottom-4 left-1/2 z-40 hidden -translate-x-1/2 rounded-2xl border border-[var(--color-primary)]/20 bg-white/95 px-4 py-3 shadow-2xl shadow-black/10 backdrop-blur lg:flex lg:min-w-[280px] lg:max-w-[420px] lg:items-center lg:justify-between lg:gap-4">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-black text-gray-900">{activePreviewTarget.client_name}</p>
+            <p className="truncate text-xs font-semibold text-gray-500">{activePreviewTarget.service_name}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Нов слот</p>
+            <p className="mt-1 text-sm font-bold text-[var(--color-primary)]">
+              {dropPreview ? `${format(new Date(dropPreview.startAt), 'HH:mm')} · ${previewStaffName || 'специалист'}` : 'Изберете място'}
+            </p>
           </div>
         </div>
       )}

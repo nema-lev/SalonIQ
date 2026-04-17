@@ -15,11 +15,9 @@ import {
   Loader2,
   Mail,
   Plus,
-  Rows3,
   SlidersHorizontal,
   Trash2,
   User,
-  Users,
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -100,6 +98,12 @@ interface ClientSuggestion {
   phone: string;
   email: string | null;
   total_visits: number;
+}
+
+interface BookingPrefill {
+  date: string;
+  staffId: string;
+  preferredSlot: string;
 }
 
 type MoveTarget = {
@@ -370,6 +374,24 @@ function formatEuroAmount(value: number | string | null | undefined) {
   }).format(Number.isFinite(amount) ? amount : 0)} €`;
 }
 
+function getAppointmentStatusCueClass(item: { status?: string; owner_view_state?: string }) {
+  const key = item.owner_view_state || item.status || 'pending';
+
+  if (['pending', 'requested', 'proposal_pending', 'proposal_sent'].includes(key)) {
+    return 'bg-amber-400';
+  }
+
+  if (['cancelled', 'rejected', 'proposal_rejected', 'cancelled_by_owner', 'cancelled_by_client'].includes(key)) {
+    return 'bg-rose-400';
+  }
+
+  if (['completed', 'no_show'].includes(key)) {
+    return 'bg-slate-400';
+  }
+
+  return 'bg-emerald-400';
+}
+
 function getInitials(name: string) {
   return name
     .split(/\s+/)
@@ -482,6 +504,7 @@ export default function AdminCalendarPage() {
   const qc = useQueryClient();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [showBookingModal, setShowBookingModal] = useState(false);
+  const [bookingPrefill, setBookingPrefill] = useState<BookingPrefill | null>(null);
   const [showBlockEditor, setShowBlockEditor] = useState(false);
   const [showWaitlistModal, setShowWaitlistModal] = useState(false);
   const [showRequestsPanel, setShowRequestsPanel] = useState(false);
@@ -519,6 +542,7 @@ export default function AdminCalendarPage() {
   const dateInputRef = useRef<HTMLInputElement | null>(null);
   const longPressTimeoutRef = useRef<number | null>(null);
   const suppressTapUntilRef = useRef(0);
+  const didAutoSelectStaffRef = useRef(false);
   const calendarColumnRegistryRef = useRef<
     Record<
       string,
@@ -831,6 +855,7 @@ export default function AdminCalendarPage() {
 
   const handleBookingCreated = (startAt: string) => {
     setShowBookingModal(false);
+    setBookingPrefill(null);
     setCurrentDate(new Date(startAt));
     qc.invalidateQueries({ queryKey: ['appointments'] });
     qc.invalidateQueries({ queryKey: ['appointments-upcoming'] });
@@ -1296,9 +1321,16 @@ export default function AdminCalendarPage() {
   }, [dayAppointments, inboxItems, selectedRecordId]);
 
   useEffect(() => {
-    if (staffFilter === 'all') return;
-    if (!calendarStaff.some((staff) => staff.id === staffFilter)) {
-      setStaffFilter('all');
+    if (!calendarStaff.length) return;
+
+    if (!didAutoSelectStaffRef.current && staffFilter === 'all') {
+      setStaffFilter(calendarStaff[0].id);
+      didAutoSelectStaffRef.current = true;
+      return;
+    }
+
+    if (staffFilter !== 'all' && !calendarStaff.some((staff) => staff.id === staffFilter)) {
+      setStaffFilter(calendarStaff[0].id);
     }
   }, [calendarStaff, staffFilter]);
 
@@ -1437,6 +1469,19 @@ export default function AdminCalendarPage() {
   }, [calendarStaff, dateKey, staffFilter]);
 
   const goToday = () => setCurrentDate(new Date());
+
+  const openBookingWithPrefill = useCallback(
+    (day: Date, staffId: string, preferredSlot: string) => {
+      setCurrentDate(new Date(day));
+      setBookingPrefill({
+        date: format(day, 'yyyy-MM-dd'),
+        staffId,
+        preferredSlot,
+      });
+      setShowBookingModal(true);
+    },
+    [],
+  );
 
   const openBlockEditorForBlock = (block: StaffException) => {
     setEditingBlockId(block.id);
@@ -1630,59 +1675,44 @@ export default function AdminCalendarPage() {
   };
 
   const renderPrimaryActions = (appointment: Appointment) => {
-    if (appointment.status === 'pending' || appointment.status === 'proposal_pending') {
-      return (
-        <div className="flex flex-wrap gap-2">
+    if (['completed', 'cancelled', 'no_show'].includes(appointment.status)) return null;
+
+    const canConfirm = appointment.status === 'pending' || appointment.status === 'proposal_pending';
+    const phoneHref = appointment.client_phone ? `tel:${appointment.client_phone}` : null;
+
+    return (
+      <div className="flex flex-wrap gap-2">
+        {canConfirm && (
           <button
             onClick={() => handleStatusChange(appointment.id, 'confirmed')}
-            className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90"
+            className="rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90"
           >
             Потвърди
           </button>
-          <button
-            type="button"
-            onClick={() => openAppointmentMove(appointment)}
-            className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-100"
+        )}
+        <button
+          type="button"
+          onClick={() => openAppointmentMove(appointment)}
+          className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-700 hover:bg-sky-100"
+        >
+          Премести
+        </button>
+        <button
+          onClick={() => handleStatusChange(appointment.id, 'cancelled')}
+          className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 hover:bg-rose-100"
+        >
+          {canConfirm ? 'Откажи' : 'Отмени'}
+        </button>
+        {phoneHref && (
+          <a
+            href={phoneHref}
+            className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50"
           >
-            Премести
-          </button>
-          <button
-            onClick={() => handleStatusChange(appointment.id, 'cancelled')}
-            className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100"
-          >
-            Откажи
-          </button>
-        </div>
-      );
-    }
-
-    if (appointment.status === 'confirmed') {
-      return (
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => openAppointmentMove(appointment)}
-            className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 hover:bg-sky-100"
-          >
-            Премести
-          </button>
-          <button
-            onClick={() => handleStatusChange(appointment.id, 'no_show')}
-            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-          >
-            Неявил се
-          </button>
-          <button
-            onClick={() => handleStatusChange(appointment.id, 'cancelled')}
-            className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100"
-          >
-            Отмени
-          </button>
-        </div>
-      );
-    }
-
-    return null;
+            Обади се
+          </a>
+        )}
+      </div>
+    );
   };
 
   const renderCalendarEmptyState = () => (
@@ -1699,9 +1729,12 @@ export default function AdminCalendarPage() {
 
     return (
       <>
-        <p className="text-[11px] font-bold text-gray-700">
-          {startTime} - {endTime}
-        </p>
+        <div className="flex items-center gap-2">
+          <span className={`h-2.5 w-2.5 flex-shrink-0 rounded-full ${getAppointmentStatusCueClass(appointment)}`} />
+          <p className="text-[11px] font-bold text-gray-700">
+            {startTime} - {endTime}
+          </p>
+        </div>
         <p className={`mt-1 font-black text-gray-900 ${mode === 'tiny' ? 'line-clamp-1 text-[13px]' : 'line-clamp-2 text-sm'}`}>
           {appointment.client_name}
         </p>
@@ -1842,15 +1875,26 @@ export default function AdminCalendarPage() {
               );
             }}
             onClick={(event) => {
-              if (!touchMoveTarget) return;
-              updateTouchPlacementFromPoint(
-                event.clientY,
-                event.currentTarget.getBoundingClientRect(),
-                staffMember.id,
-                currentDate,
-                compactCalendarRange.startHour,
-                compactPixelsPerHour,
-              );
+              if (touchMoveTarget) {
+                updateTouchPlacementFromPoint(
+                  event.clientY,
+                  event.currentTarget.getBoundingClientRect(),
+                  staffMember.id,
+                  currentDate,
+                  compactCalendarRange.startHour,
+                  compactPixelsPerHour,
+                );
+                return;
+              }
+
+              const rect = event.currentTarget.getBoundingClientRect();
+              const slotHeight = compactPixelsPerHour / (60 / CALENDAR_SLOT_MINUTES);
+              const relativeY = Math.min(Math.max(event.clientY - rect.top, 0), rect.height);
+              const slotIndex = Math.floor(relativeY / slotHeight);
+              const totalMinutes = compactCalendarRange.startHour * 60 + slotIndex * CALENDAR_SLOT_MINUTES;
+              const slotDate = new Date(currentDate);
+              slotDate.setHours(Math.floor(totalMinutes / 60), totalMinutes % 60, 0, 0);
+              openBookingWithPrefill(currentDate, staffMember.id, format(slotDate, 'HH:mm'));
             }}
           >
             {overlays.map((overlay, index) => (
@@ -1874,7 +1918,10 @@ export default function AdminCalendarPage() {
                 {overlay.block && (
                   <button
                     type="button"
-                    onClick={() => openBlockEditorForBlock(overlay.block!)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openBlockEditorForBlock(overlay.block!);
+                    }}
                     className="absolute right-2 top-2 rounded-full border border-white/80 bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-600 shadow-sm"
                   >
                     Редактирай
@@ -1943,7 +1990,10 @@ export default function AdminCalendarPage() {
                 <button
                   key={appointment.id}
                   type="button"
-	                  onClick={() => focusRecord(appointment.id, appointment.start_at)}
+	                  onClick={(event) => {
+                      event.stopPropagation();
+                      focusRecord(appointment.id, appointment.start_at);
+                    }}
 	                  onTouchStart={() => beginLongPressMove(toMoveTarget(appointment, 'appointment'))}
 	                  onTouchMove={clearLongPressTimer}
 	                  onTouchEnd={clearLongPressTimer}
@@ -2009,47 +2059,17 @@ export default function AdminCalendarPage() {
 
         {detailedAppointment && (
           <div className="grid gap-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Действия за часа</p>
-            <div className="grid grid-cols-2 gap-2">
-              {['pending', 'proposal_pending'].includes(detailedAppointment.status) && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleStatusChange(detailedAppointment.id, 'confirmed')
-                    }
-                    className="rounded-2xl bg-emerald-600 px-3 py-3 text-sm font-semibold text-white hover:opacity-90"
-                  >
-                    Потвърди
-                  </button>
-                )}
-              {!['completed', 'cancelled', 'no_show'].includes(detailedAppointment.status) && (
-                <button
-                  type="button"
-                  onClick={() => openAppointmentMove(detailedAppointment)}
-                  className="rounded-2xl border border-sky-200 bg-sky-50 px-3 py-3 text-sm font-semibold text-sky-700 hover:bg-sky-100"
-                >
-                  Премести
-                </button>
-              )}
-              {detailedAppointment.status === 'confirmed' && (
-                <button
-                  type="button"
-                  onClick={() => handleStatusChange(detailedAppointment.id, 'no_show')}
-                  className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-                >
-                  Неявил се
-                </button>
-              )}
-              {!['completed', 'cancelled', 'no_show'].includes(detailedAppointment.status) && (
-                <button
-                  type="button"
-                  onClick={() => handleStatusChange(detailedAppointment.id, 'cancelled')}
-                  className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-3 text-sm font-semibold text-rose-700 hover:bg-rose-100"
-                >
-                  {detailedAppointment.status === 'confirmed' ? 'Отмени' : 'Откажи'}
-                </button>
-              )}
-            </div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Следващи действия</p>
+            <div className="flex flex-wrap gap-2">{renderPrimaryActions(detailedAppointment)}</div>
+            {detailedAppointment.status === 'confirmed' && (
+              <button
+                type="button"
+                onClick={() => handleStatusChange(detailedAppointment.id, 'no_show')}
+                className="w-fit rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+              >
+                Отбележи неявяване
+              </button>
+            )}
           </div>
         )}
 
@@ -2299,85 +2319,48 @@ export default function AdminCalendarPage() {
                   </p>
                 </div>
 
-		                <div className="flex flex-wrap items-center gap-2">
-		                <div className="flex w-full items-center rounded-2xl border border-gray-200 bg-white p-1 sm:w-auto">
-		                    <button
-		                      type="button"
-		                      onClick={() => setCalendarView('grid')}
-		                      className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
-	                        calendarView === 'grid'
-	                          ? 'bg-[var(--color-primary)] text-white shadow-lg shadow-[var(--color-primary)]/20'
-	                          : 'text-gray-600'
-	                      }`}
-	                    >
-	                      <LayoutGrid className="h-4 w-4" />
-	                      Грид
-	                    </button>
-	                    <button
-	                      type="button"
-	                      onClick={() => setCalendarView('list')}
-	                      className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
-	                        calendarView === 'list'
-	                          ? 'bg-[var(--color-primary)] text-white shadow-lg shadow-[var(--color-primary)]/20'
-	                          : 'text-gray-600'
-	                      }`}
-	                    >
-	                      <Rows3 className="h-4 w-4" />
-	                      Списък
-	                    </button>
-		                    <button
-		                      type="button"
-		                      onClick={() => setCalendarView('week')}
-	                      className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
-	                        calendarView === 'week'
-	                          ? 'bg-[var(--color-primary)] text-white shadow-lg shadow-[var(--color-primary)]/20'
-	                          : 'text-gray-600'
-	                      }`}
-	                    >
-		                      <CalendarDays className="h-4 w-4" />
-		                      Седмица
-		                    </button>
-                        <button
-                          type="button"
-                          onClick={() => setCalendarView('month')}
-                          className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
-                            calendarView === 'month'
-                              ? 'bg-[var(--color-primary)] text-white shadow-lg shadow-[var(--color-primary)]/20'
-                              : 'text-gray-600'
-                          }`}
-                        >
-                          <CalendarDays className="h-4 w-4" />
-                          Месец
-                        </button>
-			                  </div>
-                      <div className="flex w-full items-center rounded-2xl border border-gray-200 bg-white p-1 sm:w-auto">
-                        {[
-                          { key: 'compact', label: 'Стегнат' },
-                          { key: 'comfortable', label: 'Нормален' },
-                          { key: 'precise', label: 'Прецизен' },
-                        ].map((option) => (
-                          <button
-                            key={option.key}
-                            type="button"
-                            onClick={() => setCalendarZoom(option.key as 'compact' | 'comfortable' | 'precise')}
-                            className={`rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
-                              calendarZoom === option.key
-                                ? 'bg-gray-900 text-white shadow-sm'
-                                : 'text-gray-600 hover:bg-gray-50'
-                            }`}
-                          >
-                            {option.label}
-                          </button>
-                        ))}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setShowRequestsPanel((current) => !current)}
-                        className="hidden h-11 items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 text-sm font-semibold text-amber-700 hover:bg-amber-100 lg:inline-flex"
-                      >
-                        <ClipboardList className="h-4 w-4" />
-                        Заявки ({actionItems.length})
-                      </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex w-full items-center rounded-2xl border border-gray-200 bg-white p-1 sm:w-auto">
+                    <button
+                      type="button"
+                      onClick={() => setCalendarView('grid')}
+                      className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
+                        calendarView === 'grid'
+                          ? 'bg-[var(--color-primary)] text-white shadow-lg shadow-[var(--color-primary)]/20'
+                          : 'text-gray-600'
+                      }`}
+                    >
+                      <LayoutGrid className="h-4 w-4" />
+                      Ден
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCalendarView('week')}
+                      className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
+                        calendarView === 'week'
+                          ? 'bg-[var(--color-primary)] text-white shadow-lg shadow-[var(--color-primary)]/20'
+                          : 'text-gray-600'
+                      }`}
+                    >
+                      <CalendarDays className="h-4 w-4" />
+                      Седмица
+                    </button>
+                  </div>
+                  <div className="flex min-w-[220px] flex-1 items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4">
+                    <User className="h-4 w-4 text-gray-400" />
+                    <select
+                      value={staffFilter}
+                      onChange={(event) => setStaffFilter(event.target.value)}
+                      className="h-11 w-full bg-transparent text-sm font-semibold text-gray-700 outline-none"
+                    >
+                      <option value="all">Всички специалисти</option>
+                      {calendarStaff.map((staffMember) => (
+                        <option key={staffMember.id} value={staffMember.id}>
+                          {staffMember.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 	                  <button
 		                    onClick={() =>
                           setCurrentDate(
@@ -2429,7 +2412,18 @@ export default function AdminCalendarPage() {
                   )}
                   <button
                     type="button"
-                    onClick={() => setShowBookingModal(true)}
+                    onClick={() => {
+                      setBookingPrefill(
+                        staffFilter !== 'all'
+                          ? {
+                              date: dateKey,
+                              staffId: staffFilter,
+                              preferredSlot: '',
+                            }
+                          : null,
+                      );
+                      setShowBookingModal(true);
+                    }}
                     className="inline-flex items-center gap-2 rounded-2xl bg-[var(--color-primary)] px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-[var(--color-primary)]/20 transition-opacity hover:opacity-90"
                   >
                     <Plus className="w-4 h-4" />
@@ -2480,50 +2474,9 @@ export default function AdminCalendarPage() {
 	                      </div>
 	                      <div className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 text-[11px] font-semibold text-gray-600">
 	                        <SlidersHorizontal className="h-4 w-4" />
-	                        {staffFilter === 'all' ? 'Показани са всички специалисти' : `Филтър: ${visibleStaffColumns[0]?.name ?? 'специалист'}`}
-	                      </div>
-	                    </div>
-
-	                    <div className="overflow-x-auto pb-1">
-	                      <div className="flex min-w-max gap-2">
-	                        <button
-	                          type="button"
-	                          onClick={() => setStaffFilter('all')}
-	                          className={`inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm font-semibold transition-colors ${
-	                            staffFilter === 'all'
-	                              ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
-	                              : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
-	                          }`}
-	                        >
-	                          <Users className="h-4 w-4" />
-	                          Всички
-	                        </button>
-	                        {calendarStaff.map((staffMember) => {
-	                          const isActive = staffFilter === staffMember.id;
-	                          return (
-	                            <button
-	                              key={staffMember.id}
-	                              type="button"
-	                              onClick={() => setStaffFilter(staffMember.id)}
-	                              className={`inline-flex items-center gap-3 rounded-2xl border px-3 py-2 text-left transition-colors ${
-	                                isActive
-	                                  ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10'
-	                                  : 'border-gray-200 bg-white hover:bg-gray-50'
-	                              }`}
-	                            >
-	                              <span
-	                                className="flex h-9 w-9 items-center justify-center rounded-full text-xs font-black text-white"
-	                                style={{ backgroundColor: staffMember.color || 'var(--color-primary)' }}
-	                              >
-	                                {getInitials(staffMember.name)}
-	                              </span>
-	                              <span className="min-w-0">
-	                                <span className="block truncate text-sm font-semibold text-gray-900">{staffMember.name}</span>
-	                                <span className="block text-xs text-gray-500">{staffMember.appointments.length} записа</span>
-	                              </span>
-	                            </button>
-	                          );
-	                        })}
+	                        {staffFilter === 'all'
+                            ? 'Показани са всички специалисти'
+                            : `Активен специалист: ${visibleStaffColumns[0]?.name ?? 'специалист'}`}
 	                      </div>
 	                    </div>
 
@@ -2546,6 +2499,14 @@ export default function AdminCalendarPage() {
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setShowRequestsPanel((current) => !current)}
+                            className="hidden items-center gap-2 rounded-2xl border border-amber-200 bg-white px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-50 lg:inline-flex"
+                          >
+                            <ClipboardList className="h-4 w-4" />
+                            Заявки ({actionItems.length})
+                          </button>
                           <button
                             type="button"
                             onClick={() => setShowUnavailable((current) => !current)}
@@ -2613,7 +2574,12 @@ export default function AdminCalendarPage() {
 	                                    </button>
 	                                  </div>
 	                                ) : (
-	                                  <>На телефон преместването е през бутона <span className="font-semibold">„Премести“</span> в детайлите на записа.</>
+	                                  <div className="flex flex-col gap-1">
+                                      <p className="font-semibold">Докоснете празен слот, за да създадете нов час.</p>
+                                      <p className="text-xs text-sky-700/80">
+                                        На телефон преместването остава през бутона <span className="font-semibold">„Премести“</span> или със задържане.
+                                      </p>
+                                    </div>
 	                                )}
 	                              </div>
 	                              {mobileBoardStaff.map((staffMember) => renderCompactStaffBoard(staffMember))}
@@ -2893,6 +2859,10 @@ export default function AdminCalendarPage() {
                                         if (draggedRequestId) {
                                           void handleRequestPlacement(draggedRequestId, nextStart.toISOString(), column.staff.id);
                                         }
+                                      }}
+                                      onClick={() => {
+                                        if (draggedAppointmentId || draggedRequestId || touchMoveTarget) return;
+                                        openBookingWithPrefill(column.day, column.staff.id, slot.label);
                                       }}
                                     >
                                       {dropPreview?.staffId === column.staff.id &&
@@ -3188,10 +3158,14 @@ export default function AdminCalendarPage() {
                                       handleDropReschedule(draggedAppointmentId, nextStart.toISOString(), staffMember.id);
                                       return;
                                     }
-                                    if (draggedRequestId) {
-                                      void handleRequestPlacement(draggedRequestId, nextStart.toISOString(), staffMember.id);
-                                    }
+		                                    if (draggedRequestId) {
+		                                      void handleRequestPlacement(draggedRequestId, nextStart.toISOString(), staffMember.id);
+		                                    }
 		                                  }}
+                                      onClick={() => {
+                                        if (draggedAppointmentId || draggedRequestId || touchMoveTarget) return;
+                                        openBookingWithPrefill(currentDate, staffMember.id, slot.label);
+                                      }}
 		                                >
                                       {dropPreview?.staffId === staffMember.id &&
                                       dropPreview?.startAt &&
@@ -3315,7 +3289,6 @@ export default function AdminCalendarPage() {
 	                    {filteredDayAppointments.map((appointment) => {
 	                      const startTime = format(new Date(appointment.start_at), 'HH:mm');
 	                      const endTime = format(new Date(appointment.end_at), 'HH:mm');
-	                      const statusCfg = getOwnerStatusPresentation(appointment);
 	                      const isSelected = selectedRecordId === appointment.id;
                         const isSecondary = isSecondaryOwnerState(appointment.owner_view_state || appointment.status);
 
@@ -3349,38 +3322,18 @@ export default function AdminCalendarPage() {
 	                            <div className="min-w-0 flex-1">
 	                              <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
 	                                <div className="min-w-0">
-	                                  <div className="flex flex-wrap items-center gap-2">
-	                                    <p className="truncate text-base font-black text-gray-900">{appointment.client_name}</p>
-	                                    <span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${statusCfg.cls}`}>
-	                                      {statusCfg.label}
-	                                    </span>
-	                                  </div>
+	                                  <p className="truncate text-base font-black text-gray-900">{appointment.client_name}</p>
 	                                  <p className="mt-1 text-sm font-semibold text-gray-700">{appointment.service_name}</p>
 		                                  <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-gray-500">
-	                                    <span className="flex items-center gap-1">
-	                                      <User className="w-3.5 h-3.5" />
-	                                      {appointment.staff_name}
-	                                    </span>
 	                                    <span className="flex items-center gap-1">
 	                                      <Clock className="w-3.5 h-3.5" />
 	                                      {startTime} – {endTime}
 	                                    </span>
-		                                    {appointment.price != null && (
-		                                      <span className="font-semibold text-gray-700">{formatEuroAmount(appointment.price)}</span>
-		                                    )}
 		                                  </div>
 	                                </div>
-
-	                                {appointment.internal_notes ? (
-	                                  <div className="max-w-sm text-[11px] text-gray-500 lg:text-right">
-	                                    <p className="line-clamp-2">{appointment.internal_notes}</p>
-	                                  </div>
-	                                ) : null}
 	                              </div>
 	                            </div>
 	                          </button>
-
-	                          <div className="mt-1 self-center">{renderPrimaryActions(appointment)}</div>
 	                        </div>
 	                      );
 	                    })}
@@ -3429,13 +3382,13 @@ export default function AdminCalendarPage() {
       )}
 
       {showDesktopDetails && (selectedAppointment || selectedInboxItem) && (
-        <div className="fixed inset-0 z-30 hidden bg-black/20 lg:block" onClick={() => setShowDesktopDetails(false)}>
+        <div className="fixed inset-0 z-30 hidden bg-black/40 p-4 lg:flex lg:items-center lg:justify-center" onClick={() => setShowDesktopDetails(false)}>
           <div
-            className="absolute inset-y-4 right-4 w-[340px] overflow-y-auto rounded-[28px] border border-white/70 bg-white/95 p-5 shadow-2xl shadow-black/10 backdrop-blur"
+            className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-[32px] border border-white/70 bg-white/95 p-5 shadow-2xl shadow-black/10 backdrop-blur"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Детайлен панел</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Детайли за часа</p>
               <button
                 type="button"
                 onClick={() => setShowDesktopDetails(false)}
@@ -4107,8 +4060,13 @@ export default function AdminCalendarPage() {
 
 	      <AdminBookingModal
 	        open={showBookingModal}
-	        defaultDate={dateKey}
-        onClose={() => setShowBookingModal(false)}
+	        defaultDate={bookingPrefill?.date || dateKey}
+          defaultStaffId={bookingPrefill?.staffId || ''}
+          preferredSlot={bookingPrefill?.preferredSlot || ''}
+        onClose={() => {
+          setShowBookingModal(false);
+          setBookingPrefill(null);
+        }}
         onCreated={handleBookingCreated}
       />
     </div>
@@ -4308,11 +4266,15 @@ function AppointmentMoveModal({
 function AdminBookingModal({
   open,
   defaultDate,
+  defaultStaffId,
+  preferredSlot,
   onClose,
   onCreated,
 }: {
   open: boolean;
   defaultDate: string;
+  defaultStaffId: string;
+  preferredSlot: string;
   onClose: () => void;
   onCreated: (startAt: string) => void;
 }) {
@@ -4334,7 +4296,7 @@ function AdminBookingModal({
 
   const resetForm = () => {
     setServiceId('');
-    setStaffId('');
+    setStaffId(defaultStaffId);
     setSelectedDate(defaultDate);
     setSelectedSlot('');
     setClientName('');
@@ -4347,10 +4309,18 @@ function AdminBookingModal({
 
   useEffect(() => {
     if (open) {
+      setServiceId('');
+      setStaffId(defaultStaffId);
       setSelectedDate(defaultDate);
       setSelectedSlot('');
+      setClientName('');
+      setClientPhone('');
+      setClientEmail('');
+      setNotes('');
+      setLookupField('name');
+      setShowSuggestions(false);
     }
-  }, [defaultDate, open]);
+  }, [defaultDate, defaultStaffId, open]);
 
   const { data: services, isLoading: servicesLoading } = useQuery({
     queryKey: ['admin-booking-services'],
@@ -4422,6 +4392,26 @@ function AdminBookingModal({
     !!selectedSlot &&
     clientName.trim().length >= 2 &&
     /^\+359\d{9}$/.test(normalizeBulgarianPhone(clientPhone));
+
+  useEffect(() => {
+    if (!staff?.length) return;
+
+    if (defaultStaffId && staff.some((member) => member.id === defaultStaffId)) {
+      setStaffId((current) => current || defaultStaffId);
+      return;
+    }
+
+    if (staffId && !staff.some((member) => member.id === staffId)) {
+      setStaffId('');
+      setSelectedSlot('');
+    }
+  }, [defaultStaffId, staff, staffId]);
+
+  useEffect(() => {
+    if (!preferredSlot || !slots?.length) return;
+    if (!slots.some((slot) => slot.start === preferredSlot)) return;
+    setSelectedSlot((current) => current || preferredSlot);
+  }, [preferredSlot, slots]);
 
   const chooseClient = (client: ClientSuggestion) => {
       setClientName(client.name);
@@ -4513,6 +4503,11 @@ function AdminBookingModal({
                   }}
                   className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-[var(--color-primary)]"
                 />
+                {preferredSlot ? (
+                  <p className="mt-2 text-xs font-semibold text-[var(--color-primary)]">
+                    Избран слот от календара: {preferredSlot}
+                  </p>
+                ) : null}
               </div>
 
               <div>

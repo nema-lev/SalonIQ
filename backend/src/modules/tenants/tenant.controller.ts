@@ -34,6 +34,7 @@ import { TenantGuard } from '../../common/guards/tenant.guard';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentTenant } from '../../common/decorators/tenant.decorator';
 import { getNotificationTemplates } from '../notifications/template.utils';
+import { resolveTenantCandidate } from '../../common/utils/tenant-resolution';
 import { TelegramService } from '../notifications/telegram.service';
 import { buildBulgarianPhoneVariants, normalizeBulgarianPhone } from '../../common/utils/phone';
 
@@ -973,46 +974,40 @@ export class TenantController {
     @Headers('x-forwarded-host') forwardedHost: string,
     @Headers('x-internal-key') internalKey: string,
     @Headers('x-tenant-slug') tenantSlug: string,
+    @Query('tenant') queryTenantSlug: string,
   ) {
     const expectedKey = this.config.getOrThrow<string>('INTERNAL_API_KEY');
     if (internalKey !== expectedKey) {
       throw new UnauthorizedException('Невалиден вътрешен ключ.');
     }
 
-    const appDomain = this.config.get<string>('APP_DOMAIN', 'saloniq.bg');
-    const hostname = forwardedHost?.split(':')[0] || '';
+    const candidate = resolveTenantCandidate({
+      host: forwardedHost,
+      appDomain: this.config.get<string>('APP_DOMAIN', 'saloniq.bg'),
+      headerSlug: tenantSlug,
+      defaultTenantSlug: this.config.get<string>('DEFAULT_TENANT_SLUG', ''),
+      queryTenantSlug,
+    });
+
+    if (!candidate) {
+      throw new BadRequestException(
+        'Не може да се определи бизнесът. Задай host, X-Tenant-Slug или DEFAULT_TENANT_SLUG.',
+      );
+    }
 
     try {
-      if (tenantSlug) {
-        const rows = await this.prisma.$queryRawUnsafe<any[]>(
-          `SELECT * FROM public.tenants WHERE slug = $1 AND is_active = true LIMIT 1`,
-          tenantSlug,
-        );
-
-        if (!rows.length) throw new NotFoundException('Бизнесът не е намерен.');
-
-        return this.serializeTenant(rows[0]);
-      }
-
       let query: string;
       let param: string;
 
-      if (hostname.endsWith(`.${appDomain}`)) {
-        param = hostname.replace(`.${appDomain}`, '');
+      if (candidate.type === 'slug') {
+        param = candidate.value;
         query = `SELECT * FROM public.tenants WHERE slug = $1 AND is_active = true LIMIT 1`;
       } else {
-        param = hostname;
+        param = candidate.value;
         query = `SELECT * FROM public.tenants WHERE custom_domain = $1 AND is_active = true LIMIT 1`;
       }
 
-      let rows = await this.prisma.$queryRawUnsafe<any[]>(query, param);
-
-      if (!rows.length && tenantSlug) {
-        rows = await this.prisma.$queryRawUnsafe<any[]>(
-          `SELECT * FROM public.tenants WHERE slug = $1 AND is_active = true LIMIT 1`,
-          tenantSlug,
-        );
-      }
+      const rows = await this.prisma.$queryRawUnsafe<any[]>(query, param);
 
       if (!rows.length) throw new NotFoundException('Бизнесът не е намерен.');
 

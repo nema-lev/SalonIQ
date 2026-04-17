@@ -10,13 +10,14 @@ import {
 import { Request } from 'express';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { getNotificationTemplates } from '../../modules/notifications/template.utils';
+import { resolveTenantCandidate } from '../utils/tenant-resolution';
 
 /**
  * TenantGuard — резолвира tenant от:
- * 1. Поддомейн: demo-business.saloniq.bg → slug = 'demo-business'
- * 2. Custom domain: booking.example.com
- * 3. Header X-Tenant-Slug (за локална разработка)
- * 4. Query param ?tenant=slug (за тестове)
+ * 1. Custom domain / поддомейн от host-а
+ * 2. Header X-Tenant-Slug (за preview/dev fallback)
+ * 3. DEFAULT_TENANT_SLUG от средата
+ * 4. Query param ?tenant=slug (последен test hook)
  *
  * Добавя tenant обекта към request-а за ползване в controllers/services.
  */
@@ -30,14 +31,16 @@ export class TenantGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Request & { tenant: any }>();
 
-    const slug = this.extractSlug(request);
-    if (!slug) {
-      throw new BadRequestException('Не може да се определи бизнесът от заявката.');
+    const candidate = this.extractTenantCandidate(request);
+    if (!candidate) {
+      throw new BadRequestException(
+        'Не може да се определи бизнесът от заявката. Задай валиден host, X-Tenant-Slug или DEFAULT_TENANT_SLUG.',
+      );
     }
 
-    const tenant = await this.resolveTenant(slug);
+    const tenant = await this.resolveTenant(candidate);
     if (!tenant) {
-      throw new NotFoundException(`Бизнесът '${slug}' не е намерен.`);
+      throw new NotFoundException(`Бизнесът '${candidate.value}' не е намерен.`);
     }
 
     const hasAuthenticatedAdminRequest = Boolean(request.headers.authorization);
@@ -50,54 +53,33 @@ export class TenantGuard implements CanActivate {
     return true;
   }
 
-  private extractSlug(request: Request): string | null {
-    // 1. X-Tenant-Slug header (dev/testing)
-    const headerSlug = request.headers['x-tenant-slug'] as string;
-    if (headerSlug) return headerSlug.toLowerCase();
-
-    // 2. Query param ?tenant=slug
-    const querySlug = request.query['tenant'] as string;
-    if (querySlug) return querySlug.toLowerCase();
-
-    // 3. Поддомейн или custom domain
-    const host = (request.headers['x-forwarded-host'] || request.headers.host || '') as string;
-    const hostname = host.split(':')[0]; // Махни порта
-
-    if (!hostname) return null;
-
-    const appDomain = process.env.APP_DOMAIN || 'saloniq.bg';
-
-    // Поддомейн: demo-business.saloniq.bg
-    if (hostname.endsWith(`.${appDomain}`)) {
-      return hostname.replace(`.${appDomain}`, '');
-    }
-
-    // Custom domain: резолвирай от базата
-    return hostname; // ще го потърсим по custom_domain
+  private extractTenantCandidate(request: Request) {
+    return resolveTenantCandidate({
+      host: (request.headers['x-forwarded-host'] || request.headers.host || '') as string,
+      appDomain: process.env.APP_DOMAIN || 'saloniq.bg',
+      headerSlug: request.headers['x-tenant-slug'] as string,
+      defaultTenantSlug: process.env.DEFAULT_TENANT_SLUG || '',
+      queryTenantSlug: request.query['tenant'] as string,
+    });
   }
 
-  private async resolveTenant(slugOrDomain: string): Promise<any> {
-    const cacheKey = slugOrDomain;
+  private async resolveTenant(candidate: { type: 'slug' | 'custom-domain'; value: string }): Promise<any> {
+    const cacheKey = `${candidate.type}:${candidate.value}`;
     const cached = this.tenantCache.get(cacheKey);
 
     if (cached && this.CACHE_TTL > 0 && Date.now() < cached.expiresAt) {
       return cached.data;
     }
 
-    const appDomain = process.env.APP_DOMAIN || 'saloniq.bg';
-    const isSlug = !slugOrDomain.includes('.');
-
     let query: string;
     let params: string[];
 
-    if (isSlug || slugOrDomain.endsWith(`.${appDomain}`)) {
-      const slug = slugOrDomain.replace(`.${appDomain}`, '');
+    if (candidate.type === 'slug') {
       query = `SELECT * FROM public.tenants WHERE slug = $1 AND is_active = true LIMIT 1`;
-      params = [slug];
+      params = [candidate.value];
     } else {
-      // Custom domain
       query = `SELECT * FROM public.tenants WHERE custom_domain = $1 AND is_active = true LIMIT 1`;
-      params = [slugOrDomain];
+      params = [candidate.value];
     }
 
     const rows = await this.prisma.$queryRawUnsafe<any[]>(query, ...params);

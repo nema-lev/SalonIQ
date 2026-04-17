@@ -1,10 +1,11 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
+import { resolveBrowserTenantSlug } from './tenant-resolution';
 
 /**
  * API Client — всички заявки към backend-а.
  *
- * Автоматично добавя X-Tenant-Slug header от hostname-а,
- * за да знае backend-ът кой tenant прави заявката.
+ * Автоматично добавя X-Tenant-Slug header само когато host-ът
+ * не е достатъчен за tenant resolution (localhost / preview / admin с local session).
  */
 class ApiClient {
   private client: AxiosInstance;
@@ -20,19 +21,22 @@ class ApiClient {
     this.client.interceptors.request.use((config) => {
       if (typeof window !== 'undefined') {
         const pathname = window.location.pathname;
-        const isPlatformPath = pathname.startsWith('/platform');
         const hostname = window.location.hostname;
         const appDomain = process.env.NEXT_PUBLIC_APP_DOMAIN || 'saloniq.bg';
         const defaultTenantSlug = process.env.NEXT_PUBLIC_DEFAULT_TENANT_SLUG || '';
         const storedTenantSlug = getTenantSlug();
+        const resolvedTenantSlug = resolveBrowserTenantSlug({
+          pathname,
+          hostname,
+          appDomain,
+          defaultTenantSlug,
+          storedTenantSlug,
+        });
 
-        if (!isPlatformPath && hostname.endsWith(`.${appDomain}`)) {
-          const slug = hostname.replace(`.${appDomain}`, '');
-          config.headers['X-Tenant-Slug'] = slug;
-        } else if (!isPlatformPath && storedTenantSlug) {
-          config.headers['X-Tenant-Slug'] = storedTenantSlug;
-        } else if (!isPlatformPath && defaultTenantSlug) {
-          config.headers['X-Tenant-Slug'] = defaultTenantSlug;
+        if (resolvedTenantSlug) {
+          config.headers['X-Tenant-Slug'] = resolvedTenantSlug;
+        } else {
+          delete config.headers['X-Tenant-Slug'];
         }
       }
 

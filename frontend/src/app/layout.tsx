@@ -5,18 +5,23 @@ import { Toaster } from 'sonner';
 import { TenantProvider, type TenantConfig } from '@/lib/tenant-context';
 import { QueryProvider } from '@/lib/query-provider';
 import { getBusinessCopy, resolveTheme } from '@/lib/business-copy';
+import { resolveServerTenantFallbackSlug } from '@/lib/tenant-resolution';
 import './globals.css';
 
 // Fetches tenant config server-side (SSR) — runs at request time
 async function getTenantConfig(host: string): Promise<TenantConfig | null> {
   try {
     const backendUrl = process.env.BACKEND_URL || 'http://localhost:3001';
-    const defaultTenantSlug = process.env.DEFAULT_TENANT_SLUG || '';
+    const fallbackTenantSlug = resolveServerTenantFallbackSlug({
+      host,
+      appDomain: process.env.NEXT_PUBLIC_APP_DOMAIN || process.env.APP_DOMAIN || 'saloniq.bg',
+      defaultTenantSlug: process.env.DEFAULT_TENANT_SLUG || '',
+    });
     const res = await fetch(`${backendUrl}/api/v1/tenants/config`, {
       headers: {
         'X-Forwarded-Host': host,
         'X-Internal-Key': process.env.INTERNAL_API_KEY || '',
-        'X-Tenant-Slug': defaultTenantSlug,
+        ...(fallbackTenantSlug ? { 'X-Tenant-Slug': fallbackTenantSlug } : {}),
       },
       cache: 'no-store',
     });

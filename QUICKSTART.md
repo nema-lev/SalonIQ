@@ -49,14 +49,27 @@ node scripts/seed.js
 
 ## 3. Тест
 
-Добавяй header `X-Tenant-Slug: demo-business` към заявките.
+Попълни и в двата env файла един и същ тестов tenant:
+
+```env
+# backend/.env
+DEFAULT_TENANT_SLUG=demo-business
+
+# frontend/.env.local
+NEXT_PUBLIC_DEFAULT_TENANT_SLUG=demo-business
+DEFAULT_TENANT_SLUG=demo-business
+```
+
+Тогава tenant-ът се резолвира автоматично и на localhost, без `?tenant=` и без ръчни headers.
 
 С браузър директно:
-- **Booking**: http://localhost:3000 (добави `?tenant=demo-business` в URL)
+- **Booking**: http://localhost:3000
 - **Admin**: http://localhost:3000/admin
   - Email: `admin@demo-business.local`
   - Парола: `admin123`
 - **API Docs**: http://localhost:3001/docs
+
+Ако искаш ръчно да override-неш tenant-а за кратък тест, backend още приема `?tenant=slug`, но това вече е последен fallback, не основният локален flow.
 
 ## 4. Telegram тест локално
 

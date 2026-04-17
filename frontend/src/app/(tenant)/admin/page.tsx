@@ -1,5 +1,6 @@
 'use client';
 
+import axios from 'axios';
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, addDays, subDays, isToday, startOfDay, endOfDay, startOfWeek, endOfWeek, eachDayOfInterval, isSameDay, differenceInMinutes, startOfMonth, endOfMonth } from 'date-fns';
@@ -288,71 +289,46 @@ function formatAppointmentDay(value: string) {
   return format(new Date(value), "d MMM yyyy '·' HH:mm", { locale: bg });
 }
 
+function getRescheduleErrorMessage(error: unknown, fallback: string) {
+  if (axios.isAxiosError(error)) {
+    const status = error.response?.status;
+    const message = error.response?.data?.message;
+    const normalizedMessage =
+      typeof message === 'string'
+        ? message
+        : Array.isArray(message)
+          ? message.find((entry): entry is string => typeof entry === 'string')
+          : null;
+
+    if (
+      status === 409 &&
+      (normalizedMessage?.includes('зает') ||
+        normalizedMessage?.includes('интервал') ||
+        normalizedMessage?.includes('блокиран'))
+    ) {
+      return 'Този час вече е зает. Избери друг свободен час.';
+    }
+
+    if (status === 409) {
+      return 'Не може да преместиш записа върху друг запис. Избери друг свободен час.';
+    }
+
+    if (normalizedMessage) {
+      return normalizedMessage;
+    }
+  }
+
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return fallback;
+}
+
 function sortByStartAt<T extends { start_at: string }>(items: T[] | undefined) {
   return [...(items ?? [])].sort(
     (left, right) => new Date(left.start_at).getTime() - new Date(right.start_at).getTime(),
   );
-}
-
-function getNotificationTypeLabel(type: string) {
-  const labels: Record<string, string> = {
-    booking_pending: 'Нова заявка',
-    'booking-pending': 'Нова заявка',
-    booking_confirmed: 'Потвърден час',
-    'booking-confirmed': 'Потвърден час',
-    booking_approved: 'Потвърден час',
-    'booking-approved': 'Потвърден час',
-    booking_cancelled_client: 'Клиентска отмяна',
-    'booking-cancelled-client': 'Клиентска отмяна',
-    booking_cancelled_business: 'Отказ от салона',
-    'booking-cancelled-business': 'Отказ от салона',
-    booking_rescheduled: 'Преместен час',
-    'booking-rescheduled': 'Преместен час',
-    waitlist_available: 'Резервен списък',
-    'waitlist-available': 'Резервен списък',
-    reminder_24h: 'Напомняне 24 ч.',
-    'reminder-24h': 'Напомняне 24 ч.',
-    reminder_2h: 'Напомняне 2 ч.',
-    'reminder-2h': 'Напомняне 2 ч.',
-    status_changed: 'Промяна на статус',
-    'status-changed': 'Промяна на статус',
-  };
-
-  return labels[type] || type;
-}
-
-function getNotificationStatusLabel(status: string) {
-  const labels: Record<string, string> = {
-    sent: 'Изпратено',
-    delivered: 'Доставено',
-    failed: 'Грешка',
-    pending: 'Чака',
-    read: 'Прочетено',
-  };
-
-  return labels[status] || status;
-}
-
-function getNotificationStatusClass(status: string) {
-  const styles: Record<string, string> = {
-    sent: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-    delivered: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-    failed: 'border-rose-200 bg-rose-50 text-rose-700',
-    pending: 'border-amber-200 bg-amber-50 text-amber-700',
-    read: 'border-sky-200 bg-sky-50 text-sky-700',
-  };
-
-  return styles[status] || 'border-gray-200 bg-gray-50 text-gray-600';
-}
-
-function getChannelLabel(channel: string) {
-  const labels: Record<string, string> = {
-    telegram: 'Telegram',
-    sms: 'SMS',
-    email: 'Email',
-  };
-
-  return labels[channel] || channel;
 }
 
 function getOwnerStatusPresentation(item: { status?: string; owner_view_state?: string; owner_view_label?: string }) {
@@ -636,7 +612,7 @@ export default function AdminCalendarPage() {
     refetchInterval: 15000,
   });
 
-  const { data: selectedContext, isLoading: contextLoading } = useQuery({
+  const { data: selectedContext } = useQuery({
     queryKey: ['appointment-context', selectedRecordId],
     queryFn: () => apiClient.get<AppointmentContextResponse>(`/appointments/${selectedRecordId}/context`),
     enabled: Boolean(selectedRecordId),
@@ -656,22 +632,11 @@ export default function AdminCalendarPage() {
       toast.success('Часът е преместен.');
     },
     onError: (error: any) => {
-      toast.error(error?.message || 'Неуспешно преместване на часа.');
+      toast.error(getRescheduleErrorMessage(error, 'Неуспешно преместване на часа.'));
     },
     onSettled: () => {
       setDraggedAppointmentId(null);
       setDropPreview(null);
-    },
-  });
-
-  const retryAllNotificationsMutation = useMutation({
-    mutationFn: (appointmentId: string) => apiClient.post(`/appointments/${appointmentId}/notifications/retry-failed`, {}),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['appointment-context'] });
-      toast.success('Пуснати са отново всички неуспешни известия.');
-    },
-    onError: (error: any) => {
-      toast.error(error?.message || 'Неуспешен retry на всички известия.');
     },
   });
 
@@ -742,18 +707,6 @@ export default function AdminCalendarPage() {
     },
     onError: (error: any) => {
       toast.error(error?.message || 'Неуспешно преоразмеряване на блока.');
-    },
-  });
-
-  const retryNotificationMutation = useMutation({
-    mutationFn: ({ appointmentId, type }: { appointmentId: string; type: string }) =>
-      apiClient.post(`/appointments/${appointmentId}/notifications/retry`, { type }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['appointment-context'] });
-      toast.success('Известието е пуснато отново.');
-    },
-    onError: (error: any) => {
-      toast.error(error?.message || 'Retry на известието не мина.');
     },
   });
 
@@ -876,6 +829,37 @@ export default function AdminCalendarPage() {
   };
 
   const handleDropReschedule = (appointmentId: string, startAt: string, staffId: string) => {
+    const targetAppointment = (calendarBoard?.appointments ?? []).find((appointment) => appointment.id === appointmentId);
+    if (!targetAppointment) {
+      rescheduleMutation.mutate({ id: appointmentId, startAt, staffId });
+      return;
+    }
+
+    const nextStart = new Date(startAt);
+    const nextEnd = new Date(
+      nextStart.getTime() +
+        (new Date(targetAppointment.end_at).getTime() - new Date(targetAppointment.start_at).getTime()),
+    );
+    const hasConflict = (calendarBoard?.appointments ?? []).some((appointment) => {
+      if (appointment.id === appointmentId || appointment.staff_id !== staffId) {
+        return false;
+      }
+
+      if (['cancelled', 'no_show'].includes(appointment.status)) {
+        return false;
+      }
+
+      return (
+        new Date(appointment.start_at).getTime() < nextEnd.getTime() &&
+        new Date(appointment.end_at).getTime() > nextStart.getTime()
+      );
+    });
+
+    if (hasConflict) {
+      toast.error('Този час вече е зает. Избери друг свободен час.');
+      return;
+    }
+
     rescheduleMutation.mutate({ id: appointmentId, startAt, staffId });
   };
 
@@ -944,6 +928,30 @@ export default function AdminCalendarPage() {
         new Date(request.start_at).toISOString() === new Date(startAt).toISOString();
 
       if (!sameSlot) {
+        const nextStart = new Date(startAt);
+        const nextEnd = new Date(
+          nextStart.getTime() + (new Date(request.end_at).getTime() - new Date(request.start_at).getTime()),
+        );
+        const hasConflict = (calendarBoard?.appointments ?? []).some((appointment) => {
+          if (appointment.id === requestId || appointment.staff_id !== staffId) {
+            return false;
+          }
+
+          if (['cancelled', 'no_show'].includes(appointment.status)) {
+            return false;
+          }
+
+          return (
+            new Date(appointment.start_at).getTime() < nextEnd.getTime() &&
+            new Date(appointment.end_at).getTime() > nextStart.getTime()
+          );
+        });
+
+        if (hasConflict) {
+          toast.error('Този час вече е зает. Избери друг свободен час.');
+          return;
+        }
+
         await apiClient.patch(`/appointments/${requestId}/reschedule`, { startAt, staffId });
       }
 
@@ -959,7 +967,7 @@ export default function AdminCalendarPage() {
       setShowRequestsPanel(false);
       toast.success(sameSlot ? 'Заявката е потвърдена.' : 'Часът е преместен и потвърден.');
     } catch (error: any) {
-      toast.error(error?.message || 'Неуспешно потвърждение на заявката.');
+      toast.error(getRescheduleErrorMessage(error, 'Неуспешно потвърждение на заявката.'));
     }
   };
 
@@ -1955,10 +1963,7 @@ export default function AdminCalendarPage() {
                   className="pointer-events-none absolute left-2 right-2 z-[2] rounded-2xl border-2 border-[var(--color-primary)] bg-[var(--color-primary)]/14 shadow-[0_10px_30px_rgba(79,70,229,0.18)]"
                   style={{ top: `${metrics.top}px`, height: `${metrics.height}px` }}
                 >
-                  <div className="absolute inset-x-2 top-2 flex items-center justify-between gap-2">
-                    <span className="rounded-full bg-white/95 px-2 py-1 text-[10px] font-bold text-[var(--color-primary)] shadow-sm">
-                      {format(new Date(dropPreview.startAt), 'HH:mm')}
-                    </span>
+                  <div className="absolute inset-x-2 top-2 flex items-center justify-end gap-2">
                     <span className="rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-600 shadow-sm">
                       Нов слот
                     </span>
@@ -2150,81 +2155,6 @@ export default function AdminCalendarPage() {
             <p className="mt-2 text-sm text-rose-700">{selectedContext.appointment.cancellation_reason}</p>
           </div>
         )}
-
-        <div className="rounded-3xl border border-gray-100 bg-white/80 p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Известия</p>
-              <h4 className="mt-1 text-sm font-black text-gray-900">Статус на доставката</h4>
-            </div>
-            <div className="flex items-center gap-2">
-              {(selectedContext?.notification_summary?.failed ?? 0) > 0 && detailedAppointment && (
-                <button
-                  type="button"
-                  onClick={() => retryAllNotificationsMutation.mutate(detailedAppointment.id)}
-                  className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100"
-                >
-                  Retry всички грешки
-                </button>
-              )}
-              {contextLoading && <Loader2 className="h-4 w-4 animate-spin text-[var(--color-primary)]" />}
-            </div>
-          </div>
-
-          {selectedContext?.notification_summary && (
-            <div className="mt-4 grid grid-cols-3 gap-2">
-              <div className="rounded-2xl border border-gray-100 bg-white px-3 py-3">
-                <p className="text-xs text-gray-400">Всичко</p>
-                <p className="mt-1 text-sm font-black text-gray-900">{selectedContext.notification_summary.total}</p>
-              </div>
-              <div className="rounded-2xl border border-gray-100 bg-white px-3 py-3">
-                <p className="text-xs text-gray-400">Изпратени</p>
-                <p className="mt-1 text-sm font-black text-emerald-700">{selectedContext.notification_summary.sent}</p>
-              </div>
-              <div className="rounded-2xl border border-gray-100 bg-white px-3 py-3">
-                <p className="text-xs text-gray-400">Грешки</p>
-                <p className="mt-1 text-sm font-black text-rose-700">{selectedContext.notification_summary.failed}</p>
-              </div>
-            </div>
-          )}
-
-          <div className="mt-4 space-y-2">
-            {selectedContext?.notifications?.length ? (
-              selectedContext.notifications.slice(0, 4).map((entry) => (
-                <div key={entry.id} className="rounded-2xl border border-gray-100 bg-gray-50/80 px-3 py-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-gray-900">{getNotificationTypeLabel(entry.type)}</p>
-                      <p className="mt-1 text-xs text-gray-500">
-                        {getChannelLabel(entry.channel)} · {entry.sent_at ? formatAppointmentDay(entry.sent_at) : formatAppointmentDay(entry.created_at)}
-                      </p>
-                    </div>
-                    <span className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${getNotificationStatusClass(entry.status)}`}>
-                      {getNotificationStatusLabel(entry.status)}
-                    </span>
-                  </div>
-                  {entry.error_message && <p className="mt-2 text-xs text-rose-600">{entry.error_message}</p>}
-                  {entry.status === 'failed' && detailedAppointment && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        retryNotificationMutation.mutate({
-                          appointmentId: detailedAppointment.id,
-                          type: entry.type,
-                        })
-                      }
-                      className="mt-3 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100"
-                    >
-                      Retry
-                    </button>
-                  )}
-                </div>
-              ))
-            ) : (
-              <p className="text-sm text-gray-400">За този запис още няма лог на известия.</p>
-            )}
-          </div>
-        </div>
 
         {selectedInboxItem?.bucket === 'updates' && (
           <button
@@ -2865,12 +2795,6 @@ export default function AdminCalendarPage() {
                                         openBookingWithPrefill(column.day, column.staff.id, slot.label);
                                       }}
                                     >
-                                      {dropPreview?.staffId === column.staff.id &&
-                                      dropPreview?.startAt === nextStart.toISOString() ? (
-                                        <span className="absolute left-2 top-1 rounded-full bg-white/95 px-2 py-1 text-[10px] font-bold text-[var(--color-primary)] shadow-sm">
-                                          {slot.label}
-                                        </span>
-                                      ) : null}
                                     </div>
                                   );
                                 })}
@@ -2889,10 +2813,7 @@ export default function AdminCalendarPage() {
                                         className="pointer-events-none absolute left-2 right-2 z-[2] rounded-2xl border-2 border-[var(--color-primary)] bg-[var(--color-primary)]/14 shadow-[0_12px_32px_rgba(79,70,229,0.18)]"
                                         style={{ top: `${metrics.top}px`, height: `${metrics.height}px` }}
                                       >
-                                        <div className="absolute inset-x-2 top-2 flex items-center justify-between gap-2">
-                                          <span className="rounded-full bg-white/95 px-2 py-1 text-[10px] font-bold text-[var(--color-primary)] shadow-sm">
-                                            {format(new Date(dropPreview.startAt), 'HH:mm')}
-                                          </span>
+                                        <div className="absolute inset-x-2 top-2 flex items-center justify-end gap-2">
                                           <span className="rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-600 shadow-sm">
                                             Нов слот
                                           </span>
@@ -3167,13 +3088,6 @@ export default function AdminCalendarPage() {
                                         openBookingWithPrefill(currentDate, staffMember.id, slot.label);
                                       }}
 		                                >
-                                      {dropPreview?.staffId === staffMember.id &&
-                                      dropPreview?.startAt &&
-                                      format(new Date(dropPreview.startAt), 'HH:mm') === slot.label ? (
-                                        <span className="absolute left-2 top-1 rounded-full bg-white/95 px-2 py-1 text-[10px] font-bold text-[var(--color-primary)] shadow-sm">
-                                          {slot.label}
-                                        </span>
-                                      ) : null}
                                     </div>
 		                              ))}
 
@@ -3191,10 +3105,7 @@ export default function AdminCalendarPage() {
                                         className="pointer-events-none absolute left-2 right-2 z-[2] rounded-2xl border-2 border-[var(--color-primary)] bg-[var(--color-primary)]/14 shadow-[0_12px_32px_rgba(79,70,229,0.18)]"
                                         style={{ top: `${metrics.top}px`, height: `${metrics.height}px` }}
                                       >
-                                        <div className="absolute inset-x-2 top-2 flex items-center justify-between gap-2">
-                                          <span className="rounded-full bg-white/95 px-2 py-1 text-[10px] font-bold text-[var(--color-primary)] shadow-sm">
-                                            {format(new Date(dropPreview.startAt), 'HH:mm')}
-                                          </span>
+                                        <div className="absolute inset-x-2 top-2 flex items-center justify-end gap-2">
                                           <span className="rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-600 shadow-sm">
                                             Нов слот
                                           </span>
@@ -3552,47 +3463,6 @@ export default function AdminCalendarPage() {
                 </button>
               )}
 
-              <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Известия</p>
-                <div className="mt-3 space-y-2">
-                  {selectedContext?.notifications?.length ? (
-	                    selectedContext.notifications.slice(0, 6).map((entry) => (
-	                      <div key={entry.id} className="rounded-2xl border border-white bg-white px-3 py-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-gray-900">{getNotificationTypeLabel(entry.type)}</p>
-                            <p className="mt-1 text-xs text-gray-500">
-                              {getChannelLabel(entry.channel)} · {entry.sent_at ? formatAppointmentDay(entry.sent_at) : formatAppointmentDay(entry.created_at)}
-                            </p>
-                          </div>
-	                          <span className={`rounded-full border px-2 py-1 text-[10px] font-bold ${getNotificationStatusClass(entry.status)}`}>
-	                            {getNotificationStatusLabel(entry.status)}
-	                          </span>
-	                        </div>
-                          {entry.error_message && (
-                            <p className="mt-2 text-xs text-rose-600">{entry.error_message}</p>
-                          )}
-                          {entry.status === 'failed' && detailedAppointment && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                retryNotificationMutation.mutate({
-                                  appointmentId: detailedAppointment.id,
-                                  type: entry.type,
-                                })
-                              }
-                              className="mt-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100"
-                            >
-                              Retry
-                            </button>
-                          )}
-	                      </div>
-	                    ))
-                  ) : (
-                    <p className="text-sm text-gray-400">Няма лог за известия към този запис.</p>
-                  )}
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -4136,7 +4006,7 @@ function AppointmentMoveModal({
       onMoved(startAt);
     },
     onError: (error: any) => {
-      toast.error(error?.message || 'Неуспешно преместване на часа.');
+      toast.error(getRescheduleErrorMessage(error, 'Неуспешно преместване на часа.'));
     },
   });
 

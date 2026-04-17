@@ -21,13 +21,19 @@ export function extractKnownSubdomainSlug(
   return normalizeSlug(slug);
 }
 
-export function shouldSkipCustomDomainLookup(host: string | null | undefined) {
+export function shouldSkipCustomDomainLookup(
+  host: string | null | undefined,
+  appDomain: string | null | undefined,
+) {
   const hostname = normalizeHostname(host);
+  const domain = normalizeHostname(appDomain);
 
   if (!hostname) return true;
   if (hostname === 'localhost') return true;
   if (hostname === '127.0.0.1') return true;
   if (hostname === '0.0.0.0') return true;
+  if (domain && hostname === domain) return true;
+  if (hostname.endsWith('.vercel.app')) return true;
 
   return false;
 }
@@ -52,7 +58,7 @@ export function resolveTenantCandidate(input: TenantResolutionInput): TenantReso
     return { type: 'slug', value: subdomainSlug, source: 'subdomain' };
   }
 
-  if (hostname && !shouldSkipCustomDomainLookup(hostname)) {
+  if (hostname && !shouldSkipCustomDomainLookup(hostname, input.appDomain)) {
     return { type: 'custom-domain', value: hostname, source: 'custom-domain' };
   }
 

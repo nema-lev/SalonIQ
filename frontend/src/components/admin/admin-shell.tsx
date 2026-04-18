@@ -33,6 +33,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             >
               <AdminHeader onOpenMenu={() => setMobileNavOpen(true)} />
               <main
+                data-admin-scroll-root
                 className="flex-1 overflow-y-auto overflow-x-hidden"
                 style={{
                   flex: 1,
@@ -40,6 +41,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                   overflowY: 'auto',
                   overflowX: 'clip',
                   overscrollBehaviorX: 'none',
+                  overscrollBehaviorY: 'contain',
+                  WebkitOverflowScrolling: 'touch',
                 }}
               >
                 {children}

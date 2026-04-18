@@ -34,8 +34,10 @@ export function AdminHeader({ onOpenMenu }: { onOpenMenu: () => void }) {
         limit: '30',
         mode: 'attention',
       }),
-    staleTime: 30 * 1000,
-    refetchInterval: 15000,
+    staleTime: 10 * 1000,
+    refetchInterval: 10000,
+    refetchOnWindowFocus: 'always',
+    refetchOnReconnect: true,
   });
   const inboxActionCount = useMemo(
     () => (upcoming ?? []).filter((item) => item.status === 'pending').length,

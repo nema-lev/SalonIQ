@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiClient } from '@/lib/api-client';
+import { MobileBottomSheet } from '@/components/admin/mobile-bottom-sheet';
 import {
   formatBulgarianPhoneForDisplay,
   normalizeBulgarianPhone,
@@ -232,12 +233,21 @@ const STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
 };
 
 const STATUS_FILTER_OPTIONS = [
-  { key: 'all', label: 'Всички статуси' },
+  { key: 'active', label: 'Активни' },
   { key: 'requests', label: 'Заявки' },
   { key: 'booked', label: 'Запазени' },
   { key: 'cancelled', label: 'Отказани / отменени' },
 ] as const;
 
+const REQUEST_OWNER_STATES = ['pending', 'requested', 'proposal_pending', 'proposal_sent'] as const;
+const BOOKED_OWNER_STATES = ['confirmed', 'approved', 'booked_direct', 'proposal_accepted', 'completed'] as const;
+const CANCELLED_OWNER_STATES = [
+  'cancelled',
+  'rejected',
+  'proposal_rejected',
+  'cancelled_by_owner',
+  'cancelled_by_client',
+] as const;
 const SECONDARY_OWNER_STATES = [
   'completed',
   'no_show',
@@ -250,9 +260,18 @@ const SECONDARY_OWNER_STATES = [
 
 const CALENDAR_SLOT_MINUTES = 15;
 const LONG_PRESS_DELAY_MS = 420;
-const LONG_PRESS_MOVE_TOLERANCE_PX = 10;
+const LONG_PRESS_MOVE_TOLERANCE_PX = 14;
 
 type InboxBucket = 'actions' | 'updates';
+type CalendarStatusFilter = (typeof STATUS_FILTER_OPTIONS)[number]['key'];
+
+type CalendarColumnRegistryEntry = {
+  element: HTMLDivElement | null;
+  staffId: string;
+  day: Date;
+  rangeStartHour: number;
+  pixelsPerHour: number;
+};
 
 interface InboxItemView extends UpcomingAppointment {
   bucket: InboxBucket;
@@ -458,38 +477,43 @@ function getWaitlistStatusPresentation(status: WaitlistEntry['status']) {
   return config[status];
 }
 
+function getCalendarOwnerState(item: { status?: string; owner_view_state?: string }) {
+  if (item.status === 'cancelled') {
+    return 'cancelled';
+  }
+
+  return item.owner_view_state || item.status || 'pending';
+}
+
+function isCancelledCalendarItem(item: { status?: string; owner_view_state?: string }) {
+  if (item.status === 'cancelled') {
+    return true;
+  }
+
+  return CANCELLED_OWNER_STATES.includes(
+    getCalendarOwnerState(item) as (typeof CANCELLED_OWNER_STATES)[number],
+  );
+}
+
 function matchesCalendarStatusFilter(
   item: { status?: string; owner_view_state?: string },
-  filter: 'all' | 'requests' | 'booked' | 'cancelled',
+  filter: CalendarStatusFilter,
 ) {
-  const key = item.owner_view_state || item.status || 'pending';
+  const key = getCalendarOwnerState(item);
 
-  if (filter === 'all') {
-    return ![
-      'cancelled',
-      'rejected',
-      'proposal_rejected',
-      'cancelled_by_owner',
-      'cancelled_by_client',
-    ].includes(key);
+  if (filter === 'active') {
+    return !isCancelledCalendarItem(item);
   }
 
   if (filter === 'requests') {
-    return ['pending', 'requested', 'proposal_pending', 'proposal_sent'].includes(key);
+    return REQUEST_OWNER_STATES.includes(key as (typeof REQUEST_OWNER_STATES)[number]);
   }
 
   if (filter === 'booked') {
-    return ['confirmed', 'approved', 'booked_direct', 'proposal_accepted', 'completed'].includes(key);
+    return BOOKED_OWNER_STATES.includes(key as (typeof BOOKED_OWNER_STATES)[number]);
   }
 
-  return [
-    'cancelled',
-    'rejected',
-    'proposal_rejected',
-    'cancelled_by_owner',
-    'cancelled_by_client',
-    'no_show',
-  ].includes(key);
+  return isCancelledCalendarItem(item);
 }
 
 function isSecondaryOwnerState(ownerState?: string) {
@@ -515,6 +539,38 @@ function getEventDurationMinutes(startAt?: string, endAt?: string) {
   return Math.max(duration || CALENDAR_SLOT_MINUTES, CALENDAR_SLOT_MINUTES);
 }
 
+function buildCalendarGridMetrics(
+  range: { startHour: number; endHour: number },
+  pixelsPerHour: number,
+) {
+  const slotHeight = pixelsPerHour / (60 / CALENDAR_SLOT_MINUTES);
+  const height = (range.endHour - range.startHour) * pixelsPerHour;
+  const slotCount = Math.max(
+    1,
+    (range.endHour - range.startHour) * (60 / CALENDAR_SLOT_MINUTES),
+  );
+
+  return {
+    height,
+    slotHeight,
+    hourSlots: Array.from(
+      { length: range.endHour - range.startHour + 1 },
+      (_, index) => range.startHour + index,
+    ),
+    dropSlots: Array.from({ length: slotCount }, (_, index) => {
+      const totalMinutes = range.startHour * 60 + index * CALENDAR_SLOT_MINUTES;
+      const hour = Math.floor(totalMinutes / 60);
+      const minute = totalMinutes % 60;
+
+      return {
+        key: `${hour}-${minute}`,
+        top: index * slotHeight,
+        label: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
+      };
+    }),
+  };
+}
+
 export default function AdminCalendarPage() {
   const qc = useQueryClient();
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -533,7 +589,7 @@ export default function AdminCalendarPage() {
   const [calendarView, setCalendarView] = useState<'grid' | 'list' | 'week' | 'month'>('grid');
   const [calendarZoom, setCalendarZoom] = useState<'compact' | 'comfortable' | 'precise'>('comfortable');
   const [staffFilter, setStaffFilter] = useState<string>('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'requests' | 'booked' | 'cancelled'>('all');
+  const [statusFilter, setStatusFilter] = useState<CalendarStatusFilter>('active');
   const [showUnavailable, setShowUnavailable] = useState(true);
   const [isCompactViewport, setIsCompactViewport] = useState(false);
   const [draggedAppointmentId, setDraggedAppointmentId] = useState<string | null>(null);
@@ -563,19 +619,11 @@ export default function AdminCalendarPage() {
     startY: number;
     moved: boolean;
   } | null>(null);
+  const activeTouchGestureRef = useRef<{ touchId: number } | null>(null);
   const suppressTapUntilRef = useRef(0);
   const invalidDropHintRef = useRef('Пуснете върху свободен 15-минутен слот.');
   const didAutoSelectStaffRef = useRef(false);
-  const calendarColumnRegistryRef = useRef<
-    Record<
-      string,
-      {
-        element: HTMLDivElement | null;
-        staffId: string;
-        day: Date;
-      }
-    >
-  >({});
+  const calendarColumnRegistryRef = useRef<Record<string, CalendarColumnRegistryEntry>>({});
   const pointerDragRef = useRef<{
     target: MoveTarget;
     kind: 'appointment' | 'request';
@@ -629,9 +677,10 @@ export default function AdminCalendarPage() {
         from: rangeStart.toISOString(),
         to: rangeEndExclusive.toISOString(),
       }),
-    staleTime: 30 * 1000,
-    refetchInterval: 15 * 1000,
-    refetchOnWindowFocus: true,
+    staleTime: 10 * 1000,
+    refetchInterval: 10 * 1000,
+    refetchOnWindowFocus: 'always',
+    refetchOnReconnect: true,
   });
 
   const { data: adminServices = [] } = useQuery({
@@ -648,6 +697,8 @@ export default function AdminCalendarPage() {
         to: addDays(rangeEndExclusive, -1).toISOString().slice(0, 10),
       }),
     staleTime: 30 * 1000,
+    refetchOnWindowFocus: 'always',
+    refetchOnReconnect: true,
   });
 
   const { data: upcoming, isLoading: upcomingLoading } = useQuery({
@@ -657,8 +708,10 @@ export default function AdminCalendarPage() {
         limit: '12',
         mode: 'attention',
       }),
-    staleTime: 30 * 1000,
-    refetchInterval: 15000,
+    staleTime: 10 * 1000,
+    refetchInterval: 10 * 1000,
+    refetchOnWindowFocus: 'always',
+    refetchOnReconnect: true,
   });
 
   const { data: selectedContext } = useQuery({
@@ -881,6 +934,7 @@ export default function AdminCalendarPage() {
       longPressTimeoutRef.current = null;
     }
     touchPressRef.current = null;
+    activeTouchGestureRef.current = null;
     setTouchMoveTarget(null);
     setTouchMoveMode(null);
     setPendingTouchPlacement(null);
@@ -997,33 +1051,14 @@ export default function AdminCalendarPage() {
     [calendarBoard?.appointments, calendarBoard?.exceptions, calendarBoard?.staff],
   );
 
-  const updateTouchPlacementFromPoint = (
-    clientY: number,
-    columnRect: DOMRect,
-    staffId: string,
-    day: Date,
-    rangeStartHour: number,
-    pxPerHour: number,
-  ) => {
-    const slotHeight = pxPerHour / (60 / CALENDAR_SLOT_MINUTES);
-    const relativeY = Math.min(Math.max(clientY - columnRect.top, 0), columnRect.height);
-    const slotIndex = Math.floor(relativeY / slotHeight);
-    const totalMinutes = rangeStartHour * 60 + slotIndex * CALENDAR_SLOT_MINUTES;
-    const nextStart = new Date(day);
-    nextStart.setHours(Math.floor(totalMinutes / 60), totalMinutes % 60, 0, 0);
-    if (!touchMoveTarget) {
-      return null;
-    }
-
-    const candidate = resolveMovePlacement(touchMoveTarget, nextStart.toISOString(), staffId);
-    invalidDropHintRef.current = candidate.reason || 'Пуснете върху свободен 15-минутен слот.';
-    setPendingTouchPlacement(candidate.preview);
-    setDropPreview(candidate.preview);
-    return candidate.preview;
-  };
-
   const registerCalendarColumn = useCallback(
-    (key: string, staffId: string, day: Date) => (node: HTMLDivElement | null) => {
+    (
+      key: string,
+      staffId: string,
+      day: Date,
+      rangeStartHour: number,
+      pixelsPerHour: number,
+    ) => (node: HTMLDivElement | null) => {
       if (!node) {
         delete calendarColumnRegistryRef.current[key];
         return;
@@ -1033,9 +1068,42 @@ export default function AdminCalendarPage() {
         element: node,
         staffId,
         day,
+        rangeStartHour,
+        pixelsPerHour,
       };
     },
     [],
+  );
+
+  const resolvePlacementFromClientPoint = useCallback(
+    (target: MoveTarget, clientX: number, clientY: number) => {
+      for (const entry of Object.values(calendarColumnRegistryRef.current)) {
+        const rect = entry.element?.getBoundingClientRect();
+        if (!rect || rect.width === 0 || rect.height === 0) {
+          continue;
+        }
+
+        if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
+          continue;
+        }
+
+        const slotHeight = entry.pixelsPerHour / (60 / CALENDAR_SLOT_MINUTES);
+        const slotCount = Math.max(1, Math.floor(rect.height / slotHeight));
+        const relativeY = Math.min(Math.max(clientY - rect.top, 0), Math.max(rect.height - 1, 0));
+        const slotIndex = Math.min(Math.floor(relativeY / slotHeight), slotCount - 1);
+        const totalMinutes = entry.rangeStartHour * 60 + slotIndex * CALENDAR_SLOT_MINUTES;
+        const nextStart = new Date(entry.day);
+        nextStart.setHours(Math.floor(totalMinutes / 60), totalMinutes % 60, 0, 0);
+
+        const candidate = resolveMovePlacement(target, nextStart.toISOString(), entry.staffId);
+        invalidDropHintRef.current = candidate.reason || 'Пуснете върху свободен 15-минутен слот.';
+        return candidate.preview;
+      }
+
+      invalidDropHintRef.current = 'Пуснете върху свободен 15-минутен слот.';
+      return null;
+    },
+    [resolveMovePlacement],
   );
 
   const clearDesktopDragState = useCallback(() => {
@@ -1220,7 +1288,7 @@ export default function AdminCalendarPage() {
     () =>
       appointmentsInView.filter((appointment) =>
         ['confirmed', 'approved', 'booked_direct', 'proposal_accepted'].includes(
-          appointment.owner_view_state || appointment.status,
+          getCalendarOwnerState(appointment),
         ),
       ).length,
     [appointmentsInView],
@@ -1228,8 +1296,8 @@ export default function AdminCalendarPage() {
   const pendingInView = useMemo(
     () =>
       appointmentsInView.filter((appointment) =>
-        ['pending', 'requested', 'proposal_pending', 'proposal_sent'].includes(
-          appointment.owner_view_state || appointment.status,
+        REQUEST_OWNER_STATES.includes(
+          getCalendarOwnerState(appointment) as (typeof REQUEST_OWNER_STATES)[number],
         ),
       ).length,
     [appointmentsInView],
@@ -1287,16 +1355,22 @@ export default function AdminCalendarPage() {
   );
   const calendarRange = useMemo(() => buildCalendarRange(appointmentsInView), [appointmentsInView]);
   const compactCalendarRange = useMemo(() => buildCalendarRange(compactDayAppointments), [compactDayAppointments]);
-  const hourSlots = useMemo(
-    () =>
-      Array.from({ length: calendarRange.endHour - calendarRange.startHour + 1 }, (_, index) => calendarRange.startHour + index),
-    [calendarRange.endHour, calendarRange.startHour],
-  );
   const pixelsPerHour = calendarZoom === 'compact' ? 72 : calendarZoom === 'precise' ? 112 : 88;
-  const calendarHeight = (calendarRange.endHour - calendarRange.startHour) * pixelsPerHour;
   const compactPixelsPerHour = calendarZoom === 'compact' ? 56 : calendarZoom === 'precise' ? 84 : 64;
-  const compactCalendarHeight =
-    (compactCalendarRange.endHour - compactCalendarRange.startHour) * compactPixelsPerHour;
+  const desktopCalendarGrid = useMemo(
+    () => buildCalendarGridMetrics(calendarRange, pixelsPerHour),
+    [calendarRange, pixelsPerHour],
+  );
+  const compactCalendarGrid = useMemo(
+    () => buildCalendarGridMetrics(compactCalendarRange, compactPixelsPerHour),
+    [compactCalendarRange, compactPixelsPerHour],
+  );
+  const hourSlots = desktopCalendarGrid.hourSlots;
+  const calendarHeight = desktopCalendarGrid.height;
+  const moveDropSlots = desktopCalendarGrid.dropSlots;
+  const compactHourSlots = compactCalendarGrid.hourSlots;
+  const compactCalendarHeight = compactCalendarGrid.height;
+  const compactMoveDropSlots = compactCalendarGrid.dropSlots;
   const nowIndicatorOffset = useMemo(() => {
     if (!isToday(currentDate)) return null;
     const now = new Date();
@@ -1306,28 +1380,6 @@ export default function AdminCalendarPage() {
     if (minutes < startMinutes || minutes > endMinutes) return null;
     return ((minutes - startMinutes) / 60) * pixelsPerHour;
   }, [calendarRange.endHour, calendarRange.startHour, currentDate]);
-  const moveDropSlots = useMemo(
-    () =>
-      Array.from({ length: (calendarRange.endHour - calendarRange.startHour) * (60 / CALENDAR_SLOT_MINUTES) }, (_, index) => {
-        const totalMinutes = calendarRange.startHour * 60 + index * CALENDAR_SLOT_MINUTES;
-        const hour = Math.floor(totalMinutes / 60);
-        const minute = totalMinutes % 60;
-        return {
-          key: `${hour}-${minute}`,
-          top: index * (pixelsPerHour / (60 / CALENDAR_SLOT_MINUTES)),
-          label: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
-        };
-      }),
-    [calendarRange.endHour, calendarRange.startHour],
-  );
-  const compactHourSlots = useMemo(
-    () =>
-      Array.from(
-        { length: compactCalendarRange.endHour - compactCalendarRange.startHour + 1 },
-        (_, index) => compactCalendarRange.startHour + index,
-      ),
-    [compactCalendarRange.endHour, compactCalendarRange.startHour],
-  );
   const compactNowIndicatorOffset = useMemo(() => {
     if (!isToday(currentDate)) return null;
     const now = new Date();
@@ -1398,16 +1450,16 @@ export default function AdminCalendarPage() {
         );
 
         const requests = dayAppointments.filter((appointment) =>
-          ['pending', 'requested'].includes(appointment.owner_view_state || appointment.status),
-        ).length;
-        const booked = dayAppointments.filter((appointment) =>
-          ['confirmed', 'approved', 'booked_direct'].includes(appointment.owner_view_state || appointment.status),
-        ).length;
-        const cancelled = dayAppointments.filter((appointment) =>
-          ['cancelled', 'rejected', 'cancelled_by_owner', 'cancelled_by_client', 'no_show'].includes(
-            appointment.owner_view_state || appointment.status,
+          REQUEST_OWNER_STATES.includes(
+            getCalendarOwnerState(appointment) as (typeof REQUEST_OWNER_STATES)[number],
           ),
         ).length;
+        const booked = dayAppointments.filter((appointment) =>
+          ['confirmed', 'approved', 'booked_direct', 'proposal_accepted'].includes(
+            getCalendarOwnerState(appointment),
+          ),
+        ).length;
+        const cancelled = dayAppointments.filter((appointment) => isCancelledCalendarItem(appointment)).length;
 
         return { day, appointments: dayAppointments, requests, booked, cancelled };
       }),
@@ -1446,7 +1498,7 @@ export default function AdminCalendarPage() {
       return null;
     }
 
-    const hasFilter = staffFilter !== 'all' || statusFilter !== 'all';
+    const hasFilter = staffFilter !== 'all' || statusFilter !== 'active';
     if (hasFilter) {
       return {
         title: 'Няма резултати за текущите филтри',
@@ -1557,7 +1609,13 @@ export default function AdminCalendarPage() {
       window.removeEventListener('pointerup', handlePointerUp);
       window.removeEventListener('pointercancel', handlePointerUp);
     };
-  }, [clearDesktopDragState, dropPreview, handleRequestPlacement, handleDropReschedule, calendarRange.startHour, pixelsPerHour]);
+  }, [
+    clearDesktopDragState,
+    dropPreview,
+    handleRequestPlacement,
+    handleDropReschedule,
+    resolvePlacementFromClientPoint,
+  ]);
 
   const activePreviewTarget = useMemo(() => {
     if (touchMoveTarget) return touchMoveTarget;
@@ -1596,33 +1654,14 @@ export default function AdminCalendarPage() {
     (startAt: string, rangeStartHour: number, pxPerHour: number) => {
       const startOffset = getMinuteOffset(startAt, rangeStartHour);
       const top = Math.max((startOffset / 60) * pxPerHour, 0);
-      const height = Math.max((previewDurationMinutes / 60) * pxPerHour, pxPerHour / (60 / CALENDAR_SLOT_MINUTES));
+      const height = Math.max((previewDurationMinutes / 60) * pxPerHour, 6);
       return { top, height };
     },
     [previewDurationMinutes],
   );
 
   function resolvePointerDropTarget(target: MoveTarget, clientX: number, clientY: number) {
-    for (const entry of Object.values(calendarColumnRegistryRef.current)) {
-      const rect = entry.element?.getBoundingClientRect();
-      if (!rect) continue;
-      if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
-        continue;
-      }
-
-      const slotHeight = pixelsPerHour / (60 / CALENDAR_SLOT_MINUTES);
-      const relativeY = Math.min(Math.max(clientY - rect.top, 0), rect.height);
-      const slotIndex = Math.floor(relativeY / slotHeight);
-      const totalMinutes = calendarRange.startHour * 60 + slotIndex * CALENDAR_SLOT_MINUTES;
-      const nextStart = new Date(entry.day);
-      nextStart.setHours(Math.floor(totalMinutes / 60), totalMinutes % 60, 0, 0);
-      const candidate = resolveMovePlacement(target, nextStart.toISOString(), entry.staffId);
-      invalidDropHintRef.current = candidate.reason || 'Пуснете върху свободен 15-минутен слот.';
-      return candidate.preview;
-    }
-
-    invalidDropHintRef.current = 'Пуснете върху свободен 15-минутен слот.';
-    return null;
+    return resolvePlacementFromClientPoint(target, clientX, clientY);
   }
 
   useEffect(() => {
@@ -1737,6 +1776,7 @@ export default function AdminCalendarPage() {
       if (!gesture || gesture.target.id !== target.id || gesture.moved) {
         return;
       }
+      activeTouchGestureRef.current = { touchId: gesture.touchId };
       startTouchMoveMode(target, 'gesture');
       longPressTimeoutRef.current = null;
     }, LONG_PRESS_DELAY_MS);
@@ -1763,16 +1803,22 @@ export default function AdminCalendarPage() {
       return;
     }
 
-    const trackedNodes = [document.documentElement, document.body].map((node) => ({
-      node,
-      values: {
-        userSelect: node.style.getPropertyValue('user-select'),
-        webkitUserSelect: node.style.getPropertyValue('-webkit-user-select'),
-        overscrollBehavior: node.style.getPropertyValue('overscroll-behavior'),
-        touchAction: node.style.getPropertyValue('touch-action'),
-        overflow: node.style.getPropertyValue('overflow'),
-      },
-    }));
+    const trackedNodes = [
+      document.documentElement,
+      document.body,
+      document.querySelector<HTMLElement>('[data-admin-scroll-root]'),
+    ]
+      .filter((node): node is HTMLElement => Boolean(node))
+      .map((node) => ({
+        node,
+        values: {
+          userSelect: node.style.getPropertyValue('user-select'),
+          webkitUserSelect: node.style.getPropertyValue('-webkit-user-select'),
+          overscrollBehavior: node.style.getPropertyValue('overscroll-behavior'),
+          touchAction: node.style.getPropertyValue('touch-action'),
+          overflow: node.style.getPropertyValue('overflow'),
+        },
+      }));
 
     for (const entry of trackedNodes) {
       entry.node.style.setProperty('user-select', 'none');
@@ -1792,6 +1838,110 @@ export default function AdminCalendarPage() {
       }
     };
   }, [touchMoveTarget]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !touchMoveTarget || touchMoveMode !== 'gesture') {
+      return;
+    }
+
+    const trackedTouch = activeTouchGestureRef.current;
+    if (!trackedTouch) {
+      return;
+    }
+
+    const resolvePreviewForTouch = (touch: Touch) => {
+      const preview = resolvePlacementFromClientPoint(touchMoveTarget, touch.clientX, touch.clientY);
+      setPendingTouchPlacement(preview);
+      setDropPreview(preview);
+      return preview;
+    };
+
+    const handleTouchMove = (event: TouchEvent) => {
+      const touch = Array.from(event.touches).find((entry) => entry.identifier === trackedTouch.touchId);
+      if (!touch) {
+        return;
+      }
+
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+
+      resolvePreviewForTouch(touch);
+    };
+
+    const finishTouchGesture = async (touch: Touch | undefined, cancelled: boolean) => {
+      if (!touch) {
+        clearTouchMoveState();
+        return;
+      }
+
+      if (cancelled) {
+        clearTouchMoveState();
+        return;
+      }
+
+      const preview = resolvePreviewForTouch(touch);
+      suppressTapUntilRef.current = Date.now() + 450;
+
+      if (!preview) {
+        toast.error(invalidDropHintRef.current);
+        clearTouchMoveState();
+        return;
+      }
+
+      clearTouchMoveState();
+
+      if (touchMoveTarget.source === 'request') {
+        await handleRequestPlacement(touchMoveTarget.id, preview.startAt, preview.staffId);
+        return;
+      }
+
+      handleDropReschedule(touchMoveTarget.id, preview.startAt, preview.staffId);
+    };
+
+    const handleTouchEnd = (event: TouchEvent) => {
+      const touch = Array.from(event.changedTouches).find((entry) => entry.identifier === trackedTouch.touchId);
+      if (!touch) {
+        return;
+      }
+
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+
+      void finishTouchGesture(touch, false);
+    };
+
+    const handleTouchCancel = (event: TouchEvent) => {
+      const touch = Array.from(event.changedTouches).find((entry) => entry.identifier === trackedTouch.touchId);
+      if (!touch) {
+        return;
+      }
+
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+
+      void finishTouchGesture(touch, true);
+    };
+
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
+    window.addEventListener('touchend', handleTouchEnd, { passive: false });
+    window.addEventListener('touchcancel', handleTouchCancel, { passive: false });
+
+    return () => {
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleTouchEnd);
+      window.removeEventListener('touchcancel', handleTouchCancel);
+    };
+  }, [
+    clearTouchMoveState,
+    handleDropReschedule,
+    handleRequestPlacement,
+    resolvePlacementFromClientPoint,
+    touchMoveMode,
+    touchMoveTarget,
+  ]);
 
   const focusRecord = (id: string, startAt: string) => {
     if (Date.now() < suppressTapUntilRef.current) {
@@ -2103,65 +2253,30 @@ export default function AdminCalendarPage() {
           </div>
 
           <div
+            data-calendar-column={`compact-${staffMember.id}`}
+            ref={registerCalendarColumn(
+              `compact-${staffMember.id}`,
+              staffMember.id,
+              currentDate,
+              compactCalendarRange.startHour,
+              compactPixelsPerHour,
+            )}
             className={`relative bg-white/80 ${touchMoveTarget ? 'touch-none' : 'touch-pan-y'} select-none`}
             style={{
               height: `${compactCalendarHeight}px`,
               overscrollBehavior: touchMoveTarget ? 'none' : 'contain',
               touchAction: touchMoveTarget ? 'none' : 'pan-y',
             }}
-            onTouchMove={(event) => {
-              if (!touchMoveTarget) return;
-              event.preventDefault();
-              const touch = event.touches[0];
-              if (!touch) return;
-              updateTouchPlacementFromPoint(
-                touch.clientY,
-                event.currentTarget.getBoundingClientRect(),
-                staffMember.id,
-                currentDate,
-                compactCalendarRange.startHour,
-                compactPixelsPerHour,
-              );
-            }}
-            onTouchEnd={async (event) => {
-              if (!touchMoveTarget) return;
-              const touch = event.changedTouches[0];
-              if (!touch) return;
-              event.preventDefault();
-              const preview = updateTouchPlacementFromPoint(
-                touch.clientY,
-                event.currentTarget.getBoundingClientRect(),
-                staffMember.id,
-                currentDate,
-                compactCalendarRange.startHour,
-                compactPixelsPerHour,
-              );
-              suppressTapUntilRef.current = Date.now() + 450;
-              if (touchMoveMode !== 'gesture') {
-                return;
-              }
-              if (!preview) {
-                toast.error(invalidDropHintRef.current);
-                clearTouchMoveState();
-                return;
-              }
-              if (touchMoveTarget.source === 'request') {
-                await handleRequestPlacement(touchMoveTarget.id, preview.startAt, preview.staffId);
-                return;
-              }
-              handleDropReschedule(touchMoveTarget.id, preview.startAt, preview.staffId);
-            }}
             onClick={(event) => {
               if (Date.now() < suppressTapUntilRef.current) return;
               if (touchMoveTarget) {
-                const preview = updateTouchPlacementFromPoint(
+                const preview = resolvePlacementFromClientPoint(
+                  touchMoveTarget,
+                  event.clientX,
                   event.clientY,
-                  event.currentTarget.getBoundingClientRect(),
-                  staffMember.id,
-                  currentDate,
-                  compactCalendarRange.startHour,
-                  compactPixelsPerHour,
                 );
+                setPendingTouchPlacement(preview);
+                setDropPreview(preview);
                 if (!preview || touchMoveMode !== 'confirm') {
                   return;
                 }
@@ -2169,9 +2284,11 @@ export default function AdminCalendarPage() {
               }
 
               const rect = event.currentTarget.getBoundingClientRect();
-              const slotHeight = compactPixelsPerHour / (60 / CALENDAR_SLOT_MINUTES);
-              const relativeY = Math.min(Math.max(event.clientY - rect.top, 0), rect.height);
-              const slotIndex = Math.floor(relativeY / slotHeight);
+              const relativeY = Math.min(Math.max(event.clientY - rect.top, 0), Math.max(rect.height - 1, 0));
+              const slotIndex = Math.min(
+                Math.floor(relativeY / compactCalendarGrid.slotHeight),
+                compactMoveDropSlots.length - 1,
+              );
               const totalMinutes = compactCalendarRange.startHour * 60 + slotIndex * CALENDAR_SLOT_MINUTES;
               const slotDate = new Date(currentDate);
               slotDate.setHours(Math.floor(totalMinutes / 60), totalMinutes % 60, 0, 0);
@@ -2211,7 +2328,7 @@ export default function AdminCalendarPage() {
               </div>
             ))}
 
-            {moveDropSlots.map((slot) => {
+            {compactMoveDropSlots.map((slot) => {
               const [, minute] = slot.label.split(':').map(Number);
               return (
                 <div
@@ -2230,7 +2347,11 @@ export default function AdminCalendarPage() {
                 <div
                   className="pointer-events-none absolute left-2 right-2 z-[2] rounded-2xl border-2 border-[var(--color-primary)] bg-[var(--color-primary)]/14 shadow-[0_10px_30px_rgba(79,70,229,0.18)]"
                   style={{ top: `${metrics.top}px`, height: `${metrics.height}px` }}
-                />
+                >
+                  <span className="absolute right-2 top-2 rounded-full bg-white/95 px-2 py-1 text-[10px] font-bold text-[var(--color-primary)] shadow-sm">
+                    {format(new Date(dropPreview.startAt), 'HH:mm')}
+                  </span>
+                </div>
               );
             })()}
 
@@ -2249,7 +2370,7 @@ export default function AdminCalendarPage() {
                 appointment.end_at,
                 compactCalendarRange.startHour,
                 compactPixelsPerHour,
-                compactPixelsPerHour / (60 / CALENDAR_SLOT_MINUTES),
+                6,
               );
               const ownerState = appointment.owner_view_state || appointment.status;
               const isSecondary = isSecondaryOwnerState(ownerState);
@@ -2766,6 +2887,11 @@ export default function AdminCalendarPage() {
                                             ? 'Пуснете върху свободен 15-минутен слот.'
                                             : 'Докоснете точния 15-минутен слот в графика.'}
                                         </p>
+                                        {previewPlacementLabel && (
+                                          <p className="mt-2 text-xs font-bold text-sky-900">
+                                            Целеви час: {previewPlacementLabel}
+                                          </p>
+                                        )}
 	                                    </div>
 	                                    <button
 	                                      type="button"
@@ -2926,7 +3052,13 @@ export default function AdminCalendarPage() {
                               <div
                                 key={column.key}
                                 data-calendar-column={column.key}
-                                ref={registerCalendarColumn(column.key, column.staff.id, column.day)}
+                                ref={registerCalendarColumn(
+                                  column.key,
+                                  column.staff.id,
+                                  column.day,
+                                  calendarRange.startHour,
+                                  pixelsPerHour,
+                                )}
                                 className={`relative border-r border-gray-100 bg-white/70 last:border-r-0 ${
                                   index % Math.max(visibleStaffColumns.length, 1) === 0 ? 'border-l-2 border-l-gray-200' : ''
                                 }`}
@@ -3122,7 +3254,7 @@ export default function AdminCalendarPage() {
                                     appointment.end_at,
                                     calendarRange.startHour,
                                     pixelsPerHour,
-                                    pixelsPerHour / (60 / CALENDAR_SLOT_MINUTES),
+                                    6,
                                   );
                                   const ownerState = appointment.owner_view_state || appointment.status;
                                   const isSelected = selectedRecordId === appointment.id;
@@ -3219,7 +3351,13 @@ export default function AdminCalendarPage() {
 		                            <div
 		                              key={staffMember.id}
                                   data-calendar-column={staffMember.id}
-                                  ref={registerCalendarColumn(`day-${staffMember.id}`, staffMember.id, currentDate)}
+                                  ref={registerCalendarColumn(
+                                    `day-${staffMember.id}`,
+                                    staffMember.id,
+                                    currentDate,
+                                    calendarRange.startHour,
+                                    pixelsPerHour,
+                                  )}
 		                              className="relative border-r border-gray-100 bg-white/70 last:border-r-0"
 		                              style={{ height: `${calendarHeight}px` }}
 		                            >
@@ -3415,7 +3553,7 @@ export default function AdminCalendarPage() {
 		                                  appointment.end_at,
 		                                  calendarRange.startHour,
 		                                  pixelsPerHour,
-		                                  pixelsPerHour / (60 / CALENDAR_SLOT_MINUTES),
+		                                  6,
 		                                );
 		                                const ownerState = appointment.owner_view_state || appointment.status;
 		                                const isSelected = selectedRecordId === appointment.id;
@@ -3619,6 +3757,11 @@ export default function AdminCalendarPage() {
                 ? 'Слотът е избран. Потвърдете преместването.'
                 : 'Докоснете 15-минутен слот в календара.'}
             </p>
+            {previewPlacementLabel && (
+              <p className="mt-2 rounded-2xl bg-[var(--color-primary)]/8 px-3 py-2 text-xs font-bold text-[var(--color-primary)]">
+                {previewPlacementLabel}
+              </p>
+            )}
             <div className="mt-3 flex gap-2">
               <button
                 type="button"
@@ -3666,89 +3809,83 @@ export default function AdminCalendarPage() {
       )}
 
       {showMobileDetails && (selectedAppointment || selectedInboxItem) && (
-        <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={() => setShowMobileDetails(false)}>
-          <div
-            className="absolute inset-x-0 bottom-0 max-h-[82vh] overflow-y-auto rounded-t-[32px] bg-white px-4 pb-[calc(env(safe-area-inset-bottom,0px)+24px)] pt-3 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="mx-auto mb-3 h-1.5 w-14 rounded-full bg-gray-200" />
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Детайли</p>
-                <h3 className="mt-1 text-lg font-black text-gray-900">
-                  {detailedAppointment?.client_name || selectedInboxItem?.client_name}
-                </h3>
-                <p className="mt-1 text-sm text-gray-500">
-                  {detailedAppointment
-                    ? `${detailedAppointment.service_name} · ${detailedAppointment.staff_name}`
-                    : selectedInboxItem?.summary}
+        <MobileBottomSheet open={showMobileDetails} onClose={() => setShowMobileDetails(false)}>
+          <div className="mx-auto mb-3 h-1.5 w-14 rounded-full bg-gray-200" />
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Детайли</p>
+              <h3 className="mt-1 text-lg font-black text-gray-900">
+                {detailedAppointment?.client_name || selectedInboxItem?.client_name}
+              </h3>
+              <p className="mt-1 text-sm text-gray-500">
+                {detailedAppointment
+                  ? `${detailedAppointment.service_name} · ${detailedAppointment.staff_name}`
+                  : selectedInboxItem?.summary}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowMobileDetails(false)}
+              className="flex h-10 w-10 items-center justify-center rounded-2xl border border-gray-200 bg-white text-gray-600"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="mt-4 grid gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Дата и час</p>
+                <p className="mt-2 text-sm font-semibold text-gray-900">
+                  {formatAppointmentDay(detailedAppointment?.start_at || selectedInboxItem!.start_at)}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowMobileDetails(false)}
-                className="flex h-10 w-10 items-center justify-center rounded-2xl border border-gray-200 bg-white text-gray-600"
-              >
-                <X className="h-4 w-4" />
-              </button>
+              <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Контакт</p>
+                <p className="mt-2 text-sm font-semibold text-gray-900">
+                  {formatBulgarianPhoneForDisplay(
+                    detailedAppointment?.client_phone || selectedInboxItem!.client_phone,
+                  )}
+                </p>
+              </div>
             </div>
 
-            <div className="mt-4 grid gap-3">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Дата и час</p>
-                  <p className="mt-2 text-sm font-semibold text-gray-900">
-                    {formatAppointmentDay(detailedAppointment?.start_at || selectedInboxItem!.start_at)}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Контакт</p>
-                  <p className="mt-2 text-sm font-semibold text-gray-900">
-                    {formatBulgarianPhoneForDisplay(
-                      detailedAppointment?.client_phone || selectedInboxItem!.client_phone,
-                    )}
-                  </p>
+            {detailedAppointment && (
+              <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Статус</p>
+                    <span
+                      className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-[11px] font-bold ${
+                        getOwnerStatusPresentation(detailedAppointment).cls
+                      }`}
+                    >
+                      {getOwnerStatusPresentation(detailedAppointment).label}
+                    </span>
+                  </div>
+                  {detailedAppointment.price != null && (
+                    <div className="text-right">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Стойност</p>
+                      <p className="mt-2 text-sm font-semibold text-gray-900">{formatEuroAmount(detailedAppointment.price)}</p>
+                    </div>
+                  )}
                 </div>
               </div>
+            )}
 
-              {detailedAppointment && (
-                <div className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Статус</p>
-                      <span
-                        className={`mt-2 inline-flex rounded-full border px-2.5 py-1 text-[11px] font-bold ${
-                          getOwnerStatusPresentation(detailedAppointment).cls
-                        }`}
-                      >
-                        {getOwnerStatusPresentation(detailedAppointment).label}
-                      </span>
-                    </div>
-                    {detailedAppointment.price != null && (
-                      <div className="text-right">
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Стойност</p>
-                        <p className="mt-2 text-sm font-semibold text-gray-900">{formatEuroAmount(detailedAppointment.price)}</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
+            {detailedAppointment && <div>{renderPrimaryActions(detailedAppointment)}</div>}
 
-	              {detailedAppointment && <div>{renderPrimaryActions(detailedAppointment)}</div>}
-
-              {selectedInboxItem?.bucket === 'updates' && (
-                <button
-                  type="button"
-                  onClick={() => handleOwnerAlertRead(selectedInboxItem.id)}
-                  className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-100"
-                >
-                  Маркирай като видяно
-                </button>
-              )}
-
-            </div>
+            {selectedInboxItem?.bucket === 'updates' && (
+              <button
+                type="button"
+                onClick={() => handleOwnerAlertRead(selectedInboxItem.id)}
+                className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-100"
+              >
+                Маркирай като видяно
+              </button>
+            )}
           </div>
-        </div>
+        </MobileBottomSheet>
       )}
 
       {showBlockEditor && (
@@ -4286,6 +4423,8 @@ function AppointmentMoveModal({
       queryClient.invalidateQueries({ queryKey: ['appointment-context'] });
       queryClient.invalidateQueries({ queryKey: ['appointments-calendar-board'] });
       queryClient.invalidateQueries({ queryKey: ['appointments-upcoming'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-header-upcoming'] });
+      queryClient.invalidateQueries({ queryKey: ['appointments-waitlist'] });
       onMoved(startAt);
     },
     onError: (error: any) => {
@@ -4576,16 +4715,7 @@ function AdminBookingModal({
       })
       .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
 
-    const earlier = withMinutes
-      .filter((entry) => entry.slotMinutes < preferredMinutes)
-      .sort((left, right) => right.slotMinutes - left.slotMinutes)
-      .slice(0, 2);
-    const later = withMinutes
-      .filter((entry) => entry.slotMinutes > preferredMinutes)
-      .sort((left, right) => left.slotMinutes - right.slotMinutes)
-      .slice(0, 2);
-
-    return [...earlier, ...later]
+    return withMinutes
       .sort((left, right) => {
         if (left.distanceMinutes !== right.distanceMinutes) {
           return left.distanceMinutes - right.distanceMinutes;

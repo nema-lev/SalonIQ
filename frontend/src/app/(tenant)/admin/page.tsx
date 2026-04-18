@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiClient } from '@/lib/api-client';
+import { MobileDayBoard } from '@/components/admin/mobile-day-board';
 import { MobileBottomSheet } from '@/components/admin/mobile-bottom-sheet';
 import {
   formatBulgarianPhoneForDisplay,
@@ -619,7 +620,6 @@ export default function AdminCalendarPage() {
     startY: number;
     moved: boolean;
   } | null>(null);
-  const activeTouchGestureRef = useRef<{ touchId: number } | null>(null);
   const suppressTapUntilRef = useRef(0);
   const invalidDropHintRef = useRef('Пуснете върху свободен 15-минутен слот.');
   const didAutoSelectStaffRef = useRef(false);
@@ -934,7 +934,6 @@ export default function AdminCalendarPage() {
       longPressTimeoutRef.current = null;
     }
     touchPressRef.current = null;
-    activeTouchGestureRef.current = null;
     setTouchMoveTarget(null);
     setTouchMoveMode(null);
     setPendingTouchPlacement(null);
@@ -1354,23 +1353,14 @@ export default function AdminCalendarPage() {
     [calendarBoard?.exceptions, currentDate, staffFilter],
   );
   const calendarRange = useMemo(() => buildCalendarRange(appointmentsInView), [appointmentsInView]);
-  const compactCalendarRange = useMemo(() => buildCalendarRange(compactDayAppointments), [compactDayAppointments]);
   const pixelsPerHour = calendarZoom === 'compact' ? 72 : calendarZoom === 'precise' ? 112 : 88;
-  const compactPixelsPerHour = calendarZoom === 'compact' ? 56 : calendarZoom === 'precise' ? 84 : 64;
   const desktopCalendarGrid = useMemo(
     () => buildCalendarGridMetrics(calendarRange, pixelsPerHour),
     [calendarRange, pixelsPerHour],
   );
-  const compactCalendarGrid = useMemo(
-    () => buildCalendarGridMetrics(compactCalendarRange, compactPixelsPerHour),
-    [compactCalendarRange, compactPixelsPerHour],
-  );
   const hourSlots = desktopCalendarGrid.hourSlots;
   const calendarHeight = desktopCalendarGrid.height;
   const moveDropSlots = desktopCalendarGrid.dropSlots;
-  const compactHourSlots = compactCalendarGrid.hourSlots;
-  const compactCalendarHeight = compactCalendarGrid.height;
-  const compactMoveDropSlots = compactCalendarGrid.dropSlots;
   const nowIndicatorOffset = useMemo(() => {
     if (!isToday(currentDate)) return null;
     const now = new Date();
@@ -1380,15 +1370,6 @@ export default function AdminCalendarPage() {
     if (minutes < startMinutes || minutes > endMinutes) return null;
     return ((minutes - startMinutes) / 60) * pixelsPerHour;
   }, [calendarRange.endHour, calendarRange.startHour, currentDate]);
-  const compactNowIndicatorOffset = useMemo(() => {
-    if (!isToday(currentDate)) return null;
-    const now = new Date();
-    const minutes = now.getHours() * 60 + now.getMinutes();
-    const startMinutes = compactCalendarRange.startHour * 60;
-    const endMinutes = compactCalendarRange.endHour * 60;
-    if (minutes < startMinutes || minutes > endMinutes) return null;
-    return ((minutes - startMinutes) / 60) * compactPixelsPerHour;
-  }, [compactCalendarRange.endHour, compactCalendarRange.startHour, currentDate]);
   const visibleBlockList = useMemo(
     () =>
       [...visibleExceptions].sort(
@@ -1728,21 +1709,20 @@ export default function AdminCalendarPage() {
     source,
   });
 
-  const clearLongPressTimer = useCallback(() => {
+  const clearTouchPlacementLongPressTimer = useCallback(() => {
     if (longPressTimeoutRef.current) {
       window.clearTimeout(longPressTimeoutRef.current);
       longPressTimeoutRef.current = null;
     }
   }, []);
 
-  const resetLongPressGesture = useCallback(() => {
-    clearLongPressTimer();
+  const resetTouchPlacementLongPress = useCallback(() => {
+    clearTouchPlacementLongPressTimer();
     touchPressRef.current = null;
-  }, [clearLongPressTimer]);
+  }, [clearTouchPlacementLongPressTimer]);
 
   const startTouchMoveMode = (target: MoveTarget, mode: 'gesture' | 'confirm' = 'confirm') => {
-    resetLongPressGesture();
-    suppressTapUntilRef.current = Date.now() + 450;
+    resetTouchPlacementLongPress();
     setTouchMoveTarget(target);
     setTouchMoveMode(mode);
     setPendingTouchPlacement(null);
@@ -1758,12 +1738,12 @@ export default function AdminCalendarPage() {
     );
   };
 
-  const beginLongPressMove = (target: MoveTarget, event: React.TouchEvent<HTMLElement>) => {
+  const beginTouchPlacementLongPress = (target: MoveTarget, event: React.TouchEvent<HTMLElement>) => {
     if (typeof window === 'undefined') return;
     if (['completed', 'cancelled', 'no_show'].includes(target.status)) return;
     const touch = event.touches[0];
     if (!touch) return;
-    resetLongPressGesture();
+    resetTouchPlacementLongPress();
     touchPressRef.current = {
       target,
       touchId: touch.identifier,
@@ -1776,13 +1756,12 @@ export default function AdminCalendarPage() {
       if (!gesture || gesture.target.id !== target.id || gesture.moved) {
         return;
       }
-      activeTouchGestureRef.current = { touchId: gesture.touchId };
-      startTouchMoveMode(target, 'gesture');
+      startTouchMoveMode(target, 'confirm');
       longPressTimeoutRef.current = null;
     }, LONG_PRESS_DELAY_MS);
   };
 
-  const handleLongPressTouchMove = (event: React.TouchEvent<HTMLElement>) => {
+  const handleTouchPlacementLongPressMove = (event: React.TouchEvent<HTMLElement>) => {
     const gesture = touchPressRef.current;
     if (!gesture) return;
 
@@ -1795,153 +1774,8 @@ export default function AdminCalendarPage() {
     }
 
     gesture.moved = true;
-    resetLongPressGesture();
+    resetTouchPlacementLongPress();
   };
-
-  useEffect(() => {
-    if (typeof document === 'undefined' || !touchMoveTarget) {
-      return;
-    }
-
-    const trackedNodes = [
-      document.documentElement,
-      document.body,
-      document.querySelector<HTMLElement>('[data-admin-scroll-root]'),
-    ]
-      .filter((node): node is HTMLElement => Boolean(node))
-      .map((node) => ({
-        node,
-        values: {
-          userSelect: node.style.getPropertyValue('user-select'),
-          webkitUserSelect: node.style.getPropertyValue('-webkit-user-select'),
-          overscrollBehavior: node.style.getPropertyValue('overscroll-behavior'),
-          touchAction: node.style.getPropertyValue('touch-action'),
-          overflow: node.style.getPropertyValue('overflow'),
-        },
-      }));
-
-    for (const entry of trackedNodes) {
-      entry.node.style.setProperty('user-select', 'none');
-      entry.node.style.setProperty('-webkit-user-select', 'none');
-      entry.node.style.setProperty('overscroll-behavior', 'none');
-      entry.node.style.setProperty('touch-action', 'none');
-      entry.node.style.setProperty('overflow', 'hidden');
-    }
-
-    return () => {
-      for (const entry of trackedNodes) {
-        entry.node.style.setProperty('user-select', entry.values.userSelect);
-        entry.node.style.setProperty('-webkit-user-select', entry.values.webkitUserSelect);
-        entry.node.style.setProperty('overscroll-behavior', entry.values.overscrollBehavior);
-        entry.node.style.setProperty('touch-action', entry.values.touchAction);
-        entry.node.style.setProperty('overflow', entry.values.overflow);
-      }
-    };
-  }, [touchMoveTarget]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || !touchMoveTarget || touchMoveMode !== 'gesture') {
-      return;
-    }
-
-    const trackedTouch = activeTouchGestureRef.current;
-    if (!trackedTouch) {
-      return;
-    }
-
-    const resolvePreviewForTouch = (touch: Touch) => {
-      const preview = resolvePlacementFromClientPoint(touchMoveTarget, touch.clientX, touch.clientY);
-      setPendingTouchPlacement(preview);
-      setDropPreview(preview);
-      return preview;
-    };
-
-    const handleTouchMove = (event: TouchEvent) => {
-      const touch = Array.from(event.touches).find((entry) => entry.identifier === trackedTouch.touchId);
-      if (!touch) {
-        return;
-      }
-
-      if (event.cancelable) {
-        event.preventDefault();
-      }
-
-      resolvePreviewForTouch(touch);
-    };
-
-    const finishTouchGesture = async (touch: Touch | undefined, cancelled: boolean) => {
-      if (!touch) {
-        clearTouchMoveState();
-        return;
-      }
-
-      if (cancelled) {
-        clearTouchMoveState();
-        return;
-      }
-
-      const preview = resolvePreviewForTouch(touch);
-      suppressTapUntilRef.current = Date.now() + 450;
-
-      if (!preview) {
-        toast.error(invalidDropHintRef.current);
-        clearTouchMoveState();
-        return;
-      }
-
-      clearTouchMoveState();
-
-      if (touchMoveTarget.source === 'request') {
-        await handleRequestPlacement(touchMoveTarget.id, preview.startAt, preview.staffId);
-        return;
-      }
-
-      handleDropReschedule(touchMoveTarget.id, preview.startAt, preview.staffId);
-    };
-
-    const handleTouchEnd = (event: TouchEvent) => {
-      const touch = Array.from(event.changedTouches).find((entry) => entry.identifier === trackedTouch.touchId);
-      if (!touch) {
-        return;
-      }
-
-      if (event.cancelable) {
-        event.preventDefault();
-      }
-
-      void finishTouchGesture(touch, false);
-    };
-
-    const handleTouchCancel = (event: TouchEvent) => {
-      const touch = Array.from(event.changedTouches).find((entry) => entry.identifier === trackedTouch.touchId);
-      if (!touch) {
-        return;
-      }
-
-      if (event.cancelable) {
-        event.preventDefault();
-      }
-
-      void finishTouchGesture(touch, true);
-    };
-
-    window.addEventListener('touchmove', handleTouchMove, { passive: false });
-    window.addEventListener('touchend', handleTouchEnd, { passive: false });
-    window.addEventListener('touchcancel', handleTouchCancel, { passive: false });
-
-    return () => {
-      window.removeEventListener('touchmove', handleTouchMove);
-      window.removeEventListener('touchend', handleTouchEnd);
-      window.removeEventListener('touchcancel', handleTouchCancel);
-    };
-  }, [
-    clearTouchMoveState,
-    handleDropReschedule,
-    handleRequestPlacement,
-    resolvePlacementFromClientPoint,
-    touchMoveMode,
-    touchMoveTarget,
-  ]);
 
   const focusRecord = (id: string, startAt: string) => {
     if (Date.now() < suppressTapUntilRef.current) {
@@ -2154,264 +1988,6 @@ export default function AdminCalendarPage() {
     );
   };
 
-  const renderCompactStaffBoard = (staffMember: (typeof mobileBoardStaff)[number]) => {
-    const dayKey = getWorkingDayKey(currentDate);
-    const schedule = staffMember.working_hours?.[dayKey];
-    const overlays: Array<{
-      id?: string;
-      top: number;
-      height: number;
-      label: string;
-      block?: StaffException;
-      kind: 'closed' | 'exception';
-    }> = [];
-
-    if (showUnavailable) {
-      if (!schedule?.isOpen) {
-        overlays.push({
-          top: 0,
-          height: compactCalendarHeight,
-          label: 'Почивен ден',
-          kind: 'closed',
-        });
-      } else {
-        const [openHour, openMinute] = schedule.open.split(':').map(Number);
-        const [closeHour, closeMinute] = schedule.close.split(':').map(Number);
-        const openOffset =
-          ((openHour * 60 + openMinute - compactCalendarRange.startHour * 60) / 60) * compactPixelsPerHour;
-        const closeOffset =
-          ((closeHour * 60 + closeMinute - compactCalendarRange.startHour * 60) / 60) * compactPixelsPerHour;
-
-        if (openOffset > 0) {
-          overlays.push({
-            top: 0,
-            height: openOffset,
-            label: 'Извън работно време',
-            kind: 'closed',
-          });
-        }
-
-        if (closeOffset < compactCalendarHeight) {
-          overlays.push({
-            top: Math.max(closeOffset, 0),
-            height: Math.max(compactCalendarHeight - closeOffset, 0),
-            label: 'Извън работно време',
-            kind: 'closed',
-          });
-        }
-      }
-
-      for (const exception of staffMember.dayExceptions) {
-        const window = getExceptionWindow(exception);
-        const top = Math.max(
-          (getMinuteOffset(window.startAt, compactCalendarRange.startHour) / 60) * compactPixelsPerHour,
-          0,
-        );
-        const bottom = Math.min(
-          (getMinuteOffset(window.endAt, compactCalendarRange.startHour) / 60) * compactPixelsPerHour,
-          compactCalendarHeight,
-        );
-        overlays.push({
-          id: exception.id,
-          top,
-          height: Math.max(bottom - top, 36),
-          label: exception.note || 'Блокиран интервал',
-          block: exception,
-          kind: 'exception',
-        });
-      }
-    }
-
-    return (
-      <div key={staffMember.id} className="rounded-[24px] border border-white/70 bg-white/95 p-3 shadow-sm">
-        <div className="mb-3 flex items-center gap-3">
-          <span
-            className="flex h-10 w-10 items-center justify-center rounded-full text-xs font-black text-white"
-            style={{ backgroundColor: staffMember.color || 'var(--color-primary)' }}
-          >
-            {getInitials(staffMember.name)}
-          </span>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-black text-gray-900">{staffMember.name}</p>
-            <p className="text-xs text-gray-500">{staffMember.dayAppointments.length} записа за деня</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-[52px_minmax(0,1fr)]">
-          <div className="relative border-r border-gray-100 bg-gray-50/60" style={{ height: `${compactCalendarHeight}px` }}>
-            {compactHourSlots.slice(0, -1).map((hour) => {
-              const top = (hour - compactCalendarRange.startHour) * compactPixelsPerHour;
-              return (
-                <div key={`${staffMember.id}-hour-${hour}`}>
-                  <div className="absolute left-0 right-0 border-t border-dashed border-gray-200" style={{ top: `${top}px` }} />
-                  <div className="absolute left-0 top-0 -translate-y-1/2 px-2 text-[11px] font-semibold text-gray-400" style={{ top: `${top}px` }}>
-                    {String(hour).padStart(2, '0')}:00
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div
-            data-calendar-column={`compact-${staffMember.id}`}
-            ref={registerCalendarColumn(
-              `compact-${staffMember.id}`,
-              staffMember.id,
-              currentDate,
-              compactCalendarRange.startHour,
-              compactPixelsPerHour,
-            )}
-            className={`relative bg-white/80 ${touchMoveTarget ? 'touch-none' : 'touch-pan-y'} select-none`}
-            style={{
-              height: `${compactCalendarHeight}px`,
-              overscrollBehavior: touchMoveTarget ? 'none' : 'contain',
-              touchAction: touchMoveTarget ? 'none' : 'pan-y',
-            }}
-            onClick={(event) => {
-              if (Date.now() < suppressTapUntilRef.current) return;
-              if (touchMoveTarget) {
-                const preview = resolvePlacementFromClientPoint(
-                  touchMoveTarget,
-                  event.clientX,
-                  event.clientY,
-                );
-                setPendingTouchPlacement(preview);
-                setDropPreview(preview);
-                if (!preview || touchMoveMode !== 'confirm') {
-                  return;
-                }
-                return;
-              }
-
-              const rect = event.currentTarget.getBoundingClientRect();
-              const relativeY = Math.min(Math.max(event.clientY - rect.top, 0), Math.max(rect.height - 1, 0));
-              const slotIndex = Math.min(
-                Math.floor(relativeY / compactCalendarGrid.slotHeight),
-                compactMoveDropSlots.length - 1,
-              );
-              const totalMinutes = compactCalendarRange.startHour * 60 + slotIndex * CALENDAR_SLOT_MINUTES;
-              const slotDate = new Date(currentDate);
-              slotDate.setHours(Math.floor(totalMinutes / 60), totalMinutes % 60, 0, 0);
-              openBookingWithPrefill(currentDate, staffMember.id, format(slotDate, 'HH:mm'));
-            }}
-          >
-            {overlays.map((overlay, index) => (
-              <div
-                key={overlay.id || `${staffMember.id}-overlay-${index}`}
-                className={`absolute left-0 right-0 z-0 border-y ${
-                  overlay.kind === 'exception' ? 'border-slate-300/70' : 'border-gray-200/80'
-                }`}
-                style={{
-                  top: `${overlay.top}px`,
-                  height: `${overlay.height}px`,
-                  background:
-                    overlay.kind === 'exception'
-                      ? 'repeating-linear-gradient(-45deg, rgba(148,163,184,0.14), rgba(148,163,184,0.14) 6px, rgba(148,163,184,0.05) 6px, rgba(148,163,184,0.05) 12px)'
-                      : 'rgba(148,163,184,0.08)',
-                }}
-              >
-                <span className="absolute left-2 top-2 rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-500 shadow-sm">
-                  {overlay.label}
-                </span>
-                {overlay.block && (
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      openBlockEditorForBlock(overlay.block!);
-                    }}
-                    className="absolute right-2 top-2 rounded-full border border-white/80 bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-600 shadow-sm"
-                  >
-                    Редактирай
-                  </button>
-                )}
-              </div>
-            ))}
-
-            {compactMoveDropSlots.map((slot) => {
-              const [, minute] = slot.label.split(':').map(Number);
-              return (
-                <div
-                  key={`${staffMember.id}-line-${slot.key}`}
-                  className={`absolute left-0 right-0 ${minute === 0 ? 'border-t border-gray-100' : 'border-t border-dashed border-gray-100/80'}`}
-                  style={{ top: `${slot.top}px` }}
-                />
-              );
-            })}
-
-            {touchMoveTarget &&
-            dropPreview?.staffId === staffMember.id &&
-            (() => {
-              const metrics = getPreviewMetrics(dropPreview.startAt, compactCalendarRange.startHour, compactPixelsPerHour);
-              return (
-                <div
-                  className="pointer-events-none absolute left-2 right-2 z-[2] rounded-2xl border-2 border-[var(--color-primary)] bg-[var(--color-primary)]/14 shadow-[0_10px_30px_rgba(79,70,229,0.18)]"
-                  style={{ top: `${metrics.top}px`, height: `${metrics.height}px` }}
-                >
-                  <span className="absolute right-2 top-2 rounded-full bg-white/95 px-2 py-1 text-[10px] font-bold text-[var(--color-primary)] shadow-sm">
-                    {format(new Date(dropPreview.startAt), 'HH:mm')}
-                  </span>
-                </div>
-              );
-            })()}
-
-            {compactNowIndicatorOffset !== null && (
-              <div
-                className="absolute left-0 right-0 z-[1] border-t-2 border-rose-400"
-                style={{ top: `${compactNowIndicatorOffset}px` }}
-              >
-                <span className="absolute -left-2 -top-2 h-4 w-4 rounded-full border-2 border-white bg-rose-500 shadow" />
-              </div>
-            )}
-
-            {staffMember.dayAppointments.map((appointment) => {
-              const metrics = getEventLayoutMetrics(
-                appointment.start_at,
-                appointment.end_at,
-                compactCalendarRange.startHour,
-                compactPixelsPerHour,
-                6,
-              );
-              const ownerState = appointment.owner_view_state || appointment.status;
-              const isSecondary = isSecondaryOwnerState(ownerState);
-              const accent = appointment.service_color || appointment.staff_color || 'var(--color-primary)';
-              const surface = isSecondary ? 'rgba(248,250,252,0.94)' : colorWithAlpha(accent, '18', 'rgba(14, 165, 233, 0.1)');
-
-              return (
-                <button
-                  key={appointment.id}
-                  type="button"
-                  onClick={(event) => {
-                      event.stopPropagation();
-                      focusRecord(appointment.id, appointment.start_at);
-                    }}
-                  onTouchStart={(event) => beginLongPressMove(toMoveTarget(appointment, 'appointment'), event)}
-                  onTouchMove={handleLongPressTouchMove}
-                  onTouchEnd={resetLongPressGesture}
-                  onTouchCancel={resetLongPressGesture}
-                  className={`absolute left-2 right-2 z-[2] rounded-2xl border px-3 py-2 text-left shadow-sm select-none ${
-                    selectedRecordId === appointment.id ? 'ring-2 ring-[var(--color-primary)]/20' : ''
-                  } ${isSecondary ? 'opacity-45 saturate-50' : ''} overflow-hidden`}
-                  style={{
-                    top: `${metrics.top}px`,
-                    height: `${metrics.height}px`,
-                    borderColor: colorWithAlpha(accent, isSecondary ? '2A' : '50', 'rgba(148, 163, 184, 0.35)'),
-                    backgroundColor: surface,
-                    borderStyle: isSecondary ? 'dashed' : 'solid',
-                    WebkitTouchCallout: 'none',
-                    touchAction: touchMoveTarget ? 'none' : 'manipulation',
-                  }}
-                >
-                  {renderAppointmentCardBody(appointment, metrics.height)}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   const renderDesktopDetailsPanel = () => {
     if (!(selectedAppointment || selectedInboxItem)) {
       return (
@@ -2569,10 +2145,10 @@ export default function AdminCalendarPage() {
           event.clientY,
         );
       }}
-      onTouchStart={(event) => beginLongPressMove(toMoveTarget(request as unknown as Appointment, 'request'), event)}
-      onTouchMove={handleLongPressTouchMove}
-      onTouchEnd={resetLongPressGesture}
-      onTouchCancel={resetLongPressGesture}
+      onTouchStart={(event) => beginTouchPlacementLongPress(toMoveTarget(request as unknown as Appointment, 'request'), event)}
+      onTouchMove={handleTouchPlacementLongPressMove}
+      onTouchEnd={resetTouchPlacementLongPress}
+      onTouchCancel={resetTouchPlacementLongPress}
       className="rounded-3xl border border-amber-100 bg-white p-4 shadow-sm select-none"
       style={{ WebkitTouchCallout: 'none', touchAction: 'manipulation' }}
     >
@@ -2905,12 +2481,48 @@ export default function AdminCalendarPage() {
 	                                  <div className="flex flex-col gap-1">
                                       <p className="font-semibold">Докоснете празен слот, за да създадете нов час.</p>
                                       <p className="text-xs text-sky-700/80">
-                                        На телефон преместването остава през бутона <span className="font-semibold">„Премести“</span> или със задържане.
+                                        Задръжте запис и го плъзнете по целия дневен таймлайн. За преместване в друг ден използвайте бутона <span className="font-semibold">„Премести“</span>.
                                       </p>
                                     </div>
 	                                )}
 	                              </div>
-	                              {mobileBoardStaff.map((staffMember) => renderCompactStaffBoard(staffMember))}
+                                <MobileDayBoard
+                                  currentDate={currentDate}
+                                  staffMembers={mobileBoardStaff}
+                                  calendarZoom={calendarZoom}
+                                  showUnavailable={showUnavailable}
+                                  selectedRecordId={selectedRecordId}
+                                  touchMoveTarget={touchMoveTarget}
+                                  touchMoveMode={touchMoveMode}
+                                  dropPreview={dropPreview}
+                                  onPreviewChange={(preview) => {
+                                    setPendingTouchPlacement(preview);
+                                    setDropPreview(preview);
+                                  }}
+                                  onStartGestureMove={(target) => startTouchMoveMode(target, 'gesture')}
+                                  onCancelMove={clearTouchMoveState}
+                                  onCommitMove={async (target, preview) => {
+                                    clearTouchMoveState();
+                                    if (target.source === 'request') {
+                                      await handleRequestPlacement(target.id, preview.startAt, preview.staffId);
+                                      return;
+                                    }
+                                    handleDropReschedule(target.id, preview.startAt, preview.staffId);
+                                  }}
+                                  onOpenBooking={(staffId, slotDate) =>
+                                    openBookingWithPrefill(currentDate, staffId, format(slotDate, 'HH:mm'))
+                                  }
+                                  onOpenDetails={focusRecord}
+                                  onEditBlock={openBlockEditorForBlock}
+                                  resolveMovePlacement={resolveMovePlacement}
+                                  renderAppointmentCardBody={renderAppointmentCardBody}
+                                  isSecondaryAppointment={(appointment) =>
+                                    isSecondaryOwnerState(appointment.owner_view_state || appointment.status)
+                                  }
+                                  getAppointmentAccent={(appointment) =>
+                                    appointment.service_color || appointment.staff_color || 'var(--color-primary)'
+                                  }
+                                />
 	                            </div>
 	                          )}
                             {calendarView === 'month' ? (
@@ -3578,10 +3190,6 @@ export default function AdminCalendarPage() {
                                         );
                                       }}
 				                                    onClick={() => focusRecord(appointment.id, appointment.start_at)}
-	                                      onTouchStart={(event) => beginLongPressMove(toMoveTarget(appointment, 'appointment'), event)}
-	                                      onTouchMove={handleLongPressTouchMove}
-	                                      onTouchEnd={resetLongPressGesture}
-	                                      onTouchCancel={resetLongPressGesture}
 			                                    className={`absolute left-2 right-2 z-[2] rounded-2xl border px-3 py-2 text-left shadow-sm transition-transform hover:scale-[1.01] select-none ${
 			                                      isSelected ? 'ring-2 ring-[var(--color-primary)]/25' : ''
 			                                    } ${isSecondary ? 'opacity-45 saturate-50' : ''} ${
@@ -3630,10 +3238,6 @@ export default function AdminCalendarPage() {
 	                          <button
 	                            type="button"
 		                            onClick={() => focusRecord(appointment.id, appointment.start_at)}
-	                              onTouchStart={(event) => beginLongPressMove(toMoveTarget(appointment, 'appointment'), event)}
-	                              onTouchMove={handleLongPressTouchMove}
-	                              onTouchEnd={resetLongPressGesture}
-	                              onTouchCancel={resetLongPressGesture}
 	                            className="flex w-full gap-3 text-left select-none"
                               style={{ WebkitTouchCallout: 'none', touchAction: touchMoveTarget ? 'none' : 'manipulation' }}
 	                          >
@@ -3736,16 +3340,6 @@ export default function AdminCalendarPage() {
             <p className="mt-0.5 text-sm font-bold text-gray-900">{previewPlacementLabel}</p>
           </div>
         </div>
-      )}
-
-      {selectedRecordId && !showMobileDetails && (
-        <button
-          type="button"
-          onClick={() => setShowMobileDetails(true)}
-          className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+96px)] right-4 z-30 rounded-full bg-gray-900 px-4 py-3 text-sm font-semibold text-white shadow-xl lg:hidden"
-        >
-          Отвори детайли
-        </button>
       )}
 
       {touchMoveTarget && touchMoveMode === 'confirm' && (

@@ -445,8 +445,17 @@ function matchesCalendarStatusFilter(
   item: { status?: string; owner_view_state?: string },
   filter: 'all' | 'requests' | 'booked' | 'cancelled',
 ) {
-  if (filter === 'all') return true;
   const key = item.owner_view_state || item.status || 'pending';
+
+  if (filter === 'all') {
+    return ![
+      'cancelled',
+      'rejected',
+      'proposal_rejected',
+      'cancelled_by_owner',
+      'cancelled_by_client',
+    ].includes(key);
+  }
 
   if (filter === 'requests') {
     return ['pending', 'requested', 'proposal_pending', 'proposal_sent'].includes(key);
@@ -470,6 +479,19 @@ function isSecondaryOwnerState(ownerState?: string) {
   return SECONDARY_OWNER_STATES.includes((ownerState || 'pending') as (typeof SECONDARY_OWNER_STATES)[number]);
 }
 
+function overlapsRange(startAt: string | Date, endAt: string | Date, otherStartAt: string | Date, otherEndAt: string | Date) {
+  return new Date(startAt).getTime() < new Date(otherEndAt).getTime() &&
+    new Date(endAt).getTime() > new Date(otherStartAt).getTime();
+}
+
+function timeLabelToMinutes(value: string) {
+  const [hours, minutes] = value.split(':').map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) {
+    return null;
+  }
+  return hours * 60 + minutes;
+}
+
 function getEventDurationMinutes(startAt?: string, endAt?: string) {
   if (!startAt || !endAt) return CALENDAR_SLOT_MINUTES;
   const duration = differenceInMinutes(new Date(endAt), new Date(startAt));
@@ -489,6 +511,7 @@ export default function AdminCalendarPage() {
   const [showDesktopDetails, setShowDesktopDetails] = useState(false);
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [touchMoveTarget, setTouchMoveTarget] = useState<MoveTarget | null>(null);
+  const [touchMoveMode, setTouchMoveMode] = useState<'gesture' | 'confirm' | null>(null);
   const [pendingTouchPlacement, setPendingTouchPlacement] = useState<{ startAt: string; staffId: string } | null>(null);
   const [calendarView, setCalendarView] = useState<'grid' | 'list' | 'week' | 'month'>('grid');
   const [calendarZoom, setCalendarZoom] = useState<'compact' | 'comfortable' | 'precise'>('comfortable');
@@ -518,6 +541,7 @@ export default function AdminCalendarPage() {
   const dateInputRef = useRef<HTMLInputElement | null>(null);
   const longPressTimeoutRef = useRef<number | null>(null);
   const suppressTapUntilRef = useRef(0);
+  const invalidDropHintRef = useRef('Пуснете върху свободен 15-минутен слот.');
   const didAutoSelectStaffRef = useRef(false);
   const calendarColumnRegistryRef = useRef<
     Record<
@@ -628,7 +652,9 @@ export default function AdminCalendarPage() {
       qc.invalidateQueries({ queryKey: ['admin-header-upcoming'] });
       qc.invalidateQueries({ queryKey: ['appointment-context'] });
       setTouchMoveTarget(null);
+      setTouchMoveMode(null);
       setPendingTouchPlacement(null);
+      setDropPreview(null);
       toast.success('Часът е преместен.');
     },
     onError: (error: any) => {
@@ -785,11 +811,17 @@ export default function AdminCalendarPage() {
   const handleStatusChange = async (id: string, status: string) => {
     try {
       await apiClient.patch(`/appointments/${id}/status`, { status });
-      refetch();
+      await refetch();
+      qc.invalidateQueries({ queryKey: ['appointments-calendar-board'] });
       qc.invalidateQueries({ queryKey: ['appointments-upcoming'] });
       qc.invalidateQueries({ queryKey: ['admin-header-upcoming'] });
       qc.invalidateQueries({ queryKey: ['appointment-context', id] });
       qc.invalidateQueries({ queryKey: ['appointments-waitlist'] });
+      if (status === 'cancelled' && statusFilter !== 'cancelled' && selectedRecordId === id) {
+        setSelectedRecordId(null);
+        setShowDesktopDetails(false);
+        setShowMobileDetails(false);
+      }
     } catch {
       toast.error('Грешка при смяна на статуса');
     }
@@ -818,13 +850,15 @@ export default function AdminCalendarPage() {
     qc.invalidateQueries({ queryKey: ['appointments-waitlist'] });
   };
 
-  const openAppointmentMove = (appointment: Appointment) => {
-    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
-      startTouchMoveMode(toMoveTarget(appointment, 'appointment'));
-      return;
-    }
-
+  const clearTouchMoveState = useCallback(() => {
     setTouchMoveTarget(null);
+    setTouchMoveMode(null);
+    setPendingTouchPlacement(null);
+    setDropPreview(null);
+  }, []);
+
+  const openAppointmentMove = (appointment: Appointment) => {
+    clearTouchMoveState();
     setShowMoveModal(true);
   };
 
@@ -863,6 +897,76 @@ export default function AdminCalendarPage() {
     rescheduleMutation.mutate({ id: appointmentId, startAt, staffId });
   };
 
+  const resolveMovePlacement = useCallback(
+    (target: MoveTarget, startAt: string, staffId: string) => {
+      const allAppointments = calendarBoard?.appointments ?? [];
+      const nextStart = new Date(startAt);
+      const durationMs = new Date(target.end_at).getTime() - new Date(target.start_at).getTime();
+      if (!Number.isFinite(durationMs) || durationMs <= 0) {
+        return { preview: null, reason: 'Неуспешно определяне на новия слот.' as string };
+      }
+
+      if (target.source === 'appointment' && !isSameDay(nextStart, new Date(target.start_at))) {
+        return {
+          preview: null,
+          reason: 'Преместването в друг ден става от бутона „Премести“.',
+        };
+      }
+
+      const nextEnd = new Date(nextStart.getTime() + durationMs);
+      const staffMember = (calendarBoard?.staff ?? []).find((entry) => entry.id === staffId);
+      if (!staffMember) {
+        return { preview: null, reason: 'Специалистът не е намерен.' };
+      }
+
+      const dayKey = getWorkingDayKey(nextStart);
+      const schedule = staffMember.working_hours?.[dayKey];
+      if (!schedule?.isOpen) {
+        return { preview: null, reason: 'Този ден е извън работното време на специалиста.' };
+      }
+
+      const [openHour, openMinute] = schedule.open.split(':').map(Number);
+      const [closeHour, closeMinute] = schedule.close.split(':').map(Number);
+      const workStart = new Date(nextStart);
+      workStart.setHours(openHour, openMinute, 0, 0);
+      const workEnd = new Date(nextStart);
+      workEnd.setHours(closeHour, closeMinute, 0, 0);
+
+      if (nextStart.getTime() < workStart.getTime() || nextEnd.getTime() > workEnd.getTime()) {
+        return { preview: null, reason: 'Изберете слот в работното време на специалиста.' };
+      }
+
+      const blockedByException = (calendarBoard?.exceptions ?? []).some(
+        (exception) =>
+          exception.staff_id === staffId &&
+          overlapsRange(nextStart, nextEnd, exception.start_at, exception.end_at),
+      );
+      if (blockedByException) {
+        return { preview: null, reason: 'Този интервал е блокиран.' };
+      }
+
+      const occupied = allAppointments.some(
+        (appointment) =>
+          appointment.id !== target.id &&
+          appointment.staff_id === staffId &&
+          !['cancelled', 'no_show'].includes(appointment.status) &&
+          overlapsRange(nextStart, nextEnd, appointment.start_at, appointment.end_at),
+      );
+      if (occupied) {
+        return { preview: null, reason: 'Този час е зает. Пуснете върху свободен слот.' };
+      }
+
+      return {
+        preview: {
+          staffId,
+          startAt: nextStart.toISOString(),
+        },
+        reason: null,
+      };
+    },
+    [calendarBoard?.appointments, calendarBoard?.exceptions, calendarBoard?.staff],
+  );
+
   const updateTouchPlacementFromPoint = (
     clientY: number,
     columnRect: DOMRect,
@@ -877,10 +981,15 @@ export default function AdminCalendarPage() {
     const totalMinutes = rangeStartHour * 60 + slotIndex * CALENDAR_SLOT_MINUTES;
     const nextStart = new Date(day);
     nextStart.setHours(Math.floor(totalMinutes / 60), totalMinutes % 60, 0, 0);
-    const nextIso = nextStart.toISOString();
+    if (!touchMoveTarget) {
+      return null;
+    }
 
-    setPendingTouchPlacement({ startAt: nextIso, staffId });
-    setDropPreview({ staffId, startAt: nextIso });
+    const candidate = resolveMovePlacement(touchMoveTarget, nextStart.toISOString(), staffId);
+    invalidDropHintRef.current = candidate.reason || 'Пуснете върху свободен 15-минутен слот.';
+    setPendingTouchPlacement(candidate.preview);
+    setDropPreview(candidate.preview);
+    return candidate.preview;
   };
 
   const registerCalendarColumn = useCallback(
@@ -963,6 +1072,7 @@ export default function AdminCalendarPage() {
       setDraggedRequestId(null);
       setDropPreview(null);
       setTouchMoveTarget(null);
+      setTouchMoveMode(null);
       setPendingTouchPlacement(null);
       setShowRequestsPanel(false);
       toast.success(sameSlot ? 'Заявката е потвърдена.' : 'Часът е преместен и потвърден.');
@@ -972,7 +1082,7 @@ export default function AdminCalendarPage() {
   };
 
   const confirmTouchMove = async () => {
-    if (!touchMoveTarget || !pendingTouchPlacement) return;
+    if (!touchMoveTarget || !pendingTouchPlacement || touchMoveMode !== 'confirm') return;
 
     if (touchMoveTarget.source === 'request') {
       await handleRequestPlacement(touchMoveTarget.id, pendingTouchPlacement.startAt, pendingTouchPlacement.staffId);
@@ -1377,7 +1487,7 @@ export default function AdminCalendarPage() {
           startAt: dragState.target.start_at,
         });
       }
-      const nextTarget = resolvePointerDropTarget(event.clientX, event.clientY);
+      const nextTarget = resolvePointerDropTarget(dragState.target, event.clientX, event.clientY);
       if (!nextTarget) {
         setDropPreview(null);
         return;
@@ -1389,11 +1499,15 @@ export default function AdminCalendarPage() {
       const dragState = pointerDragRef.current;
       if (!dragState) return;
       const preview = dropPreview;
-      if (dragState.moved && preview) {
-        if (dragState.kind === 'request') {
-          await handleRequestPlacement(dragState.target.id, preview.startAt, preview.staffId);
+      if (dragState.moved) {
+        if (preview) {
+          if (dragState.kind === 'request') {
+            await handleRequestPlacement(dragState.target.id, preview.startAt, preview.staffId);
+          } else {
+            handleDropReschedule(dragState.target.id, preview.startAt, preview.staffId);
+          }
         } else {
-          handleDropReschedule(dragState.target.id, preview.startAt, preview.staffId);
+          toast.error(invalidDropHintRef.current);
         }
       }
       clearDesktopDragState();
@@ -1424,9 +1538,9 @@ export default function AdminCalendarPage() {
     () => getEventDurationMinutes(activePreviewTarget?.start_at, activePreviewTarget?.end_at),
     [activePreviewTarget],
   );
-  const previewStaffName = useMemo(
-    () => calendarStaff.find((staff) => staff.id === dropPreview?.staffId)?.name ?? null,
-    [calendarStaff, dropPreview?.staffId],
+  const previewTimeLabel = useMemo(
+    () => (dropPreview ? format(new Date(dropPreview.startAt), 'HH:mm') : null),
+    [dropPreview],
   );
 
   const getPreviewMetrics = useCallback(
@@ -1439,7 +1553,7 @@ export default function AdminCalendarPage() {
     [previewDurationMinutes],
   );
 
-  function resolvePointerDropTarget(clientX: number, clientY: number) {
+  function resolvePointerDropTarget(target: MoveTarget, clientX: number, clientY: number) {
     for (const entry of Object.values(calendarColumnRegistryRef.current)) {
       const rect = entry.element?.getBoundingClientRect();
       if (!rect) continue;
@@ -1453,13 +1567,12 @@ export default function AdminCalendarPage() {
       const totalMinutes = calendarRange.startHour * 60 + slotIndex * CALENDAR_SLOT_MINUTES;
       const nextStart = new Date(entry.day);
       nextStart.setHours(Math.floor(totalMinutes / 60), totalMinutes % 60, 0, 0);
-
-      return {
-        staffId: entry.staffId,
-        startAt: nextStart.toISOString(),
-      };
+      const candidate = resolveMovePlacement(target, nextStart.toISOString(), entry.staffId);
+      invalidDropHintRef.current = candidate.reason || 'Пуснете върху свободен 15-минутен слот.';
+      return candidate.preview;
     }
 
+    invalidDropHintRef.current = 'Пуснете върху свободен 15-минутен слот.';
     return null;
   }
 
@@ -1534,26 +1647,48 @@ export default function AdminCalendarPage() {
     }
   };
 
-  const startTouchMoveMode = (target: MoveTarget) => {
+  const startTouchMoveMode = (target: MoveTarget, mode: 'gesture' | 'confirm' = 'confirm') => {
     suppressTapUntilRef.current = Date.now() + 450;
     setTouchMoveTarget(target);
+    setTouchMoveMode(mode);
     setPendingTouchPlacement(null);
     setDropPreview(null);
     setCurrentDate(new Date(target.start_at));
     setShowMobileDetails(false);
     setShowDesktopDetails(false);
     setShowRequestsPanel(false);
-    toast.message('Изберете нов 15-минутен слот и потвърдете преместването.');
+    toast.message(
+      mode === 'gesture'
+        ? 'Пуснете върху свободен 15-минутен слот.'
+        : 'Изберете нов 15-минутен слот и потвърдете преместването.',
+    );
   };
 
   const beginLongPressMove = (target: MoveTarget) => {
     if (typeof window === 'undefined') return;
     clearLongPressTimer();
     longPressTimeoutRef.current = window.setTimeout(() => {
-      startTouchMoveMode(target);
+      startTouchMoveMode(target, 'gesture');
       longPressTimeoutRef.current = null;
     }, 320);
   };
+
+  useEffect(() => {
+    if (typeof document === 'undefined' || touchMoveMode !== 'gesture' || !touchMoveTarget) {
+      return;
+    }
+
+    const { style } = document.body;
+    const previousUserSelect = style.userSelect;
+    const previousOverscrollX = style.overscrollBehaviorX;
+    style.userSelect = 'none';
+    style.overscrollBehaviorX = 'none';
+
+    return () => {
+      style.userSelect = previousUserSelect;
+      style.overscrollBehaviorX = previousOverscrollX;
+    };
+  }, [touchMoveMode, touchMoveTarget]);
 
   const focusRecord = (id: string, startAt: string) => {
     if (Date.now() < suppressTapUntilRef.current) {
@@ -1854,10 +1989,11 @@ export default function AdminCalendarPage() {
           </div>
 
           <div
-            className="relative bg-white/80 touch-none"
-            style={{ height: `${compactCalendarHeight}px` }}
+            className={`relative bg-white/80 ${touchMoveTarget ? 'touch-none' : 'touch-pan-y'} select-none`}
+            style={{ height: `${compactCalendarHeight}px`, overscrollBehaviorX: 'none' }}
             onTouchMove={(event) => {
               if (!touchMoveTarget) return;
+              event.preventDefault();
               const touch = event.touches[0];
               if (!touch) return;
               updateTouchPlacementFromPoint(
@@ -1869,11 +2005,12 @@ export default function AdminCalendarPage() {
                 compactPixelsPerHour,
               );
             }}
-            onTouchEnd={(event) => {
+            onTouchEnd={async (event) => {
               if (!touchMoveTarget) return;
               const touch = event.changedTouches[0];
               if (!touch) return;
-              updateTouchPlacementFromPoint(
+              event.preventDefault();
+              const preview = updateTouchPlacementFromPoint(
                 touch.clientY,
                 event.currentTarget.getBoundingClientRect(),
                 staffMember.id,
@@ -1881,10 +2018,25 @@ export default function AdminCalendarPage() {
                 compactCalendarRange.startHour,
                 compactPixelsPerHour,
               );
+              suppressTapUntilRef.current = Date.now() + 450;
+              if (touchMoveMode !== 'gesture') {
+                return;
+              }
+              if (!preview) {
+                toast.error(invalidDropHintRef.current);
+                clearTouchMoveState();
+                return;
+              }
+              if (touchMoveTarget.source === 'request') {
+                await handleRequestPlacement(touchMoveTarget.id, preview.startAt, preview.staffId);
+                return;
+              }
+              handleDropReschedule(touchMoveTarget.id, preview.startAt, preview.staffId);
             }}
             onClick={(event) => {
+              if (Date.now() < suppressTapUntilRef.current) return;
               if (touchMoveTarget) {
-                updateTouchPlacementFromPoint(
+                const preview = updateTouchPlacementFromPoint(
                   event.clientY,
                   event.currentTarget.getBoundingClientRect(),
                   staffMember.id,
@@ -1892,6 +2044,9 @@ export default function AdminCalendarPage() {
                   compactCalendarRange.startHour,
                   compactPixelsPerHour,
                 );
+                if (!preview || touchMoveMode !== 'confirm') {
+                  return;
+                }
                 return;
               }
 
@@ -1965,7 +2120,7 @@ export default function AdminCalendarPage() {
                 >
                   <div className="absolute inset-x-2 top-2 flex items-center justify-end gap-2">
                     <span className="rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-600 shadow-sm">
-                      Нов слот
+                      {previewTimeLabel}
                     </span>
                   </div>
                 </div>
@@ -2003,7 +2158,7 @@ export default function AdminCalendarPage() {
 	                  onTouchMove={clearLongPressTimer}
 	                  onTouchEnd={clearLongPressTimer}
 	                  onTouchCancel={clearLongPressTimer}
-                  className={`absolute left-2 right-2 z-[2] rounded-2xl border px-3 py-2 text-left shadow-sm ${
+                  className={`absolute left-2 right-2 z-[2] rounded-2xl border px-3 py-2 text-left shadow-sm select-none ${
                     selectedRecordId === appointment.id ? 'ring-2 ring-[var(--color-primary)]/20' : ''
                   } ${isSecondary ? 'opacity-45 saturate-50' : ''} overflow-hidden`}
                   style={{
@@ -2012,6 +2167,7 @@ export default function AdminCalendarPage() {
                     borderColor: colorWithAlpha(accent, isSecondary ? '2A' : '50', 'rgba(148, 163, 184, 0.35)'),
                     backgroundColor: surface,
                     borderStyle: isSecondary ? 'dashed' : 'solid',
+                    WebkitTouchCallout: 'none',
                   }}
                 >
                   {renderAppointmentCardBody(appointment, height)}
@@ -2185,7 +2341,8 @@ export default function AdminCalendarPage() {
       onTouchMove={clearLongPressTimer}
       onTouchEnd={clearLongPressTimer}
       onTouchCancel={clearLongPressTimer}
-      className="rounded-3xl border border-amber-100 bg-white p-4 shadow-sm"
+      className="rounded-3xl border border-amber-100 bg-white p-4 shadow-sm select-none"
+      style={{ WebkitTouchCallout: 'none' }}
     >
       <button type="button" onClick={() => focusRecord(request.id, request.start_at)} className="w-full text-left">
         <div className="flex items-start justify-between gap-3">
@@ -2493,11 +2650,15 @@ export default function AdminCalendarPage() {
 	                                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 	                                    <div>
 	                                      <p className="font-semibold">Изберете нов слот за {touchMoveTarget.client_name}</p>
-	                                      <p className="text-xs text-sky-700/80">Докоснете точния 15-минутен слот в графика.</p>
+	                                      <p className="text-xs text-sky-700/80">
+                                          {touchMoveMode === 'gesture'
+                                            ? 'Пуснете върху свободен 15-минутен слот.'
+                                            : 'Докоснете точния 15-минутен слот в графика.'}
+                                        </p>
 	                                    </div>
 	                                    <button
 	                                      type="button"
-	                                      onClick={() => setTouchMoveTarget(null)}
+	                                      onClick={clearTouchMoveState}
 	                                      className="rounded-2xl border border-sky-300 bg-white px-3 py-2 text-xs font-semibold text-sky-700"
 	                                    >
 	                                      Откажи преместването
@@ -2768,17 +2929,26 @@ export default function AdminCalendarPage() {
                                   return (
                                     <div
                                       key={`${column.key}-${slot.key}`}
-                                      className={`absolute left-0 right-0 z-[1] transition-colors ${
-                                        dropPreview?.staffId === column.staff.id &&
-                                        dropPreview?.startAt === nextStart.toISOString()
-                                          ? 'border border-[var(--color-primary)]/45 bg-[var(--color-primary)]/12 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.7)]'
-                                          : ''
-                                      }`}
+                                      className="absolute left-0 right-0 z-[1] transition-colors"
                                       style={{ top: `${slot.top}px`, height: `${pixelsPerHour / (60 / CALENDAR_SLOT_MINUTES)}px` }}
                                       onDragOver={(event) => {
                                         if (!draggedAppointmentId && !draggedRequestId) return;
                                         event.preventDefault();
-                                        setDropPreview({ staffId: column.staff.id, startAt: nextStart.toISOString() });
+                                        const dragTarget = draggedAppointmentId
+                                          ? appointments.find((appointment) => appointment.id === draggedAppointmentId)
+                                          : inboxItems.find((item) => item.id === draggedRequestId);
+                                        if (!dragTarget) return;
+                                        const normalizedDragTarget = draggedAppointmentId
+                                          ? toMoveTarget(dragTarget as Appointment, 'appointment')
+                                          : toMoveTarget(dragTarget as Appointment, 'request');
+                                        const candidate = resolveMovePlacement(
+                                          normalizedDragTarget,
+                                          nextStart.toISOString(),
+                                          column.staff.id,
+                                        );
+                                        invalidDropHintRef.current =
+                                          candidate.reason || 'Пуснете върху свободен 15-минутен слот.';
+                                        setDropPreview(candidate.preview);
                                       }}
                                       onDrop={(event) => {
                                         event.preventDefault();
@@ -2791,6 +2961,7 @@ export default function AdminCalendarPage() {
                                         }
                                       }}
                                       onClick={() => {
+                                        if (Date.now() < suppressTapUntilRef.current) return;
                                         if (draggedAppointmentId || draggedRequestId || touchMoveTarget) return;
                                         openBookingWithPrefill(column.day, column.staff.id, slot.label);
                                       }}
@@ -2815,7 +2986,7 @@ export default function AdminCalendarPage() {
                                       >
                                         <div className="absolute inset-x-2 top-2 flex items-center justify-end gap-2">
                                           <span className="rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-600 shadow-sm">
-                                            Нов слот
+                                            {previewTimeLabel}
                                           </span>
                                         </div>
                                       </div>
@@ -3054,13 +3225,7 @@ export default function AdminCalendarPage() {
 		                              {moveDropSlots.map((slot) => (
 		                                <div
 		                                  key={`${staffMember.id}-${slot.key}`}
-		                                  className={`absolute left-0 right-0 z-[1] transition-colors ${
-		                                    dropPreview?.staffId === staffMember.id &&
-		                                    dropPreview?.startAt &&
-		                                    format(new Date(dropPreview.startAt), 'HH:mm') === slot.label
-		                                      ? 'border border-[var(--color-primary)]/45 bg-[var(--color-primary)]/12 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.7)]'
-		                                      : ''
-		                                  }`}
+		                                  className="absolute left-0 right-0 z-[1] transition-colors"
 		                                  style={{ top: `${slot.top}px`, height: `${pixelsPerHour / (60 / CALENDAR_SLOT_MINUTES)}px` }}
 		                                  onDragOver={(event) => {
 		                                    if (!draggedAppointmentId && !draggedRequestId) return;
@@ -3068,7 +3233,21 @@ export default function AdminCalendarPage() {
 		                                    const [hour, minute] = slot.label.split(':').map(Number);
 		                                    const nextStart = new Date(currentDate);
 		                                    nextStart.setHours(hour, minute, 0, 0);
-		                                    setDropPreview({ staffId: staffMember.id, startAt: nextStart.toISOString() });
+                                        const dragTarget = draggedAppointmentId
+                                          ? appointments.find((appointment) => appointment.id === draggedAppointmentId)
+                                          : inboxItems.find((item) => item.id === draggedRequestId);
+                                        if (!dragTarget) return;
+                                        const normalizedDragTarget = draggedAppointmentId
+                                          ? toMoveTarget(dragTarget as Appointment, 'appointment')
+                                          : toMoveTarget(dragTarget as Appointment, 'request');
+                                        const candidate = resolveMovePlacement(
+                                          normalizedDragTarget,
+                                          nextStart.toISOString(),
+                                          staffMember.id,
+                                        );
+                                        invalidDropHintRef.current =
+                                          candidate.reason || 'Пуснете върху свободен 15-минутен слот.';
+                                        setDropPreview(candidate.preview);
 		                                  }}
 		                                  onDrop={(event) => {
 		                                    event.preventDefault();
@@ -3084,6 +3263,7 @@ export default function AdminCalendarPage() {
 		                                    }
 		                                  }}
                                       onClick={() => {
+                                        if (Date.now() < suppressTapUntilRef.current) return;
                                         if (draggedAppointmentId || draggedRequestId || touchMoveTarget) return;
                                         openBookingWithPrefill(currentDate, staffMember.id, slot.label);
                                       }}
@@ -3107,7 +3287,7 @@ export default function AdminCalendarPage() {
                                       >
                                         <div className="absolute inset-x-2 top-2 flex items-center justify-end gap-2">
                                           <span className="rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-600 shadow-sm">
-                                            Нов слот
+                                            {previewTimeLabel}
                                           </span>
                                         </div>
                                       </div>
@@ -3169,7 +3349,7 @@ export default function AdminCalendarPage() {
 	                                      onTouchMove={clearLongPressTimer}
 	                                      onTouchEnd={clearLongPressTimer}
 	                                      onTouchCancel={clearLongPressTimer}
-			                                    className={`absolute left-2 right-2 z-[2] rounded-2xl border px-3 py-2 text-left shadow-sm transition-transform hover:scale-[1.01] ${
+			                                    className={`absolute left-2 right-2 z-[2] rounded-2xl border px-3 py-2 text-left shadow-sm transition-transform hover:scale-[1.01] select-none ${
 			                                      isSelected ? 'ring-2 ring-[var(--color-primary)]/25' : ''
 			                                    } ${isSecondary ? 'opacity-45 saturate-50' : ''} ${
                                         draggedAppointmentId === appointment.id ? 'opacity-20 scale-[0.99]' : ''
@@ -3181,6 +3361,7 @@ export default function AdminCalendarPage() {
 		                                      backgroundColor: soft,
 		                                      borderStyle: isSecondary ? 'dashed' : 'solid',
 		                                      boxShadow: isSelected ? '0 0 0 1px rgba(99, 102, 241, 0.2)' : undefined,
+                                          WebkitTouchCallout: 'none',
 		                                    }}
 		                                  >
 		                                    {renderAppointmentCardBody(appointment, height)}
@@ -3219,7 +3400,8 @@ export default function AdminCalendarPage() {
 	                              onTouchMove={clearLongPressTimer}
 	                              onTouchEnd={clearLongPressTimer}
 	                              onTouchCancel={clearLongPressTimer}
-	                            className="flex w-full gap-3 text-left"
+	                            className="flex w-full gap-3 text-left select-none"
+                              style={{ WebkitTouchCallout: 'none' }}
 	                          >
 	                            <div className="flex w-16 flex-shrink-0 flex-col items-center gap-1.5 rounded-[20px] border border-gray-100 bg-gray-50/80 px-2 py-3">
 	                              <span className="text-sm font-black text-gray-900">{startTime}</span>
@@ -3323,13 +3505,13 @@ export default function AdminCalendarPage() {
         </button>
       )}
 
-      {touchMoveTarget && (
+      {touchMoveTarget && touchMoveMode === 'confirm' && (
         <div className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+20px)] left-4 right-4 z-40 lg:hidden">
           <div className="rounded-[24px] border border-white/70 bg-white/95 p-3 shadow-2xl shadow-black/10 backdrop-blur">
             <p className="text-sm font-semibold text-gray-900">{touchMoveTarget.client_name}</p>
             <p className="mt-1 text-xs text-gray-500">
               {pendingTouchPlacement
-                ? `Нов слот: ${formatAppointmentDay(pendingTouchPlacement.startAt)}`
+                ? 'Слотът е избран. Потвърдете преместването.'
                 : 'Докоснете 15-минутен слот в календара.'}
             </p>
             <div className="mt-3 flex gap-2">
@@ -3343,11 +3525,7 @@ export default function AdminCalendarPage() {
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setTouchMoveTarget(null);
-                  setPendingTouchPlacement(null);
-                  setDropPreview(null);
-                }}
+                onClick={clearTouchMoveState}
                 className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-700"
               >
                 Отказ
@@ -3364,9 +3542,9 @@ export default function AdminCalendarPage() {
             <p className="truncate text-xs font-semibold text-gray-500">{activePreviewTarget.service_name}</p>
           </div>
           <div className="text-right">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Нов слот</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400">Преместване</p>
             <p className="mt-1 text-sm font-bold text-[var(--color-primary)]">
-              {dropPreview ? `${format(new Date(dropPreview.startAt), 'HH:mm')} · ${previewStaffName || 'специалист'}` : 'Изберете място'}
+              {dropPreview ? 'Пуснете върху свободния слот в колоната.' : 'Плъзнете към свободен слот'}
             </p>
           </div>
         </div>
@@ -4263,6 +4441,34 @@ function AdminBookingModal({
     clientName.trim().length >= 2 &&
     /^\+359\d{9}$/.test(normalizeBulgarianPhone(clientPhone));
 
+  const preferredSlotAvailable = useMemo(
+    () => Boolean(preferredSlot && slots?.some((slot) => slot.start === preferredSlot)),
+    [preferredSlot, slots],
+  );
+  const nearestPreferredSlots = useMemo(() => {
+    if (!preferredSlot || !slots?.length || preferredSlotAvailable) {
+      return [];
+    }
+
+    const preferredMinutes = timeLabelToMinutes(preferredSlot);
+    if (preferredMinutes === null) {
+      return [];
+    }
+
+    return [...slots]
+      .sort((left, right) => {
+        const leftMinutes = timeLabelToMinutes(left.start) ?? Number.MAX_SAFE_INTEGER;
+        const rightMinutes = timeLabelToMinutes(right.start) ?? Number.MAX_SAFE_INTEGER;
+        const leftDiff = Math.abs(leftMinutes - preferredMinutes);
+        const rightDiff = Math.abs(rightMinutes - preferredMinutes);
+        if (leftDiff !== rightDiff) {
+          return leftDiff - rightDiff;
+        }
+        return leftMinutes - rightMinutes;
+      })
+      .slice(0, 4);
+  }, [preferredSlot, preferredSlotAvailable, slots]);
+
   useEffect(() => {
     if (!staff?.length) return;
 
@@ -4278,10 +4484,9 @@ function AdminBookingModal({
   }, [defaultStaffId, staff, staffId]);
 
   useEffect(() => {
-    if (!preferredSlot || !slots?.length) return;
-    if (!slots.some((slot) => slot.start === preferredSlot)) return;
+    if (!preferredSlot || !slots?.length || !preferredSlotAvailable) return;
     setSelectedSlot((current) => current || preferredSlot);
-  }, [preferredSlot, slots]);
+  }, [preferredSlot, preferredSlotAvailable, slots]);
 
   const chooseClient = (client: ClientSuggestion) => {
       setClientName(client.name);
@@ -4388,6 +4593,33 @@ function AdminBookingModal({
                   ) : slotsLoading ? (
                     <div className="flex items-center justify-center py-4">
                       <Loader2 className="w-5 h-5 animate-spin text-[var(--color-primary)]" />
+                    </div>
+                  ) : preferredSlot && !preferredSlotAvailable && slots?.length ? (
+                    <div className="space-y-3 px-2 py-2">
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+                        <p className="font-semibold">
+                          Избраният час {preferredSlot} не е свободен за тази услуга.
+                        </p>
+                        <p className="mt-1 text-xs text-amber-800/80">
+                          Запазихме избора ви и показваме най-близките свободни варианти.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {nearestPreferredSlots.map((slot) => (
+                          <button
+                            key={slot.start}
+                            type="button"
+                            onClick={() => setSelectedSlot(slot.start)}
+                            className={`rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
+                              selectedSlot === slot.start
+                                ? 'bg-[var(--color-primary)] text-white'
+                                : 'bg-white text-gray-700 border border-amber-200 hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]'
+                            }`}
+                          >
+                            {slot.start}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   ) : !slots?.length ? (
                     <p className="px-2 py-3 text-sm text-gray-400">Няма свободни часове за тази дата.</p>

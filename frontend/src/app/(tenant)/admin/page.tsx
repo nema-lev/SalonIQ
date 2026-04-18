@@ -262,6 +262,7 @@ const SECONDARY_OWNER_STATES = [
 const CALENDAR_SLOT_MINUTES = 15;
 const LONG_PRESS_DELAY_MS = 420;
 const LONG_PRESS_MOVE_TOLERANCE_PX = 14;
+const DAY_VIEW_FETCH_BUFFER_DAYS = 3;
 
 type InboxBucket = 'actions' | 'updates';
 type CalendarStatusFilter = (typeof STATUS_FILTER_OPTIONS)[number]['key'];
@@ -657,7 +658,7 @@ export default function AdminCalendarPage() {
         ? startOfWeek(currentDate, { weekStartsOn: 1 })
         : calendarView === 'month'
           ? startOfWeek(startOfMonth(currentDate), { weekStartsOn: 1 })
-          : startOfDay(currentDate),
+          : startOfDay(subDays(currentDate, DAY_VIEW_FETCH_BUFFER_DAYS)),
     [calendarView, currentDate],
   );
   const rangeEndExclusive = useMemo(
@@ -666,7 +667,7 @@ export default function AdminCalendarPage() {
         ? addDays(endOfWeek(currentDate, { weekStartsOn: 1 }), 1)
         : calendarView === 'month'
           ? addDays(endOfWeek(endOfMonth(currentDate), { weekStartsOn: 1 }), 1)
-        : addDays(endOfDay(currentDate), 1),
+        : addDays(endOfDay(addDays(currentDate, DAY_VIEW_FETCH_BUFFER_DAYS)), 1),
     [calendarView, currentDate],
   );
 
@@ -981,7 +982,12 @@ export default function AdminCalendarPage() {
   };
 
   const resolveMovePlacement = useCallback(
-    (target: MoveTarget, startAt: string, staffId: string) => {
+    (
+      target: MoveTarget,
+      startAt: string,
+      staffId: string,
+      options?: { allowCrossDay?: boolean },
+    ) => {
       const allAppointments = calendarBoard?.appointments ?? [];
       const nextStart = new Date(startAt);
       const durationMs = new Date(target.end_at).getTime() - new Date(target.start_at).getTime();
@@ -989,7 +995,11 @@ export default function AdminCalendarPage() {
         return { preview: null, reason: 'Неуспешно определяне на новия слот.' as string };
       }
 
-      if (target.source === 'appointment' && !isSameDay(nextStart, new Date(target.start_at))) {
+      if (
+        target.source === 'appointment' &&
+        !options?.allowCrossDay &&
+        !isSameDay(nextStart, new Date(target.start_at))
+      ) {
         return {
           preview: null,
           reason: 'Преместването в друг ден става от бутона „Премести“.',
@@ -1623,13 +1633,15 @@ export default function AdminCalendarPage() {
       null;
 
     const parts = [
-      calendarView === 'week' ? format(previewDate, 'EEE d MMM', { locale: bg }) : null,
+      calendarView === 'week' || !isSameDay(previewDate, currentDate)
+        ? format(previewDate, 'EEE d MMM', { locale: bg })
+        : null,
       format(previewDate, 'HH:mm'),
       staffName,
     ].filter(Boolean);
 
     return parts.join(' · ');
-  }, [activePreviewTarget?.staff_name, calendarBoard?.staff, calendarView, dropPreview]);
+  }, [activePreviewTarget?.staff_name, calendarBoard?.staff, calendarView, currentDate, dropPreview]);
 
   const getPreviewMetrics = useCallback(
     (startAt: string, rangeStartHour: number, pxPerHour: number) => {
@@ -1733,7 +1745,7 @@ export default function AdminCalendarPage() {
     setShowRequestsPanel(false);
     toast.message(
       mode === 'gesture'
-        ? 'Пуснете върху свободен 15-минутен слот.'
+        ? 'Плъзнете по таймлайна, а към ръба сменяте деня.'
         : 'Изберете нов 15-минутен слот и потвърдете преместването.',
     );
   };
@@ -2460,7 +2472,7 @@ export default function AdminCalendarPage() {
 	                                      <p className="font-semibold">Изберете нов слот за {touchMoveTarget.client_name}</p>
 	                                      <p className="text-xs text-sky-700/80">
                                           {touchMoveMode === 'gesture'
-                                            ? 'Пуснете върху свободен 15-минутен слот.'
+                                            ? 'Плъзнете нагоре/надолу по таймлайна, а към левия или десния ръб сменяте деня.'
                                             : 'Докоснете точния 15-минутен слот в графика.'}
                                         </p>
                                         {previewPlacementLabel && (
@@ -2481,7 +2493,7 @@ export default function AdminCalendarPage() {
 	                                  <div className="flex flex-col gap-1">
                                       <p className="font-semibold">Докоснете празен слот, за да създадете нов час.</p>
                                       <p className="text-xs text-sky-700/80">
-                                        Задръжте запис и го плъзнете по целия дневен таймлайн. За преместване в друг ден използвайте бутона <span className="font-semibold">„Премести“</span>.
+                                        Задръжте запис и го плъзнете по целия дневен таймлайн. По време на drag стигнете до левия или десния ръб, за да смените деня.
                                       </p>
                                     </div>
 	                                )}
@@ -2514,6 +2526,7 @@ export default function AdminCalendarPage() {
                                   }
                                   onOpenDetails={focusRecord}
                                   onEditBlock={openBlockEditorForBlock}
+                                  onChangeDay={setCurrentDate}
                                   resolveMovePlacement={resolveMovePlacement}
                                   renderAppointmentCardBody={renderAppointmentCardBody}
                                   isSecondaryAppointment={(appointment) =>
@@ -3333,7 +3346,7 @@ export default function AdminCalendarPage() {
         </div>
       )}
 
-      {dropPreview && activePreviewTarget && previewPlacementLabel && (
+      {dropPreview && activePreviewTarget && previewPlacementLabel && !(touchMoveTarget && touchMoveMode === 'gesture') && (
         <div className="pointer-events-none fixed left-1/2 top-[calc(env(safe-area-inset-top,0px)+12px)] z-40 -translate-x-1/2">
           <div className="rounded-full border border-[var(--color-primary)]/20 bg-white/95 px-4 py-2 shadow-xl shadow-black/10 backdrop-blur">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-400">Нов час</p>

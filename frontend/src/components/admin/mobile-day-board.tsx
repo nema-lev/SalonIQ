@@ -1,19 +1,14 @@
 'use client';
 
 import { format, isToday } from 'date-fns';
-import { type ReactNode, useEffect, useMemo, useRef } from 'react';
-import { toast } from 'sonner';
+import { bg } from 'date-fns/locale';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { MobileDragHud } from './mobile-drag-hud';
+import { useMobileCalendarDrag, type MobilePlacementPreview } from './use-mobile-calendar-drag';
 
 const CALENDAR_SLOT_MINUTES = 15;
 const LONG_PRESS_DELAY_MS = 420;
 const LONG_PRESS_MOVE_TOLERANCE_PX = 14;
-const AUTO_SCROLL_EDGE_PX = 84;
-const AUTO_SCROLL_MAX_STEP = 18;
-
-type PlacementPreview = {
-  staffId: string;
-  startAt: string;
-} | null;
 
 type MoveTarget = {
   id: string;
@@ -73,8 +68,9 @@ type ResolveMovePlacement = (
   target: MoveTarget,
   startAt: string,
   staffId: string,
+  options?: { allowCrossDay?: boolean },
 ) => {
-  preview: PlacementPreview;
+  preview: MobilePlacementPreview;
   reason: string | null;
 };
 
@@ -86,14 +82,15 @@ type MobileDayBoardProps = {
   selectedRecordId: string | null;
   touchMoveTarget: MoveTarget | null;
   touchMoveMode: 'gesture' | 'confirm' | null;
-  dropPreview: PlacementPreview;
-  onPreviewChange: (preview: PlacementPreview) => void;
+  dropPreview: MobilePlacementPreview;
+  onPreviewChange: (preview: MobilePlacementPreview) => void;
   onStartGestureMove: (target: MoveTarget) => void;
   onCancelMove: () => void;
-  onCommitMove: (target: MoveTarget, preview: NonNullable<PlacementPreview>) => Promise<void> | void;
+  onCommitMove: (target: MoveTarget, preview: NonNullable<MobilePlacementPreview>) => Promise<void> | void;
   onOpenBooking: (staffId: string, slotDate: Date) => void;
   onOpenDetails: (id: string, startAt: string) => void;
   onEditBlock: (block: StaffException) => void;
+  onChangeDay: (nextDate: Date) => void;
   resolveMovePlacement: ResolveMovePlacement;
   renderAppointmentCardBody: (appointment: Appointment, height: number) => ReactNode;
   isSecondaryAppointment: (appointment: Appointment) => boolean;
@@ -150,6 +147,12 @@ function getInitials(name: string) {
     .join('');
 }
 
+function getEventDurationMinutes(startAt?: string, endAt?: string) {
+  if (!startAt || !endAt) return CALENDAR_SLOT_MINUTES;
+  const duration = Math.round((new Date(endAt).getTime() - new Date(startAt).getTime()) / 60000);
+  return Math.max(duration || CALENDAR_SLOT_MINUTES, CALENDAR_SLOT_MINUTES);
+}
+
 function buildMobileDayRange(staffMembers: StaffBoard[], currentDate: Date) {
   const minutes: number[] = [];
   const dayKey = getWorkingDayKey(currentDate);
@@ -179,10 +182,10 @@ function buildMobileDayRange(staffMembers: StaffBoard[], currentDate: Date) {
     return { startHour: 8, endHour: 20 };
   }
 
-  const rawStart = Math.floor(Math.min(...minutes) / 60) - 1;
-  const rawEnd = Math.ceil(Math.max(...minutes) / 60) + 1;
-  const startHour = Math.max(6, rawStart);
-  const endHour = Math.min(23, Math.max(rawEnd, startHour + 10));
+  const earliestMinute = Math.min(...minutes);
+  const latestMinute = Math.max(...minutes);
+  const startHour = Math.max(0, Math.floor(earliestMinute / 60));
+  const endHour = Math.min(24, Math.max(Math.ceil(latestMinute / 60), startHour + 8));
 
   return { startHour, endHour };
 }
@@ -235,11 +238,13 @@ export function MobileDayBoard({
   onOpenBooking,
   onOpenDetails,
   onEditBlock,
+  onChangeDay,
   resolveMovePlacement,
   renderAppointmentCardBody,
   isSecondaryAppointment,
   getAppointmentAccent,
 }: MobileDayBoardProps) {
+  const frameRef = useRef<HTMLDivElement | null>(null);
   const scrollRootRef = useRef<HTMLDivElement | null>(null);
   const columnRegistryRef = useRef<Record<string, ColumnRegistryEntry>>({});
   const longPressTimeoutRef = useRef<number | null>(null);
@@ -250,19 +255,14 @@ export function MobileDayBoard({
     startY: number;
     moved: boolean;
   } | null>(null);
-  const activeTouchGestureRef = useRef<{ touchId: number } | null>(null);
-  const autoScrollFrameRef = useRef<number | null>(null);
-  const autoScrollVelocityRef = useRef(0);
-  const lastTouchPointRef = useRef<{ clientX: number; clientY: number } | null>(null);
   const suppressTapUntilRef = useRef(0);
-  const invalidDropHintRef = useRef('Пуснете върху свободен 15-минутен слот.');
-  const lastScrollSignatureRef = useRef<string | null>(null);
+  const [surfaceHeight, setSurfaceHeight] = useState<number | null>(null);
 
   const range = useMemo(
     () => buildMobileDayRange(staffMembers, currentDate),
     [currentDate, staffMembers],
   );
-  const pixelsPerHour = calendarZoom === 'compact' ? 68 : calendarZoom === 'precise' ? 96 : 80;
+  const pixelsPerHour = calendarZoom === 'compact' ? 74 : calendarZoom === 'precise' ? 104 : 88;
   const grid = useMemo(() => buildGridMetrics(range, pixelsPerHour), [pixelsPerHour, range]);
   const nowIndicatorOffset = useMemo(() => {
     if (!isToday(currentDate)) return null;
@@ -273,6 +273,10 @@ export function MobileDayBoard({
     if (minutes < startMinutes || minutes > endMinutes) return null;
     return ((minutes - startMinutes) / 60) * pixelsPerHour;
   }, [currentDate, pixelsPerHour, range.endHour, range.startHour]);
+  const gestureDurationMinutes = useMemo(
+    () => getEventDurationMinutes(touchMoveTarget?.start_at, touchMoveTarget?.end_at),
+    [touchMoveTarget?.end_at, touchMoveTarget?.start_at],
+  );
 
   const clearLongPressTimer = () => {
     if (longPressTimeoutRef.current) {
@@ -284,14 +288,6 @@ export function MobileDayBoard({
   const resetLongPressGesture = () => {
     clearLongPressTimer();
     touchPressRef.current = null;
-  };
-
-  const stopAutoScroll = () => {
-    autoScrollVelocityRef.current = 0;
-    if (autoScrollFrameRef.current) {
-      window.cancelAnimationFrame(autoScrollFrameRef.current);
-      autoScrollFrameRef.current = null;
-    }
   };
 
   const registerCalendarColumn =
@@ -312,7 +308,7 @@ export function MobileDayBoard({
     target: MoveTarget,
     clientX: number,
     clientY: number,
-  ): PlacementPreview => {
+  ): MobilePlacementPreview => {
     for (const entry of Object.values(columnRegistryRef.current)) {
       const rect = entry.element?.getBoundingClientRect();
       if (!rect || rect.width === 0 || rect.height === 0) {
@@ -329,570 +325,500 @@ export function MobileDayBoard({
       const nextStart = new Date(currentDate);
       nextStart.setHours(Math.floor(totalMinutes / 60), totalMinutes % 60, 0, 0);
 
-      const candidate = resolveMovePlacement(target, nextStart.toISOString(), entry.staffId);
-      invalidDropHintRef.current = candidate.reason || 'Пуснете върху свободен 15-минутен слот.';
-      return candidate.preview;
+      return resolveMovePlacement(target, nextStart.toISOString(), entry.staffId).preview;
     }
 
-    invalidDropHintRef.current = 'Пуснете върху свободен 15-минутен слот.';
     return null;
   };
+
+  const {
+    beginGestureDrag,
+    dragPoint,
+    candidateStartAt,
+    candidateStaffId,
+    invalidReason,
+    isDraggingAppointment,
+  } = useMobileCalendarDrag({
+    currentDate,
+    touchMoveTarget,
+    touchMoveMode,
+    scrollRootRef,
+    surfaceRef: frameRef,
+    columnRegistryRef,
+    gridSlotHeight: grid.slotHeight,
+    gridSlotCount: grid.dropSlots.length,
+    rangeStartHour: range.startHour,
+    resolveMovePlacement,
+    onPreviewChange,
+    onCommitMove,
+    onCancelMove,
+    onChangeDay,
+  });
 
   useEffect(() => {
     return () => {
       resetLongPressGesture();
-      stopAutoScroll();
     };
   }, []);
 
   useEffect(() => {
-    const scrollRoot = scrollRootRef.current;
-    if (!scrollRoot || touchMoveMode === 'gesture') {
-      return;
+    if (!isDraggingAppointment && scrollRootRef.current) {
+      scrollRootRef.current.scrollTop = 0;
     }
-
-    const signature = [
-      format(currentDate, 'yyyy-MM-dd'),
-      range.startHour,
-      range.endHour,
-      staffMembers.map((staffMember) => `${staffMember.id}:${staffMember.dayAppointments.length}`).join('|'),
-    ].join('::');
-
-    if (lastScrollSignatureRef.current === signature) {
-      return;
-    }
-
-    lastScrollSignatureRef.current = signature;
-
-    const firstAppointment = staffMembers
-      .flatMap((staffMember) => staffMember.dayAppointments)
-      .sort((left, right) => new Date(left.start_at).getTime() - new Date(right.start_at).getTime())[0];
-    const focusDate = isToday(currentDate) ? new Date() : firstAppointment ? new Date(firstAppointment.start_at) : null;
-    const focusMinutes = focusDate
-      ? focusDate.getHours() * 60 + focusDate.getMinutes()
-      : range.startHour * 60 + 120;
-    const focusOffset = Math.max(((focusMinutes - range.startHour * 60) / 60) * pixelsPerHour, 0);
-    const scrollTop = Math.max(focusOffset - scrollRoot.clientHeight * 0.28, 0);
-
-    scrollRoot.scrollTop = Math.min(scrollTop, Math.max(scrollRoot.scrollHeight - scrollRoot.clientHeight, 0));
-  }, [currentDate, pixelsPerHour, range.endHour, range.startHour, staffMembers, touchMoveMode]);
+  }, [currentDate, isDraggingAppointment, range.endHour, range.startHour, staffMembers]);
 
   useEffect(() => {
-    if (
-      typeof window === 'undefined' ||
-      !touchMoveTarget ||
-      touchMoveTarget.source !== 'appointment' ||
-      touchMoveMode !== 'gesture'
-    ) {
-      stopAutoScroll();
-      lastTouchPointRef.current = null;
+    if (typeof window === 'undefined') {
       return;
     }
 
-    const trackedTouch = activeTouchGestureRef.current;
-    if (!trackedTouch) {
-      return;
-    }
+    let frame = 0;
 
-    const resolvePreviewForTouch = (touch: Touch) => {
-      const preview = resolvePlacementFromClientPoint(touchMoveTarget, touch.clientX, touch.clientY);
-      onPreviewChange(preview);
-      return preview;
+    const updateSurfaceHeight = () => {
+      const node = frameRef.current;
+      if (!node) {
+        return;
+      }
+
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+      const rect = node.getBoundingClientRect();
+      const nextHeight = Math.max(Math.floor(viewportHeight - rect.top - 16), 440);
+      setSurfaceHeight((current) => (current === nextHeight ? current : nextHeight));
     };
 
-    const tickAutoScroll = () => {
-      const scrollRoot = scrollRootRef.current;
-      const velocity = autoScrollVelocityRef.current;
-      const lastTouchPoint = lastTouchPointRef.current;
-
-      if (!scrollRoot || !velocity || !lastTouchPoint) {
-        autoScrollFrameRef.current = null;
-        return;
+    const scheduleUpdate = () => {
+      if (frame) {
+        window.cancelAnimationFrame(frame);
       }
-
-      const previousScrollTop = scrollRoot.scrollTop;
-      const maxScrollTop = Math.max(scrollRoot.scrollHeight - scrollRoot.clientHeight, 0);
-      scrollRoot.scrollTop = Math.min(Math.max(previousScrollTop + velocity, 0), maxScrollTop);
-
-      if (scrollRoot.scrollTop !== previousScrollTop) {
-        const preview = resolvePlacementFromClientPoint(
-          touchMoveTarget,
-          lastTouchPoint.clientX,
-          lastTouchPoint.clientY,
-        );
-        onPreviewChange(preview);
-      }
-
-      if (scrollRoot.scrollTop === previousScrollTop) {
-        autoScrollFrameRef.current = null;
-        return;
-      }
-
-      autoScrollFrameRef.current = window.requestAnimationFrame(tickAutoScroll);
+      frame = window.requestAnimationFrame(updateSurfaceHeight);
     };
 
-    const syncAutoScroll = (clientY: number) => {
-      const scrollRoot = scrollRootRef.current;
-      if (!scrollRoot) {
-        stopAutoScroll();
-        return;
-      }
-
-      const rect = scrollRoot.getBoundingClientRect();
-      let nextVelocity = 0;
-
-      if (clientY < rect.top + AUTO_SCROLL_EDGE_PX) {
-        const ratio = (rect.top + AUTO_SCROLL_EDGE_PX - clientY) / AUTO_SCROLL_EDGE_PX;
-        nextVelocity = -Math.max(6, Math.round(ratio * AUTO_SCROLL_MAX_STEP));
-      } else if (clientY > rect.bottom - AUTO_SCROLL_EDGE_PX) {
-        const ratio = (clientY - (rect.bottom - AUTO_SCROLL_EDGE_PX)) / AUTO_SCROLL_EDGE_PX;
-        nextVelocity = Math.max(6, Math.round(ratio * AUTO_SCROLL_MAX_STEP));
-      }
-
-      autoScrollVelocityRef.current = nextVelocity;
-
-      if (!nextVelocity) {
-        if (autoScrollFrameRef.current) {
-          window.cancelAnimationFrame(autoScrollFrameRef.current);
-          autoScrollFrameRef.current = null;
-        }
-        return;
-      }
-
-      if (!autoScrollFrameRef.current) {
-        autoScrollFrameRef.current = window.requestAnimationFrame(tickAutoScroll);
-      }
-    };
-
-    const handleTouchMove = (event: TouchEvent) => {
-      const touch = Array.from(event.touches).find((entry) => entry.identifier === trackedTouch.touchId);
-      if (!touch) {
-        return;
-      }
-
-      if (event.cancelable) {
-        event.preventDefault();
-      }
-
-      lastTouchPointRef.current = { clientX: touch.clientX, clientY: touch.clientY };
-      syncAutoScroll(touch.clientY);
-      resolvePreviewForTouch(touch);
-    };
-
-    const finishTouchGesture = async (touch: Touch | undefined, cancelled: boolean) => {
-      stopAutoScroll();
-      lastTouchPointRef.current = null;
-      activeTouchGestureRef.current = null;
-
-      if (!touch || cancelled) {
-        onCancelMove();
-        return;
-      }
-
-      suppressTapUntilRef.current = Date.now() + 450;
-      const preview = resolvePreviewForTouch(touch);
-
-      if (!preview) {
-        toast.error(invalidDropHintRef.current);
-        onCancelMove();
-        return;
-      }
-
-      await onCommitMove(touchMoveTarget, preview);
-    };
-
-    const handleTouchEnd = (event: TouchEvent) => {
-      const touch = Array.from(event.changedTouches).find((entry) => entry.identifier === trackedTouch.touchId);
-      if (!touch) {
-        return;
-      }
-
-      if (event.cancelable) {
-        event.preventDefault();
-      }
-
-      void finishTouchGesture(touch, false);
-    };
-
-    const handleTouchCancel = (event: TouchEvent) => {
-      const touch = Array.from(event.changedTouches).find((entry) => entry.identifier === trackedTouch.touchId);
-      if (!touch) {
-        return;
-      }
-
-      if (event.cancelable) {
-        event.preventDefault();
-      }
-
-      void finishTouchGesture(touch, true);
-    };
-
-    window.addEventListener('touchmove', handleTouchMove, { passive: false });
-    window.addEventListener('touchend', handleTouchEnd, { passive: false });
-    window.addEventListener('touchcancel', handleTouchCancel, { passive: false });
+    scheduleUpdate();
+    window.addEventListener('resize', scheduleUpdate);
+    window.visualViewport?.addEventListener('resize', scheduleUpdate);
+    window.visualViewport?.addEventListener('scroll', scheduleUpdate);
 
     return () => {
-      stopAutoScroll();
-      window.removeEventListener('touchmove', handleTouchMove);
-      window.removeEventListener('touchend', handleTouchEnd);
-      window.removeEventListener('touchcancel', handleTouchCancel);
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+      }
+      window.removeEventListener('resize', scheduleUpdate);
+      window.visualViewport?.removeEventListener('resize', scheduleUpdate);
+      window.visualViewport?.removeEventListener('scroll', scheduleUpdate);
     };
-  }, [
-    currentDate,
-    grid.dropSlots.length,
-    grid.slotHeight,
-    onCancelMove,
-    onCommitMove,
-    onPreviewChange,
-    pixelsPerHour,
-    range.startHour,
-    resolveMovePlacement,
-    staffMembers,
-    touchMoveMode,
-    touchMoveTarget,
-  ]);
+  }, [currentDate, showUnavailable, staffMembers.length, touchMoveMode]);
+
+  const activeDragStaffName = useMemo(
+    () =>
+      (candidateStaffId
+        ? staffMembers.find((staffMember) => staffMember.id === candidateStaffId)?.name
+        : null) || touchMoveTarget?.staff_name || null,
+    [candidateStaffId, staffMembers, touchMoveTarget?.staff_name],
+  );
 
   return (
     <div
-      ref={scrollRootRef}
-      className="space-y-4 overflow-y-auto pb-3"
-      style={{
-        maxHeight: 'min(72vh, calc(100dvh - 280px))',
-        WebkitOverflowScrolling: 'touch',
-        overscrollBehavior: 'contain',
-      }}
+      ref={frameRef}
+      className="relative flex min-h-[440px] flex-col overflow-hidden rounded-[30px] border border-white/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.98)_0%,rgba(248,250,252,0.98)_100%)] shadow-[0_24px_60px_rgba(15,23,42,0.08)]"
+      style={surfaceHeight ? { height: `${surfaceHeight}px` } : undefined}
     >
-      {staffMembers.map((staffMember) => {
-        const dayKey = getWorkingDayKey(currentDate);
-        const schedule = staffMember.working_hours?.[dayKey];
-        const overlays: Array<{
-          id?: string;
-          top: number;
-          height: number;
-          label: string;
-          block?: StaffException;
-          kind: 'closed' | 'exception';
-        }> = [];
+      <div className="border-b border-gray-100 bg-white/90 px-4 py-3 backdrop-blur">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="truncate text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
+              {format(currentDate, 'EEEE, d MMMM', { locale: bg })}
+            </p>
+            <p className="mt-1 text-sm font-black text-gray-900">
+              {isDraggingAppointment
+                ? 'Плъзнете нагоре/надолу, а към ръба сменяте деня.'
+                : 'Задръжте запис, за да започнете преместване.'}
+            </p>
+          </div>
+          <div
+            className={`rounded-full px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] ${
+              isDraggingAppointment
+                ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
+                : 'bg-gray-100 text-gray-500'
+            }`}
+          >
+            {isDraggingAppointment ? 'Плъзгане' : 'Докосване'}
+          </div>
+        </div>
+      </div>
 
-        if (showUnavailable) {
-          if (!schedule?.isOpen) {
-            overlays.push({
-              top: 0,
-              height: grid.height,
-              label: 'Почивен ден',
-              kind: 'closed',
-            });
-          } else {
-            const [openHour, openMinute] = schedule.open.split(':').map(Number);
-            const [closeHour, closeMinute] = schedule.close.split(':').map(Number);
-            const openOffset = ((openHour * 60 + openMinute - range.startHour * 60) / 60) * pixelsPerHour;
-            const closeOffset = ((closeHour * 60 + closeMinute - range.startHour * 60) / 60) * pixelsPerHour;
+      <div
+        ref={scrollRootRef}
+        className="flex-1 space-y-4 overflow-y-auto px-3 pb-[calc(env(safe-area-inset-bottom,0px)+28px)] pt-3"
+        style={{
+          WebkitOverflowScrolling: 'touch',
+          overscrollBehavior: 'contain',
+          touchAction: isDraggingAppointment ? 'none' : 'pan-y',
+        }}
+      >
+        {staffMembers.map((staffMember) => {
+          const dayKey = getWorkingDayKey(currentDate);
+          const schedule = staffMember.working_hours?.[dayKey];
+          const overlays: Array<{
+            id?: string;
+            top: number;
+            height: number;
+            label: string;
+            block?: StaffException;
+            kind: 'closed' | 'exception';
+          }> = [];
 
-            if (openOffset > 0) {
+          if (showUnavailable) {
+            if (!schedule?.isOpen) {
               overlays.push({
                 top: 0,
-                height: openOffset,
-                label: 'Извън работно време',
+                height: grid.height,
+                label: 'Почивен ден',
                 kind: 'closed',
               });
+            } else {
+              const [openHour, openMinute] = schedule.open.split(':').map(Number);
+              const [closeHour, closeMinute] = schedule.close.split(':').map(Number);
+              const openOffset = ((openHour * 60 + openMinute - range.startHour * 60) / 60) * pixelsPerHour;
+              const closeOffset = ((closeHour * 60 + closeMinute - range.startHour * 60) / 60) * pixelsPerHour;
+
+              if (openOffset > 0) {
+                overlays.push({
+                  top: 0,
+                  height: openOffset,
+                  label: 'Извън работно време',
+                  kind: 'closed',
+                });
+              }
+
+              if (closeOffset < grid.height) {
+                overlays.push({
+                  top: Math.max(closeOffset, 0),
+                  height: Math.max(grid.height - closeOffset, 0),
+                  label: 'Извън работно време',
+                  kind: 'closed',
+                });
+              }
             }
 
-            if (closeOffset < grid.height) {
+            for (const exception of staffMember.dayExceptions) {
+              const top = Math.max((getMinuteOffset(exception.start_at, range.startHour) / 60) * pixelsPerHour, 0);
+              const bottom = Math.min((getMinuteOffset(exception.end_at, range.startHour) / 60) * pixelsPerHour, grid.height);
               overlays.push({
-                top: Math.max(closeOffset, 0),
-                height: Math.max(grid.height - closeOffset, 0),
-                label: 'Извън работно време',
-                kind: 'closed',
+                id: exception.id,
+                top,
+                height: Math.max(bottom - top, 36),
+                label: exception.note || 'Блокиран интервал',
+                block: exception,
+                kind: 'exception',
               });
             }
           }
 
-          for (const exception of staffMember.dayExceptions) {
-            const top = Math.max((getMinuteOffset(exception.start_at, range.startHour) / 60) * pixelsPerHour, 0);
-            const bottom = Math.min((getMinuteOffset(exception.end_at, range.startHour) / 60) * pixelsPerHour, grid.height);
-            overlays.push({
-              id: exception.id,
-              top,
-              height: Math.max(bottom - top, 36),
-              label: exception.note || 'Блокиран интервал',
-              block: exception,
-              kind: 'exception',
-            });
-          }
-        }
-
-        return (
-          <div key={staffMember.id} className="rounded-[24px] border border-white/70 bg-white/95 p-3 shadow-sm">
-            <div className="mb-3 flex items-center gap-3">
-              <span
-                className="flex h-10 w-10 items-center justify-center rounded-full text-xs font-black text-white"
-                style={{ backgroundColor: staffMember.color || 'var(--color-primary)' }}
-              >
-                {getInitials(staffMember.name)}
-              </span>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-black text-gray-900">{staffMember.name}</p>
-                <p className="text-xs text-gray-500">{staffMember.dayAppointments.length} записа за деня</p>
+          return (
+            <div key={staffMember.id} className="rounded-[26px] border border-white/80 bg-white/95 p-3 shadow-sm">
+              <div className="mb-3 flex items-center gap-3">
+                <span
+                  className="flex h-11 w-11 items-center justify-center rounded-full text-xs font-black text-white shadow-sm"
+                  style={{ backgroundColor: staffMember.color || 'var(--color-primary)' }}
+                >
+                  {getInitials(staffMember.name)}
+                </span>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-black text-gray-900">{staffMember.name}</p>
+                  <p className="text-xs text-gray-500">{staffMember.dayAppointments.length} записа за деня</p>
+                </div>
               </div>
-            </div>
 
-            <div className="grid grid-cols-[52px_minmax(0,1fr)]">
-              <div className="relative border-r border-gray-100 bg-gray-50/60" style={{ height: `${grid.height}px` }}>
-                {grid.hourSlots.slice(0, -1).map((hour) => {
-                  const top = (hour - range.startHour) * pixelsPerHour;
-                  return (
-                    <div key={`${staffMember.id}-hour-${hour}`}>
-                      <div className="absolute left-0 right-0 border-t border-dashed border-gray-200" style={{ top: `${top}px` }} />
-                      <div className="absolute left-0 top-0 -translate-y-1/2 px-2 text-[11px] font-semibold text-gray-400" style={{ top: `${top}px` }}>
-                        {String(hour).padStart(2, '0')}:00
+              <div className="grid grid-cols-[52px_minmax(0,1fr)]">
+                <div className="relative border-r border-gray-100 bg-gray-50/60" style={{ height: `${grid.height}px` }}>
+                  {grid.hourSlots.slice(0, -1).map((hour) => {
+                    const top = (hour - range.startHour) * pixelsPerHour;
+                    return (
+                      <div key={`${staffMember.id}-hour-${hour}`}>
+                        <div className="absolute left-0 right-0 border-t border-dashed border-gray-200" style={{ top: `${top}px` }} />
+                        <div className="absolute left-0 top-0 -translate-y-1/2 px-2 text-[11px] font-semibold text-gray-400" style={{ top: `${top}px` }}>
+                          {String(hour).padStart(2, '0')}:00
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div
-                data-calendar-column={`mobile-${staffMember.id}`}
-                ref={registerCalendarColumn(`mobile-${staffMember.id}`, staffMember.id)}
-                className="relative select-none bg-white/80"
-                style={{
-                  height: `${grid.height}px`,
-                  touchAction: touchMoveMode === 'gesture' ? 'none' : 'pan-y',
-                }}
-                onClick={(event) => {
-                  if (Date.now() < suppressTapUntilRef.current) return;
-
-                  if (touchMoveTarget && touchMoveMode === 'confirm') {
-                    const preview = resolvePlacementFromClientPoint(
-                      touchMoveTarget,
-                      event.clientX,
-                      event.clientY,
                     );
-                    onPreviewChange(preview);
-                    return;
-                  }
+                  })}
+                </div>
 
-                  if (touchMoveTarget) {
-                    return;
-                  }
+                <div
+                  data-calendar-column={`mobile-${staffMember.id}`}
+                  ref={registerCalendarColumn(`mobile-${staffMember.id}`, staffMember.id)}
+                  className="relative select-none bg-white/80"
+                  style={{
+                    height: `${grid.height}px`,
+                    touchAction: isDraggingAppointment ? 'none' : 'pan-y',
+                  }}
+                  onClick={(event) => {
+                    if (Date.now() < suppressTapUntilRef.current) return;
 
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  const relativeY = Math.min(Math.max(event.clientY - rect.top, 0), Math.max(rect.height - 1, 0));
-                  const slotIndex = Math.min(Math.floor(relativeY / grid.slotHeight), grid.dropSlots.length - 1);
-                  const totalMinutes = range.startHour * 60 + slotIndex * CALENDAR_SLOT_MINUTES;
-                  const slotDate = new Date(currentDate);
-                  slotDate.setHours(Math.floor(totalMinutes / 60), totalMinutes % 60, 0, 0);
-                  onOpenBooking(staffMember.id, slotDate);
-                }}
-              >
-                {overlays.map((overlay, index) => (
-                  <div
-                    key={overlay.id || `${staffMember.id}-overlay-${index}`}
-                    className={`absolute left-0 right-0 z-0 border-y ${
-                      overlay.kind === 'exception' ? 'border-slate-300/70' : 'border-gray-200/80'
-                    }`}
-                    style={{
-                      top: `${overlay.top}px`,
-                      height: `${overlay.height}px`,
-                      background:
-                        overlay.kind === 'exception'
-                          ? 'repeating-linear-gradient(-45deg, rgba(148,163,184,0.14), rgba(148,163,184,0.14) 6px, rgba(148,163,184,0.05) 6px, rgba(148,163,184,0.05) 12px)'
-                          : 'rgba(148,163,184,0.08)',
-                    }}
-                  >
-                    <span className="absolute left-2 top-2 rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-500 shadow-sm">
-                      {overlay.label}
-                    </span>
-                    {overlay.block && (
+                    if (touchMoveTarget && touchMoveMode === 'confirm') {
+                      const preview = resolvePlacementFromClientPoint(
+                        touchMoveTarget,
+                        event.clientX,
+                        event.clientY,
+                      );
+                      onPreviewChange(preview);
+                      return;
+                    }
+
+                    if (touchMoveTarget) {
+                      return;
+                    }
+
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    const relativeY = Math.min(Math.max(event.clientY - rect.top, 0), Math.max(rect.height - 1, 0));
+                    const slotIndex = Math.min(Math.floor(relativeY / grid.slotHeight), grid.dropSlots.length - 1);
+                    const totalMinutes = range.startHour * 60 + slotIndex * CALENDAR_SLOT_MINUTES;
+                    const slotDate = new Date(currentDate);
+                    slotDate.setHours(Math.floor(totalMinutes / 60), totalMinutes % 60, 0, 0);
+                    onOpenBooking(staffMember.id, slotDate);
+                  }}
+                >
+                  {overlays.map((overlay, index) => (
+                    <div
+                      key={overlay.id || `${staffMember.id}-overlay-${index}`}
+                      className={`absolute left-0 right-0 z-0 border-y ${
+                        overlay.kind === 'exception' ? 'border-slate-300/70' : 'border-gray-200/80'
+                      }`}
+                      style={{
+                        top: `${overlay.top}px`,
+                        height: `${overlay.height}px`,
+                        background:
+                          overlay.kind === 'exception'
+                            ? 'repeating-linear-gradient(-45deg, rgba(148,163,184,0.14), rgba(148,163,184,0.14) 6px, rgba(148,163,184,0.05) 6px, rgba(148,163,184,0.05) 12px)'
+                            : 'rgba(148,163,184,0.08)',
+                      }}
+                    >
+                      <span className="absolute left-2 top-2 rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-500 shadow-sm">
+                        {overlay.label}
+                      </span>
+                      {overlay.block && (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (overlay.block) {
+                              onEditBlock(overlay.block);
+                            }
+                          }}
+                          className="absolute right-2 top-2 rounded-full border border-white/80 bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-600 shadow-sm"
+                        >
+                          Редактирай
+                        </button>
+                      )}
+                    </div>
+                  ))}
+
+                  {grid.dropSlots.map((slot) => {
+                    const [, minute] = slot.label.split(':').map(Number);
+                    return (
+                      <div
+                        key={`${staffMember.id}-line-${slot.key}`}
+                        className={`absolute left-0 right-0 ${minute === 0 ? 'border-t border-gray-100' : 'border-t border-dashed border-gray-100/80'}`}
+                        style={{ top: `${slot.top}px` }}
+                      />
+                    );
+                  })}
+
+                  {touchMoveTarget &&
+                  dropPreview?.staffId === staffMember.id &&
+                  (() => {
+                    const metrics = getEventLayoutMetrics(
+                      dropPreview.startAt,
+                      new Date(
+                        new Date(dropPreview.startAt).getTime() +
+                          (new Date(touchMoveTarget.end_at).getTime() - new Date(touchMoveTarget.start_at).getTime()),
+                      ).toISOString(),
+                      range.startHour,
+                      pixelsPerHour,
+                      10,
+                    );
+                    return (
+                      <div
+                        className="pointer-events-none absolute left-2 right-2 z-[2] rounded-2xl border-2 border-[var(--color-primary)] bg-[var(--color-primary)]/14 shadow-[0_10px_30px_rgba(79,70,229,0.18)]"
+                        style={{ top: `${metrics.top}px`, height: `${metrics.height}px` }}
+                      >
+                        <span className="absolute right-2 top-2 rounded-full bg-white/95 px-2 py-1 text-[10px] font-bold text-[var(--color-primary)] shadow-sm">
+                          {format(new Date(dropPreview.startAt), 'HH:mm')}
+                        </span>
+                      </div>
+                    );
+                  })()}
+
+                  {nowIndicatorOffset !== null && (
+                    <div
+                      className="absolute left-0 right-0 z-[1] border-t-2 border-rose-400"
+                      style={{ top: `${nowIndicatorOffset}px` }}
+                    >
+                      <span className="absolute -left-2 -top-2 h-4 w-4 rounded-full border-2 border-white bg-rose-500 shadow" />
+                    </div>
+                  )}
+
+                  {staffMember.dayAppointments.map((appointment) => {
+                    const metrics = getEventLayoutMetrics(
+                      appointment.start_at,
+                      appointment.end_at,
+                      range.startHour,
+                      pixelsPerHour,
+                      10,
+                    );
+                    const isSecondary = isSecondaryAppointment(appointment);
+                    const accent = getAppointmentAccent(appointment);
+                    const surface = isSecondary
+                      ? 'rgba(248,250,252,0.94)'
+                      : colorWithAlpha(accent, '18', 'rgba(14, 165, 233, 0.1)');
+                    const isDragOrigin =
+                      isDraggingAppointment &&
+                      touchMoveTarget?.id === appointment.id &&
+                      touchMoveTarget?.source === 'appointment';
+                    const canDragAppointment = !['completed', 'cancelled', 'no_show'].includes(appointment.status);
+
+                    return (
                       <button
+                        key={appointment.id}
                         type="button"
                         onClick={(event) => {
+                          if (Date.now() < suppressTapUntilRef.current) {
+                            return;
+                          }
                           event.stopPropagation();
-                          onEditBlock(overlay.block!);
+                          onOpenDetails(appointment.id, appointment.start_at);
                         }}
-                        className="absolute right-2 top-2 rounded-full border border-white/80 bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-600 shadow-sm"
-                      >
-                        Редактирай
-                      </button>
-                    )}
-                  </div>
-                ))}
-
-                {grid.dropSlots.map((slot) => {
-                  const [, minute] = slot.label.split(':').map(Number);
-                  return (
-                    <div
-                      key={`${staffMember.id}-line-${slot.key}`}
-                      className={`absolute left-0 right-0 ${minute === 0 ? 'border-t border-gray-100' : 'border-t border-dashed border-gray-100/80'}`}
-                      style={{ top: `${slot.top}px` }}
-                    />
-                  );
-                })}
-
-                {touchMoveTarget &&
-                dropPreview?.staffId === staffMember.id &&
-                (() => {
-                  const metrics = getEventLayoutMetrics(
-                    dropPreview.startAt,
-                    new Date(
-                      new Date(dropPreview.startAt).getTime() +
-                        (new Date(touchMoveTarget.end_at).getTime() - new Date(touchMoveTarget.start_at).getTime()),
-                    ).toISOString(),
-                    range.startHour,
-                    pixelsPerHour,
-                    10,
-                  );
-                  return (
-                    <div
-                      className="pointer-events-none absolute left-2 right-2 z-[2] rounded-2xl border-2 border-[var(--color-primary)] bg-[var(--color-primary)]/14 shadow-[0_10px_30px_rgba(79,70,229,0.18)]"
-                      style={{ top: `${metrics.top}px`, height: `${metrics.height}px` }}
-                    >
-                      <span className="absolute right-2 top-2 rounded-full bg-white/95 px-2 py-1 text-[10px] font-bold text-[var(--color-primary)] shadow-sm">
-                        {format(new Date(dropPreview.startAt), 'HH:mm')}
-                      </span>
-                    </div>
-                  );
-                })()}
-
-                {nowIndicatorOffset !== null && (
-                  <div
-                    className="absolute left-0 right-0 z-[1] border-t-2 border-rose-400"
-                    style={{ top: `${nowIndicatorOffset}px` }}
-                  >
-                    <span className="absolute -left-2 -top-2 h-4 w-4 rounded-full border-2 border-white bg-rose-500 shadow" />
-                  </div>
-                )}
-
-                {staffMember.dayAppointments.map((appointment) => {
-                  const metrics = getEventLayoutMetrics(
-                    appointment.start_at,
-                    appointment.end_at,
-                    range.startHour,
-                    pixelsPerHour,
-                    10,
-                  );
-                  const isSecondary = isSecondaryAppointment(appointment);
-                  const accent = getAppointmentAccent(appointment);
-                  const surface = isSecondary
-                    ? 'rgba(248,250,252,0.94)'
-                    : colorWithAlpha(accent, '18', 'rgba(14, 165, 233, 0.1)');
-
-                  return (
-                    <button
-                      key={appointment.id}
-                      type="button"
-                      onClick={(event) => {
-                        if (Date.now() < suppressTapUntilRef.current) {
-                          return;
-                        }
-                        event.stopPropagation();
-                        onOpenDetails(appointment.id, appointment.start_at);
-                      }}
-                      onTouchStart={(event) => {
-                        if (touchMoveTarget) {
-                          return;
-                        }
-
-                        const touch = event.touches[0];
-                        if (!touch) return;
-
-                        resetLongPressGesture();
-                        touchPressRef.current = {
-                          target: {
-                            id: appointment.id,
-                            start_at: appointment.start_at,
-                            end_at: appointment.end_at,
-                            status: appointment.status,
-                            staff_id: staffMember.id,
-                            service_id: '',
-                            client_name: '',
-                            client_phone: '',
-                            service_name: '',
-                            staff_name: '',
-                            source: 'appointment',
-                          },
-                          touchId: touch.identifier,
-                          startX: touch.clientX,
-                          startY: touch.clientY,
-                          moved: false,
-                        };
-
-                        longPressTimeoutRef.current = window.setTimeout(() => {
-                          const gesture = touchPressRef.current;
-                          if (!gesture || gesture.target.id !== appointment.id || gesture.moved) {
+                        onTouchStart={(event) => {
+                          if (touchMoveTarget || !canDragAppointment) {
                             return;
                           }
 
-                          activeTouchGestureRef.current = { touchId: gesture.touchId };
-                          suppressTapUntilRef.current = Date.now() + 450;
-                          const target: MoveTarget = {
-                            id: appointment.id,
-                            start_at: appointment.start_at,
-                            end_at: appointment.end_at,
-                            status: appointment.status,
-                            staff_id: appointment.staff_id || staffMember.id,
-                            service_id: appointment.service_id || '',
-                            client_name: appointment.client_name || '',
-                            client_phone: appointment.client_phone || '',
-                            service_name: appointment.service_name || '',
-                            staff_name: appointment.staff_name || staffMember.name,
-                            source: 'appointment',
+                          const touch = event.touches[0];
+                          if (!touch) return;
+
+                          resetLongPressGesture();
+                          touchPressRef.current = {
+                            target: {
+                              id: appointment.id,
+                              start_at: appointment.start_at,
+                              end_at: appointment.end_at,
+                              status: appointment.status,
+                              staff_id: appointment.staff_id || staffMember.id,
+                              service_id: appointment.service_id || '',
+                              client_name: appointment.client_name || '',
+                              client_phone: appointment.client_phone || '',
+                              service_name: appointment.service_name || '',
+                              staff_name: appointment.staff_name || staffMember.name,
+                              source: 'appointment',
+                            },
+                            touchId: touch.identifier,
+                            startX: touch.clientX,
+                            startY: touch.clientY,
+                            moved: false,
                           };
-                          const initialPreview =
-                            resolveMovePlacement(target, target.start_at, target.staff_id).preview || {
-                              staffId: target.staff_id,
-                              startAt: target.start_at,
-                            };
-                          onPreviewChange(initialPreview);
-                          onStartGestureMove(target);
-                          longPressTimeoutRef.current = null;
-                        }, LONG_PRESS_DELAY_MS);
-                      }}
-                      onTouchMove={(event) => {
-                        const gesture = touchPressRef.current;
-                        if (!gesture) return;
 
-                        const touch =
-                          Array.from(event.touches).find((entry) => entry.identifier === gesture.touchId) ||
-                          event.touches[0];
-                        if (!touch) return;
+                          longPressTimeoutRef.current = window.setTimeout(() => {
+                            const gesture = touchPressRef.current;
+                            if (!gesture || gesture.target.id !== appointment.id || gesture.moved) {
+                              return;
+                            }
 
-                        const distance = Math.hypot(touch.clientX - gesture.startX, touch.clientY - gesture.startY);
-                        if (distance < LONG_PRESS_MOVE_TOLERANCE_PX) {
-                          return;
-                        }
+                            suppressTapUntilRef.current = Date.now() + 450;
+                            const initialPreview =
+                              resolveMovePlacement(
+                                gesture.target,
+                                gesture.target.start_at,
+                                gesture.target.staff_id,
+                                { allowCrossDay: true },
+                              ).preview || {
+                                staffId: gesture.target.staff_id,
+                                startAt: gesture.target.start_at,
+                              };
+                            onPreviewChange(initialPreview);
+                            beginGestureDrag({
+                              touchId: gesture.touchId,
+                              startX: gesture.startX,
+                              startY: gesture.startY,
+                            });
+                            touchPressRef.current = null;
+                            onStartGestureMove(gesture.target);
+                            longPressTimeoutRef.current = null;
+                          }, LONG_PRESS_DELAY_MS);
+                        }}
+                        onTouchMove={(event) => {
+                          const gesture = touchPressRef.current;
+                          if (!gesture) return;
 
-                        gesture.moved = true;
-                        resetLongPressGesture();
-                      }}
-                      onTouchEnd={resetLongPressGesture}
-                      onTouchCancel={resetLongPressGesture}
-                      className={`absolute left-2 right-2 z-[2] overflow-hidden rounded-2xl border px-3 py-2 text-left shadow-sm select-none ${
-                        selectedRecordId === appointment.id ? 'ring-2 ring-[var(--color-primary)]/20' : ''
-                      } ${isSecondary ? 'opacity-45 saturate-50' : ''}`}
-                      style={{
-                        top: `${metrics.top}px`,
-                        height: `${metrics.height}px`,
-                        borderColor: colorWithAlpha(
-                          accent,
-                          isSecondary ? '2A' : '50',
-                          'rgba(148, 163, 184, 0.35)',
-                        ),
-                        backgroundColor: surface,
-                        borderStyle: isSecondary ? 'dashed' : 'solid',
-                        WebkitTouchCallout: 'none',
-                        touchAction: 'manipulation',
-                      }}
-                    >
-                      {renderAppointmentCardBody(appointment, metrics.height)}
-                    </button>
-                  );
-                })}
+                          const touch =
+                            Array.from(event.touches).find((entry) => entry.identifier === gesture.touchId) ||
+                            event.touches[0];
+                          if (!touch) return;
+
+                          const distance = Math.hypot(touch.clientX - gesture.startX, touch.clientY - gesture.startY);
+                          if (distance < LONG_PRESS_MOVE_TOLERANCE_PX) {
+                            return;
+                          }
+
+                          gesture.moved = true;
+                          resetLongPressGesture();
+                        }}
+                        onTouchEnd={resetLongPressGesture}
+                        onTouchCancel={resetLongPressGesture}
+                        className={`absolute left-2 right-2 z-[2] overflow-hidden rounded-2xl border px-3 py-2 text-left shadow-sm select-none ${
+                          selectedRecordId === appointment.id ? 'ring-2 ring-[var(--color-primary)]/20' : ''
+                        } ${isSecondary ? 'opacity-45 saturate-50' : ''} ${
+                          isDragOrigin ? 'opacity-30 saturate-50' : ''
+                        }`}
+                        style={{
+                          top: `${metrics.top}px`,
+                          height: `${metrics.height}px`,
+                          borderColor: colorWithAlpha(
+                            accent,
+                            isSecondary ? '2A' : isDragOrigin ? '38' : '50',
+                            'rgba(148, 163, 184, 0.35)',
+                          ),
+                          backgroundColor: surface,
+                          borderStyle: isSecondary || isDragOrigin ? 'dashed' : 'solid',
+                          WebkitTouchCallout: 'none',
+                          touchAction: touchMoveTarget ? 'none' : 'manipulation',
+                        }}
+                      >
+                        {renderAppointmentCardBody(appointment, metrics.height)}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
+          );
+        })}
+      </div>
+
+      <MobileDragHud
+        visible={isDraggingAppointment}
+        target={touchMoveTarget}
+        dragPoint={dragPoint}
+        preview={dropPreview}
+        candidateStartAt={candidateStartAt}
+        candidateStaffName={activeDragStaffName}
+        invalidReason={invalidReason}
+      />
+
+      {isDraggingAppointment && (
+        <div className="pointer-events-none absolute inset-x-3 bottom-3 z-20 rounded-[24px] border border-white/80 bg-white/92 px-4 py-3 shadow-xl shadow-black/10 backdrop-blur">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Ден и таймлайн</p>
+              <p className="mt-1 text-sm font-bold text-gray-900">
+                Плъзнете нагоре/надолу за час, към левия или десния ръб за ден.
+              </p>
+            </div>
+            <div className="rounded-full bg-[var(--color-primary)]/10 px-3 py-1.5 text-[10px] font-bold text-[var(--color-primary)]">
+              {gestureDurationMinutes} мин
+            </div>
           </div>
-        );
-      })}
+        </div>
+      )}
     </div>
   );
 }

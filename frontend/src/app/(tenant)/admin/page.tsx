@@ -249,6 +249,8 @@ const SECONDARY_OWNER_STATES = [
 ] as const;
 
 const CALENDAR_SLOT_MINUTES = 15;
+const LONG_PRESS_DELAY_MS = 420;
+const LONG_PRESS_MOVE_TOLERANCE_PX = 10;
 
 type InboxBucket = 'actions' | 'updates';
 
@@ -415,6 +417,21 @@ function getMinuteOffset(value: string, startHour: number) {
   return date.getHours() * 60 + date.getMinutes() - startHour * 60;
 }
 
+function getEventLayoutMetrics(
+  startAt: string,
+  endAt: string,
+  startHour: number,
+  pixelsPerHour: number,
+  minimumHeight: number,
+) {
+  const startOffset = getMinuteOffset(startAt, startHour);
+  const endOffset = getMinuteOffset(endAt, startHour);
+  const top = Math.max((startOffset / 60) * pixelsPerHour, 0);
+  const height = Math.max(((endOffset - startOffset) / 60) * pixelsPerHour, minimumHeight);
+
+  return { top, height };
+}
+
 function getWorkingDayKey(value: Date) {
   const keys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
   return keys[value.getDay()] || 'mon';
@@ -522,7 +539,6 @@ export default function AdminCalendarPage() {
   const [draggedAppointmentId, setDraggedAppointmentId] = useState<string | null>(null);
   const [draggedRequestId, setDraggedRequestId] = useState<string | null>(null);
   const [dropPreview, setDropPreview] = useState<{ staffId: string; startAt: string } | null>(null);
-  const [pointerDragLabel, setPointerDragLabel] = useState<string | null>(null);
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [resizingBlock, setResizingBlock] = useState<{
     id: string;
@@ -540,6 +556,13 @@ export default function AdminCalendarPage() {
   } | null>(null);
   const dateInputRef = useRef<HTMLInputElement | null>(null);
   const longPressTimeoutRef = useRef<number | null>(null);
+  const touchPressRef = useRef<{
+    target: MoveTarget;
+    touchId: number;
+    startX: number;
+    startY: number;
+    moved: boolean;
+  } | null>(null);
   const suppressTapUntilRef = useRef(0);
   const invalidDropHintRef = useRef('Пуснете върху свободен 15-минутен слот.');
   const didAutoSelectStaffRef = useRef(false);
@@ -607,6 +630,8 @@ export default function AdminCalendarPage() {
         to: rangeEndExclusive.toISOString(),
       }),
     staleTime: 30 * 1000,
+    refetchInterval: 15 * 1000,
+    refetchOnWindowFocus: true,
   });
 
   const { data: adminServices = [] } = useQuery({
@@ -851,6 +876,11 @@ export default function AdminCalendarPage() {
   };
 
   const clearTouchMoveState = useCallback(() => {
+    if (longPressTimeoutRef.current) {
+      window.clearTimeout(longPressTimeoutRef.current);
+      longPressTimeoutRef.current = null;
+    }
+    touchPressRef.current = null;
     setTouchMoveTarget(null);
     setTouchMoveMode(null);
     setPendingTouchPlacement(null);
@@ -1013,7 +1043,6 @@ export default function AdminCalendarPage() {
     setDraggedAppointmentId(null);
     setDraggedRequestId(null);
     setDropPreview(null);
-    setPointerDragLabel(null);
   }, []);
 
   const beginDesktopPointerDrag = useCallback(
@@ -1324,6 +1353,14 @@ export default function AdminCalendarPage() {
       })),
     [compactDayAppointments, compactDayExceptions, visibleStaffColumns],
   );
+  const desktopBoardStaff = useMemo(
+    () =>
+      visibleStaffColumns.map((staffMember) => ({
+        ...staffMember,
+        dayAppointments: filteredDayAppointments.filter((appointment) => appointment.staff_id === staffMember.id),
+      })),
+    [filteredDayAppointments, visibleStaffColumns],
+  );
   const weekGridColumns = useMemo(
     () =>
       weekDays.flatMap((day) =>
@@ -1481,7 +1518,6 @@ export default function AdminCalendarPage() {
         suppressTapUntilRef.current = Date.now() + 500;
         setDraggedAppointmentId(dragState.kind === 'appointment' ? dragState.target.id : null);
         setDraggedRequestId(dragState.kind === 'request' ? dragState.target.id : null);
-        setPointerDragLabel(dragState.target.client_name);
         setDropPreview({
           staffId: dragState.target.staff_id,
           startAt: dragState.target.start_at,
@@ -1538,16 +1574,29 @@ export default function AdminCalendarPage() {
     () => getEventDurationMinutes(activePreviewTarget?.start_at, activePreviewTarget?.end_at),
     [activePreviewTarget],
   );
-  const previewTimeLabel = useMemo(
-    () => (dropPreview ? format(new Date(dropPreview.startAt), 'HH:mm') : null),
-    [dropPreview],
-  );
+  const previewPlacementLabel = useMemo(() => {
+    if (!dropPreview) return null;
+
+    const previewDate = new Date(dropPreview.startAt);
+    const staffName =
+      (calendarBoard?.staff ?? []).find((staffMember) => staffMember.id === dropPreview.staffId)?.name ||
+      activePreviewTarget?.staff_name ||
+      null;
+
+    const parts = [
+      calendarView === 'week' ? format(previewDate, 'EEE d MMM', { locale: bg }) : null,
+      format(previewDate, 'HH:mm'),
+      staffName,
+    ].filter(Boolean);
+
+    return parts.join(' · ');
+  }, [activePreviewTarget?.staff_name, calendarBoard?.staff, calendarView, dropPreview]);
 
   const getPreviewMetrics = useCallback(
-    (startAt: string, rangeStartHour: number, pxPerHour: number, minHeight: number) => {
+    (startAt: string, rangeStartHour: number, pxPerHour: number) => {
       const startOffset = getMinuteOffset(startAt, rangeStartHour);
-      const top = (startOffset / 60) * pxPerHour + 4;
-      const height = Math.max((previewDurationMinutes / 60) * pxPerHour - 8, minHeight);
+      const top = Math.max((startOffset / 60) * pxPerHour, 0);
+      const height = Math.max((previewDurationMinutes / 60) * pxPerHour, pxPerHour / (60 / CALENDAR_SLOT_MINUTES));
       return { top, height };
     },
     [previewDurationMinutes],
@@ -1640,14 +1689,20 @@ export default function AdminCalendarPage() {
     source,
   });
 
-  const clearLongPressTimer = () => {
+  const clearLongPressTimer = useCallback(() => {
     if (longPressTimeoutRef.current) {
       window.clearTimeout(longPressTimeoutRef.current);
       longPressTimeoutRef.current = null;
     }
-  };
+  }, []);
+
+  const resetLongPressGesture = useCallback(() => {
+    clearLongPressTimer();
+    touchPressRef.current = null;
+  }, [clearLongPressTimer]);
 
   const startTouchMoveMode = (target: MoveTarget, mode: 'gesture' | 'confirm' = 'confirm') => {
+    resetLongPressGesture();
     suppressTapUntilRef.current = Date.now() + 450;
     setTouchMoveTarget(target);
     setTouchMoveMode(mode);
@@ -1664,31 +1719,79 @@ export default function AdminCalendarPage() {
     );
   };
 
-  const beginLongPressMove = (target: MoveTarget) => {
+  const beginLongPressMove = (target: MoveTarget, event: React.TouchEvent<HTMLElement>) => {
     if (typeof window === 'undefined') return;
-    clearLongPressTimer();
+    if (['completed', 'cancelled', 'no_show'].includes(target.status)) return;
+    const touch = event.touches[0];
+    if (!touch) return;
+    resetLongPressGesture();
+    touchPressRef.current = {
+      target,
+      touchId: touch.identifier,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      moved: false,
+    };
     longPressTimeoutRef.current = window.setTimeout(() => {
+      const gesture = touchPressRef.current;
+      if (!gesture || gesture.target.id !== target.id || gesture.moved) {
+        return;
+      }
       startTouchMoveMode(target, 'gesture');
       longPressTimeoutRef.current = null;
-    }, 320);
+    }, LONG_PRESS_DELAY_MS);
   };
 
-  useEffect(() => {
-    if (typeof document === 'undefined' || touchMoveMode !== 'gesture' || !touchMoveTarget) {
+  const handleLongPressTouchMove = (event: React.TouchEvent<HTMLElement>) => {
+    const gesture = touchPressRef.current;
+    if (!gesture) return;
+
+    const touch = Array.from(event.touches).find((entry) => entry.identifier === gesture.touchId) || event.touches[0];
+    if (!touch) return;
+
+    const distance = Math.hypot(touch.clientX - gesture.startX, touch.clientY - gesture.startY);
+    if (distance < LONG_PRESS_MOVE_TOLERANCE_PX) {
       return;
     }
 
-    const { style } = document.body;
-    const previousUserSelect = style.userSelect;
-    const previousOverscrollX = style.overscrollBehaviorX;
-    style.userSelect = 'none';
-    style.overscrollBehaviorX = 'none';
+    gesture.moved = true;
+    resetLongPressGesture();
+  };
+
+  useEffect(() => {
+    if (typeof document === 'undefined' || !touchMoveTarget) {
+      return;
+    }
+
+    const trackedNodes = [document.documentElement, document.body].map((node) => ({
+      node,
+      values: {
+        userSelect: node.style.getPropertyValue('user-select'),
+        webkitUserSelect: node.style.getPropertyValue('-webkit-user-select'),
+        overscrollBehavior: node.style.getPropertyValue('overscroll-behavior'),
+        touchAction: node.style.getPropertyValue('touch-action'),
+        overflow: node.style.getPropertyValue('overflow'),
+      },
+    }));
+
+    for (const entry of trackedNodes) {
+      entry.node.style.setProperty('user-select', 'none');
+      entry.node.style.setProperty('-webkit-user-select', 'none');
+      entry.node.style.setProperty('overscroll-behavior', 'none');
+      entry.node.style.setProperty('touch-action', 'none');
+      entry.node.style.setProperty('overflow', 'hidden');
+    }
 
     return () => {
-      style.userSelect = previousUserSelect;
-      style.overscrollBehaviorX = previousOverscrollX;
+      for (const entry of trackedNodes) {
+        entry.node.style.setProperty('user-select', entry.values.userSelect);
+        entry.node.style.setProperty('-webkit-user-select', entry.values.webkitUserSelect);
+        entry.node.style.setProperty('overscroll-behavior', entry.values.overscrollBehavior);
+        entry.node.style.setProperty('touch-action', entry.values.touchAction);
+        entry.node.style.setProperty('overflow', entry.values.overflow);
+      }
     };
-  }, [touchMoveMode, touchMoveTarget]);
+  }, [touchMoveTarget]);
 
   const focusRecord = (id: string, startAt: string) => {
     if (Date.now() < suppressTapUntilRef.current) {
@@ -1868,7 +1971,18 @@ export default function AdminCalendarPage() {
   const renderAppointmentCardBody = (appointment: Appointment, height: number) => {
     const startTime = format(new Date(appointment.start_at), 'HH:mm');
     const endTime = format(new Date(appointment.end_at), 'HH:mm');
-    const mode = height < 72 ? 'tiny' : height < 104 ? 'compact' : 'full';
+    const mode = height < 30 ? 'micro' : height < 72 ? 'tiny' : height < 104 ? 'compact' : 'full';
+
+    if (mode === 'micro') {
+      return (
+        <div className="flex items-center gap-1.5 overflow-hidden">
+          <span className={`h-2 w-2 flex-shrink-0 rounded-full ${getAppointmentStatusCueClass(appointment)}`} />
+          <p className="truncate text-[10px] font-bold leading-none text-gray-800">
+            {startTime} · {appointment.client_name}
+          </p>
+        </div>
+      );
+    }
 
     return (
       <>
@@ -1990,7 +2104,11 @@ export default function AdminCalendarPage() {
 
           <div
             className={`relative bg-white/80 ${touchMoveTarget ? 'touch-none' : 'touch-pan-y'} select-none`}
-            style={{ height: `${compactCalendarHeight}px`, overscrollBehaviorX: 'none' }}
+            style={{
+              height: `${compactCalendarHeight}px`,
+              overscrollBehavior: touchMoveTarget ? 'none' : 'contain',
+              touchAction: touchMoveTarget ? 'none' : 'pan-y',
+            }}
             onTouchMove={(event) => {
               if (!touchMoveTarget) return;
               event.preventDefault();
@@ -2107,23 +2225,12 @@ export default function AdminCalendarPage() {
             {touchMoveTarget &&
             dropPreview?.staffId === staffMember.id &&
             (() => {
-              const metrics = getPreviewMetrics(
-                dropPreview.startAt,
-                compactCalendarRange.startHour,
-                compactPixelsPerHour,
-                48,
-              );
+              const metrics = getPreviewMetrics(dropPreview.startAt, compactCalendarRange.startHour, compactPixelsPerHour);
               return (
                 <div
                   className="pointer-events-none absolute left-2 right-2 z-[2] rounded-2xl border-2 border-[var(--color-primary)] bg-[var(--color-primary)]/14 shadow-[0_10px_30px_rgba(79,70,229,0.18)]"
                   style={{ top: `${metrics.top}px`, height: `${metrics.height}px` }}
-                >
-                  <div className="absolute inset-x-2 top-2 flex items-center justify-end gap-2">
-                    <span className="rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-600 shadow-sm">
-                      {previewTimeLabel}
-                    </span>
-                  </div>
-                </div>
+                />
               );
             })()}
 
@@ -2137,10 +2244,13 @@ export default function AdminCalendarPage() {
             )}
 
             {staffMember.dayAppointments.map((appointment) => {
-              const startOffset = getMinuteOffset(appointment.start_at, compactCalendarRange.startHour);
-              const endOffset = getMinuteOffset(appointment.end_at, compactCalendarRange.startHour);
-              const top = (startOffset / 60) * compactPixelsPerHour + 4;
-              const height = Math.max(((endOffset - startOffset) / 60) * compactPixelsPerHour - 8, 48);
+              const metrics = getEventLayoutMetrics(
+                appointment.start_at,
+                appointment.end_at,
+                compactCalendarRange.startHour,
+                compactPixelsPerHour,
+                compactPixelsPerHour / (60 / CALENDAR_SLOT_MINUTES),
+              );
               const ownerState = appointment.owner_view_state || appointment.status;
               const isSecondary = isSecondaryOwnerState(ownerState);
               const accent = appointment.service_color || appointment.staff_color || 'var(--color-primary)';
@@ -2150,27 +2260,28 @@ export default function AdminCalendarPage() {
                 <button
                   key={appointment.id}
                   type="button"
-	                  onClick={(event) => {
+                  onClick={(event) => {
                       event.stopPropagation();
                       focusRecord(appointment.id, appointment.start_at);
                     }}
-	                  onTouchStart={() => beginLongPressMove(toMoveTarget(appointment, 'appointment'))}
-	                  onTouchMove={clearLongPressTimer}
-	                  onTouchEnd={clearLongPressTimer}
-	                  onTouchCancel={clearLongPressTimer}
+                  onTouchStart={(event) => beginLongPressMove(toMoveTarget(appointment, 'appointment'), event)}
+                  onTouchMove={handleLongPressTouchMove}
+                  onTouchEnd={resetLongPressGesture}
+                  onTouchCancel={resetLongPressGesture}
                   className={`absolute left-2 right-2 z-[2] rounded-2xl border px-3 py-2 text-left shadow-sm select-none ${
                     selectedRecordId === appointment.id ? 'ring-2 ring-[var(--color-primary)]/20' : ''
                   } ${isSecondary ? 'opacity-45 saturate-50' : ''} overflow-hidden`}
                   style={{
-                    top: `${top}px`,
-                    height: `${height}px`,
+                    top: `${metrics.top}px`,
+                    height: `${metrics.height}px`,
                     borderColor: colorWithAlpha(accent, isSecondary ? '2A' : '50', 'rgba(148, 163, 184, 0.35)'),
                     backgroundColor: surface,
                     borderStyle: isSecondary ? 'dashed' : 'solid',
                     WebkitTouchCallout: 'none',
+                    touchAction: touchMoveTarget ? 'none' : 'manipulation',
                   }}
                 >
-                  {renderAppointmentCardBody(appointment, height)}
+                  {renderAppointmentCardBody(appointment, metrics.height)}
                 </button>
               );
             })}
@@ -2337,12 +2448,12 @@ export default function AdminCalendarPage() {
           event.clientY,
         );
       }}
-      onTouchStart={() => beginLongPressMove(toMoveTarget(request as unknown as Appointment, 'request'))}
-      onTouchMove={clearLongPressTimer}
-      onTouchEnd={clearLongPressTimer}
-      onTouchCancel={clearLongPressTimer}
+      onTouchStart={(event) => beginLongPressMove(toMoveTarget(request as unknown as Appointment, 'request'), event)}
+      onTouchMove={handleLongPressTouchMove}
+      onTouchEnd={resetLongPressGesture}
+      onTouchCancel={resetLongPressGesture}
       className="rounded-3xl border border-amber-100 bg-white p-4 shadow-sm select-none"
-      style={{ WebkitTouchCallout: 'none' }}
+      style={{ WebkitTouchCallout: 'none', touchAction: 'manipulation' }}
     >
       <button type="button" onClick={() => focusRecord(request.id, request.start_at)} className="w-full text-left">
         <div className="flex items-start justify-between gap-3">
@@ -2393,8 +2504,8 @@ export default function AdminCalendarPage() {
     <div className="space-y-5">
       <div className="grid gap-5">
         <section className="min-w-0">
-          <div className="glass-panel rounded-[32px] border border-white/60 p-4 shadow-xl shadow-black/5 sm:p-5">
-            <div className="flex flex-col gap-3 border-b border-gray-100 pb-4">
+          <div className="glass-panel rounded-[32px] border border-white/60 p-3 shadow-xl shadow-black/5 sm:p-5">
+            <div className="flex flex-col gap-2 border-b border-gray-100 pb-3 sm:gap-3 sm:pb-4">
 	              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
 	                <div>
 	                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Календар</p>
@@ -2519,7 +2630,7 @@ export default function AdminCalendarPage() {
                 </div>
               </div>
 
-		              <div className="flex flex-wrap gap-2">
+		              <div className="hidden flex-wrap gap-2 sm:flex">
 		                <div className="rounded-2xl border border-white/70 bg-white/90 px-3 py-2 shadow-sm">
 		                  <p className="text-base font-black text-gray-900">{appointmentsInView.length}</p>
 		                  <p className="text-[11px] text-gray-500">{calendarView === 'week' ? 'записа' : calendarView === 'month' ? 'за месеца' : 'за деня'}</p>
@@ -2539,14 +2650,14 @@ export default function AdminCalendarPage() {
 		              </div>
             </div>
 
-	            <div className="mt-5">
+	            <div className="mt-3 sm:mt-5">
 	              {isLoading ? (
 	                <div className="flex justify-center py-20">
 	                  <Loader2 className="w-8 h-8 animate-spin text-[var(--color-primary)]" />
 	                </div>
 	              ) : (
 	                <div className="space-y-4">
-	                  <div className="flex flex-col gap-3 rounded-[28px] border border-white/70 bg-white/80 p-3 shadow-sm">
+	                  <div className="flex flex-col gap-2 rounded-[28px] border border-white/70 bg-white/80 p-2.5 shadow-sm sm:gap-3 sm:p-3">
 	                    <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
 	                      <div className="min-w-0">
 	                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">
@@ -2555,11 +2666,11 @@ export default function AdminCalendarPage() {
 		                        <h4 className="mt-1 text-sm font-black text-gray-900">
 		                          {calendarView === 'week' ? 'Седмичен преглед' : 'Дневен график'}
 		                        </h4>
-		                        <p className="mt-1 text-xs text-gray-500">
+		                        <p className="mt-1 hidden text-xs text-gray-500 sm:block">
 		                          {calendarView === 'week' ? 'Дни × специалисти' : 'Специалисти × часове'}
 		                        </p>
 	                      </div>
-	                      <div className="inline-flex items-center gap-2 rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 text-[11px] font-semibold text-gray-600">
+	                      <div className="hidden items-center gap-2 rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 text-[11px] font-semibold text-gray-600 sm:inline-flex">
 	                        <SlidersHorizontal className="h-4 w-4" />
 	                        {staffFilter === 'all'
                             ? 'Показани са всички специалисти'
@@ -2567,7 +2678,7 @@ export default function AdminCalendarPage() {
 	                      </div>
 	                    </div>
 
-                      <div className="flex flex-col gap-3 rounded-2xl border border-dashed border-gray-200 bg-gray-50/80 p-3 lg:flex-row lg:items-center lg:justify-between">
+                      <div className="flex flex-col gap-2 rounded-2xl border border-dashed border-gray-200 bg-gray-50/80 p-2.5 lg:flex-row lg:items-center lg:justify-between">
                         <div className="flex flex-wrap gap-2">
                           {STATUS_FILTER_OPTIONS.map((option) => (
                             <button
@@ -2973,23 +3084,12 @@ export default function AdminCalendarPage() {
                                 {dropPreview?.staffId === column.staff.id &&
                                 isSameDay(new Date(dropPreview.startAt), column.day) ? (
                                   (() => {
-                                    const metrics = getPreviewMetrics(
-                                      dropPreview.startAt,
-                                      calendarRange.startHour,
-                                      pixelsPerHour,
-                                      56,
-                                    );
+                                    const metrics = getPreviewMetrics(dropPreview.startAt, calendarRange.startHour, pixelsPerHour);
                                     return (
                                       <div
                                         className="pointer-events-none absolute left-2 right-2 z-[2] rounded-2xl border-2 border-[var(--color-primary)] bg-[var(--color-primary)]/14 shadow-[0_12px_32px_rgba(79,70,229,0.18)]"
                                         style={{ top: `${metrics.top}px`, height: `${metrics.height}px` }}
-                                      >
-                                        <div className="absolute inset-x-2 top-2 flex items-center justify-end gap-2">
-                                          <span className="rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-600 shadow-sm">
-                                            {previewTimeLabel}
-                                          </span>
-                                        </div>
-                                      </div>
+                                      />
                                     );
                                   })()
                                 ) : null}
@@ -3017,10 +3117,13 @@ export default function AdminCalendarPage() {
                                 )}
 
                                 {column.appointments.map((appointment) => {
-                                  const startOffset = getMinuteOffset(appointment.start_at, calendarRange.startHour);
-                                  const endOffset = getMinuteOffset(appointment.end_at, calendarRange.startHour);
-                                  const top = (startOffset / 60) * pixelsPerHour + 4;
-                                  const height = Math.max(((endOffset - startOffset) / 60) * pixelsPerHour - 8, 56);
+                                  const metrics = getEventLayoutMetrics(
+                                    appointment.start_at,
+                                    appointment.end_at,
+                                    calendarRange.startHour,
+                                    pixelsPerHour,
+                                    pixelsPerHour / (60 / CALENDAR_SLOT_MINUTES),
+                                  );
                                   const ownerState = appointment.owner_view_state || appointment.status;
                                   const isSelected = selectedRecordId === appointment.id;
                                   const isSecondary = isSecondaryOwnerState(ownerState);
@@ -3050,14 +3153,14 @@ export default function AdminCalendarPage() {
                                         draggedAppointmentId === appointment.id ? 'opacity-20 scale-[0.99]' : ''
                                       } overflow-hidden`}
                                       style={{
-                                        top: `${top}px`,
-                                        height: `${height}px`,
+                                        top: `${metrics.top}px`,
+                                        height: `${metrics.height}px`,
                                         borderColor: colorWithAlpha(accent, isSecondary ? '28' : '55', 'rgba(14, 165, 233, 0.3)'),
                                         backgroundColor: soft,
                                         borderStyle: isSecondary ? 'dashed' : 'solid',
                                       }}
                                     >
-                                      {renderAppointmentCardBody(appointment, height)}
+                                      {renderAppointmentCardBody(appointment, metrics.height)}
                                     </button>
                                   );
                                 })}
@@ -3075,7 +3178,7 @@ export default function AdminCalendarPage() {
 	                          <div className="sticky top-0 z-10 border-b border-r border-gray-100 bg-white/95 px-3 py-4 backdrop-blur">
 	                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">Час</p>
 	                          </div>
-	                          {visibleStaffColumns.map((staffMember) => (
+	                          {desktopBoardStaff.map((staffMember) => (
 	                            <div
 	                              key={staffMember.id}
 	                              className="sticky top-0 z-10 border-b border-r border-gray-100 bg-white/95 px-3 py-3 backdrop-blur last:border-r-0"
@@ -3089,7 +3192,7 @@ export default function AdminCalendarPage() {
 	                                </span>
 	                                <div className="min-w-0">
 	                                  <p className="truncate text-xs font-black text-gray-900">{staffMember.name}</p>
-	                                  <p className="text-[10px] text-gray-500">{staffMember.appointments.length} записа</p>
+	                                  <p className="text-[10px] text-gray-500">{staffMember.dayAppointments.length} записа</p>
 	                                </div>
 	                              </div>
 	                            </div>
@@ -3112,7 +3215,7 @@ export default function AdminCalendarPage() {
 	                            })}
 	                          </div>
 
-		                          {visibleStaffColumns.map((staffMember) => (
+		                          {desktopBoardStaff.map((staffMember) => (
 		                            <div
 		                              key={staffMember.id}
                                   data-calendar-column={staffMember.id}
@@ -3274,23 +3377,12 @@ export default function AdminCalendarPage() {
                                 {dropPreview?.staffId === staffMember.id &&
                                 isSameDay(new Date(dropPreview.startAt), currentDate) ? (
                                   (() => {
-                                    const metrics = getPreviewMetrics(
-                                      dropPreview.startAt,
-                                      calendarRange.startHour,
-                                      pixelsPerHour,
-                                      56,
-                                    );
+                                    const metrics = getPreviewMetrics(dropPreview.startAt, calendarRange.startHour, pixelsPerHour);
                                     return (
                                       <div
                                         className="pointer-events-none absolute left-2 right-2 z-[2] rounded-2xl border-2 border-[var(--color-primary)] bg-[var(--color-primary)]/14 shadow-[0_12px_32px_rgba(79,70,229,0.18)]"
                                         style={{ top: `${metrics.top}px`, height: `${metrics.height}px` }}
-                                      >
-                                        <div className="absolute inset-x-2 top-2 flex items-center justify-end gap-2">
-                                          <span className="rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-600 shadow-sm">
-                                            {previewTimeLabel}
-                                          </span>
-                                        </div>
-                                      </div>
+                                      />
                                     );
                                   })()
                                 ) : null}
@@ -3317,11 +3409,14 @@ export default function AdminCalendarPage() {
 	                                </div>
 	                              )}
 
-		                              {staffMember.appointments.map((appointment) => {
-		                                const startOffset = getMinuteOffset(appointment.start_at, calendarRange.startHour);
-		                                const endOffset = getMinuteOffset(appointment.end_at, calendarRange.startHour);
-		                                const top = (startOffset / 60) * pixelsPerHour + 4;
-		                                const height = Math.max(((endOffset - startOffset) / 60) * pixelsPerHour - 8, 56);
+		                              {staffMember.dayAppointments.map((appointment) => {
+		                                const metrics = getEventLayoutMetrics(
+		                                  appointment.start_at,
+		                                  appointment.end_at,
+		                                  calendarRange.startHour,
+		                                  pixelsPerHour,
+		                                  pixelsPerHour / (60 / CALENDAR_SLOT_MINUTES),
+		                                );
 		                                const ownerState = appointment.owner_view_state || appointment.status;
 		                                const isSelected = selectedRecordId === appointment.id;
 		                                const isSecondary = isSecondaryOwnerState(ownerState);
@@ -3345,26 +3440,27 @@ export default function AdminCalendarPage() {
                                         );
                                       }}
 				                                    onClick={() => focusRecord(appointment.id, appointment.start_at)}
-	                                      onTouchStart={() => beginLongPressMove(toMoveTarget(appointment, 'appointment'))}
-	                                      onTouchMove={clearLongPressTimer}
-	                                      onTouchEnd={clearLongPressTimer}
-	                                      onTouchCancel={clearLongPressTimer}
+	                                      onTouchStart={(event) => beginLongPressMove(toMoveTarget(appointment, 'appointment'), event)}
+	                                      onTouchMove={handleLongPressTouchMove}
+	                                      onTouchEnd={resetLongPressGesture}
+	                                      onTouchCancel={resetLongPressGesture}
 			                                    className={`absolute left-2 right-2 z-[2] rounded-2xl border px-3 py-2 text-left shadow-sm transition-transform hover:scale-[1.01] select-none ${
 			                                      isSelected ? 'ring-2 ring-[var(--color-primary)]/25' : ''
 			                                    } ${isSecondary ? 'opacity-45 saturate-50' : ''} ${
                                         draggedAppointmentId === appointment.id ? 'opacity-20 scale-[0.99]' : ''
                                       } overflow-hidden`}
 		                                    style={{
-		                                      top: `${top}px`,
-		                                      height: `${height}px`,
+		                                      top: `${metrics.top}px`,
+		                                      height: `${metrics.height}px`,
 		                                      borderColor: colorWithAlpha(accent, isSecondary ? '28' : '55', 'rgba(14, 165, 233, 0.3)'),
 		                                      backgroundColor: soft,
 		                                      borderStyle: isSecondary ? 'dashed' : 'solid',
 		                                      boxShadow: isSelected ? '0 0 0 1px rgba(99, 102, 241, 0.2)' : undefined,
                                           WebkitTouchCallout: 'none',
+                                          touchAction: touchMoveTarget ? 'none' : 'manipulation',
 		                                    }}
 		                                  >
-		                                    {renderAppointmentCardBody(appointment, height)}
+		                                    {renderAppointmentCardBody(appointment, metrics.height)}
 			                                  </button>
 			                                );
 			                              })}
@@ -3396,12 +3492,12 @@ export default function AdminCalendarPage() {
 	                          <button
 	                            type="button"
 		                            onClick={() => focusRecord(appointment.id, appointment.start_at)}
-	                              onTouchStart={() => beginLongPressMove(toMoveTarget(appointment, 'appointment'))}
-	                              onTouchMove={clearLongPressTimer}
-	                              onTouchEnd={clearLongPressTimer}
-	                              onTouchCancel={clearLongPressTimer}
+	                              onTouchStart={(event) => beginLongPressMove(toMoveTarget(appointment, 'appointment'), event)}
+	                              onTouchMove={handleLongPressTouchMove}
+	                              onTouchEnd={resetLongPressGesture}
+	                              onTouchCancel={resetLongPressGesture}
 	                            className="flex w-full gap-3 text-left select-none"
-                              style={{ WebkitTouchCallout: 'none' }}
+                              style={{ WebkitTouchCallout: 'none', touchAction: touchMoveTarget ? 'none' : 'manipulation' }}
 	                          >
 	                            <div className="flex w-16 flex-shrink-0 flex-col items-center gap-1.5 rounded-[20px] border border-gray-100 bg-gray-50/80 px-2 py-3">
 	                              <span className="text-sm font-black text-gray-900">{startTime}</span>
@@ -3491,6 +3587,15 @@ export default function AdminCalendarPage() {
               </button>
             </div>
             {renderDesktopDetailsPanel()}
+          </div>
+        </div>
+      )}
+
+      {dropPreview && activePreviewTarget && previewPlacementLabel && (
+        <div className="pointer-events-none fixed left-1/2 top-[calc(env(safe-area-inset-top,0px)+12px)] z-40 -translate-x-1/2">
+          <div className="rounded-full border border-[var(--color-primary)]/20 bg-white/95 px-4 py-2 shadow-xl shadow-black/10 backdrop-blur">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-400">Нов час</p>
+            <p className="mt-0.5 text-sm font-bold text-gray-900">{previewPlacementLabel}</p>
           </div>
         </div>
       )}
@@ -4455,16 +4560,37 @@ function AdminBookingModal({
       return [];
     }
 
-    return [...slots]
-      .sort((left, right) => {
-        const leftMinutes = timeLabelToMinutes(left.start) ?? Number.MAX_SAFE_INTEGER;
-        const rightMinutes = timeLabelToMinutes(right.start) ?? Number.MAX_SAFE_INTEGER;
-        const leftDiff = Math.abs(leftMinutes - preferredMinutes);
-        const rightDiff = Math.abs(rightMinutes - preferredMinutes);
-        if (leftDiff !== rightDiff) {
-          return leftDiff - rightDiff;
+    const withMinutes = slots
+      .map((slot) => {
+        const slotMinutes = timeLabelToMinutes(slot.start);
+        if (slotMinutes === null) {
+          return null;
         }
-        return leftMinutes - rightMinutes;
+
+        return {
+          slot,
+          slotMinutes,
+          distanceMinutes: Math.abs(slotMinutes - preferredMinutes),
+          direction: slotMinutes < preferredMinutes ? 'earlier' : 'later',
+        };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+
+    const earlier = withMinutes
+      .filter((entry) => entry.slotMinutes < preferredMinutes)
+      .sort((left, right) => right.slotMinutes - left.slotMinutes)
+      .slice(0, 2);
+    const later = withMinutes
+      .filter((entry) => entry.slotMinutes > preferredMinutes)
+      .sort((left, right) => left.slotMinutes - right.slotMinutes)
+      .slice(0, 2);
+
+    return [...earlier, ...later]
+      .sort((left, right) => {
+        if (left.distanceMinutes !== right.distanceMinutes) {
+          return left.distanceMinutes - right.distanceMinutes;
+        }
+        return left.slotMinutes - right.slotMinutes;
       })
       .slice(0, 4);
   }, [preferredSlot, preferredSlotAvailable, slots]);
@@ -4598,25 +4724,25 @@ function AdminBookingModal({
                     <div className="space-y-3 px-2 py-2">
                       <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
                         <p className="font-semibold">
-                          Избраният час {preferredSlot} не е свободен за тази услуга.
+                          Точният час {preferredSlot} не е свободен за тази услуга.
                         </p>
                         <p className="mt-1 text-xs text-amber-800/80">
-                          Запазихме избора ви и показваме най-близките свободни варианти.
+                          Показваме най-близките свободни варианти около избрания момент, включително по-ранни и по-късни часове.
                         </p>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        {nearestPreferredSlots.map((slot) => (
+                        {nearestPreferredSlots.map((option) => (
                           <button
-                            key={slot.start}
+                            key={option.slot.start}
                             type="button"
-                            onClick={() => setSelectedSlot(slot.start)}
+                            onClick={() => setSelectedSlot(option.slot.start)}
                             className={`rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
-                              selectedSlot === slot.start
+                              selectedSlot === option.slot.start
                                 ? 'bg-[var(--color-primary)] text-white'
                                 : 'bg-white text-gray-700 border border-amber-200 hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]'
                             }`}
                           >
-                            {slot.start}
+                            {option.slot.start} {option.direction === 'earlier' ? '· по-рано' : '· по-късно'}
                           </button>
                         ))}
                       </div>

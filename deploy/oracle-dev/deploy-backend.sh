@@ -49,11 +49,16 @@ compose() {
 }
 
 run_backend_up() {
-  local output_file
+  local output_file compose_status
 
   output_file="$(mktemp)"
 
-  if compose up -d --no-deps "${BACKEND_SERVICE}" >"${output_file}" 2>&1; then
+  set +e
+  compose up -d --no-deps "${BACKEND_SERVICE}" >"${output_file}" 2>&1
+  compose_status=$?
+  set -e
+
+  if [[ "${compose_status}" -eq 0 ]]; then
     cat "${output_file}"
     rm -f "${output_file}"
     return 0
@@ -67,41 +72,57 @@ run_backend_up() {
   fi
 
   rm -f "${output_file}"
-  return 1
+  return "${compose_status}"
 }
 
-remove_stale_backend_container() {
-  local container_id
+remove_stale_backend_containers() {
+  local -a container_ids=()
 
-  container_id="$(docker ps -aq --filter "name=^/${BACKEND_CONTAINER_NAME}$" | head -n 1)"
+  mapfile -t container_ids < <(docker ps -aq --filter "name=^/${BACKEND_CONTAINER_NAME}$")
 
-  if [[ -z "${container_id}" ]]; then
+  if [[ "${#container_ids[@]}" -eq 0 ]]; then
     fail "Detected recreate failure but could not find backend container ${BACKEND_CONTAINER_NAME} to remove"
   fi
 
-  log "Removing stale backend container ${BACKEND_CONTAINER_NAME}"
-  docker rm -f "${container_id}" >/dev/null
+  log "Removing stale backend container(s) for ${BACKEND_CONTAINER_NAME}"
+  docker rm -f "${container_ids[@]}" >/dev/null
 }
 
 deploy_backend() {
   local up_status=0
 
   log "Starting backend container"
-  if run_backend_up; then
+  set +e
+  run_backend_up
+  up_status=$?
+  set -e
+
+  if [[ "${up_status}" -eq 0 ]]; then
     return 0
   fi
-
-  up_status=$?
 
   if [[ "${up_status}" -ne 2 ]]; then
     return "${up_status}"
   fi
 
   log "Detected legacy docker-compose recreate bug (ContainerConfig); retrying with backend container cleanup"
-  remove_stale_backend_container
+  remove_stale_backend_containers
 
   log "Retrying backend start after cleanup"
-  compose up -d --no-deps "${BACKEND_SERVICE}"
+  set +e
+  run_backend_up
+  up_status=$?
+  set -e
+
+  if [[ "${up_status}" -eq 0 ]]; then
+    return 0
+  fi
+
+  if [[ "${up_status}" -eq 2 ]]; then
+    fail "Backend recreate still fails with ContainerConfig after backend container cleanup"
+  fi
+
+  return "${up_status}"
 }
 
 wait_for_backend_health() {
@@ -140,7 +161,6 @@ require_cmd git
 require_cmd docker
 require_cmd curl
 require_cmd grep
-require_cmd head
 require_cmd mktemp
 require_cmd rm
 

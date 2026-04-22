@@ -53,17 +53,13 @@ run_backend_up() {
 
   output_file="$(mktemp)"
 
-  set +e
-  compose up -d --no-deps "${BACKEND_SERVICE}" >"${output_file}" 2>&1
-  compose_status=$?
-  set -e
-
-  if [[ "${compose_status}" -eq 0 ]]; then
+  if compose up -d --no-deps "${BACKEND_SERVICE}" >"${output_file}" 2>&1; then
     cat "${output_file}"
     rm -f "${output_file}"
     return 0
   fi
 
+  compose_status=$?
   cat "${output_file}" >&2 || true
 
   if grep -Fq "KeyError: 'ContainerConfig'" "${output_file}"; then
@@ -108,37 +104,39 @@ deploy_backend() {
   local up_status=0
 
   log "Starting backend container"
-  set +e
-  run_backend_up
-  up_status=$?
-  set -e
-
-  if [[ "${up_status}" -eq 0 ]]; then
+  if run_backend_up; then
+    log "Backend container started on first attempt"
     return 0
   fi
-
-  if [[ "${up_status}" -ne 2 ]]; then
-    return "${up_status}"
-  fi
-
-  log "Detected legacy docker-compose recreate bug (ContainerConfig); retrying with backend container cleanup"
-  remove_stale_backend_containers
-
-  log "Retrying backend start after cleanup"
-  set +e
-  run_backend_up
   up_status=$?
-  set -e
 
-  if [[ "${up_status}" -eq 0 ]]; then
-    return 0
-  fi
+  case "${up_status}" in
+    2)
+      log "Detected legacy docker-compose recreate bug; entering fallback cleanup"
+      remove_stale_backend_containers
 
-  if [[ "${up_status}" -eq 2 ]]; then
-    fail "Backend recreate still fails with ContainerConfig after backend container cleanup"
-  fi
+      log "Retrying backend start after cleanup"
+      if run_backend_up; then
+        log "Backend container started after fallback cleanup"
+        return 0
+      fi
+      up_status=$?
 
-  return "${up_status}"
+      case "${up_status}" in
+        2)
+          fail "Backend recreate still fails with ContainerConfig after backend container cleanup"
+          ;;
+        *)
+          log "Backend start failed after fallback cleanup with status ${up_status}"
+          return "${up_status}"
+          ;;
+      esac
+      ;;
+    *)
+      log "Backend start failed without legacy recreate fallback (status ${up_status})"
+      return "${up_status}"
+      ;;
+  esac
 }
 
 wait_for_backend_health() {

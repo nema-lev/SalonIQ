@@ -34,10 +34,7 @@ import { TenantGuard } from '../../common/guards/tenant.guard';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentTenant } from '../../common/decorators/tenant.decorator';
 import { getNotificationTemplates } from '../notifications/template.utils';
-import {
-  resolveInternalTenantCandidate,
-  resolveTenantCandidate,
-} from '../../common/utils/tenant-resolution';
+import { resolveTenantCandidate } from '../../common/utils/tenant-resolution';
 import { TelegramService } from '../notifications/telegram.service';
 import { buildBulgarianPhoneVariants, normalizeBulgarianPhone } from '../../common/utils/phone';
 
@@ -986,12 +983,13 @@ export class TenantController {
       throw new UnauthorizedException('Невалиден вътрешен ключ.');
     }
 
-    const candidate = resolveInternalTenantCandidate({
+    const candidate = resolveTenantCandidate({
       host: forwardedHost,
       appDomain: this.config.get<string>('APP_DOMAIN', 'saloniq.bg'),
       headerSlug: tenantSlug,
       defaultTenantSlug: this.config.get<string>('DEFAULT_TENANT_SLUG', ''),
       queryTenantSlug,
+      platformHosts: this.config.get<string>('BACKEND_HOST', ''),
     });
 
     if (!candidate) {
@@ -1004,7 +1002,10 @@ export class TenantController {
       let query: string;
       let param: string;
 
-      if (candidate.type === 'slug') {
+      if (candidate.type === 'tenant-id') {
+        param = candidate.value;
+        query = `SELECT * FROM public.tenants WHERE id = $1::uuid AND is_active = true LIMIT 1`;
+      } else if (candidate.type === 'slug') {
         param = candidate.value;
         query = `SELECT * FROM public.tenants WHERE slug = $1 AND is_active = true LIMIT 1`;
       } else {

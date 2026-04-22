@@ -7,6 +7,17 @@ export function normalizeSlug(slug: string | null | undefined) {
   return next || null;
 }
 
+export function normalizeHostList(hosts: readonly string[] | string | null | undefined) {
+  const entries: readonly string[] = Array.isArray(hosts)
+    ? hosts
+    : typeof hosts === 'string'
+      ? hosts.split(',')
+      : [];
+  return entries
+    .map((entry: string) => normalizeHostname(entry))
+    .filter((entry: string): entry is string => Boolean(entry));
+}
+
 export function extractKnownSubdomainSlug(
   host: string | null | undefined,
   appDomain: string | null | undefined,
@@ -38,15 +49,56 @@ export function shouldSkipCustomDomainLookup(
   return false;
 }
 
+function extractUrlHostname(value: string | null | undefined) {
+  const normalizedValue = (value || '').trim();
+  if (!normalizedValue) return null;
+
+  try {
+    return normalizeHostname(new URL(normalizedValue).hostname);
+  } catch {
+    return normalizeHostname(normalizedValue);
+  }
+}
+
+function isPlatformHost(host: string | null | undefined, platformHosts: readonly string[] | string | null | undefined) {
+  const hostname = normalizeHostname(host);
+  if (!hostname) return false;
+
+  return normalizeHostList(platformHosts).includes(hostname);
+}
+
+function isCrossHostRequest(
+  host: string | null | undefined,
+  originHost: string | null | undefined,
+  referer: string | null | undefined,
+) {
+  const hostname = normalizeHostname(host);
+  if (!hostname) return false;
+
+  const relatedHosts = [extractUrlHostname(originHost), extractUrlHostname(referer)];
+  return relatedHosts.some((relatedHost) => Boolean(relatedHost && relatedHost !== hostname));
+}
+
+function isUuid(value: string | null | undefined) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    (value || '').trim(),
+  );
+}
+
 export type TenantResolutionInput = {
   host?: string | null;
   appDomain?: string | null;
   headerSlug?: string | null;
   defaultTenantSlug?: string | null;
   queryTenantSlug?: string | null;
+  originHost?: string | null;
+  referer?: string | null;
+  authenticatedTenantId?: string | null;
+  platformHosts?: readonly string[] | string | null;
 };
 
 export type TenantResolutionCandidate =
+  | { type: 'tenant-id'; value: string; source: 'auth' }
   | { type: 'slug'; value: string; source: 'subdomain' | 'header' | 'default-env' | 'query' }
   | { type: 'custom-domain'; value: string; source: 'custom-domain' };
 
@@ -76,36 +128,29 @@ function resolveExplicitSlugCandidate(
 export function resolveTenantCandidate(input: TenantResolutionInput): TenantResolutionCandidate | null {
   const hostname = normalizeHostname(input.host);
   const subdomainSlug = extractKnownSubdomainSlug(hostname, input.appDomain);
-
-  if (subdomainSlug) {
-    return { type: 'slug', value: subdomainSlug, source: 'subdomain' };
-  }
-
-  if (hostname && !shouldSkipCustomDomainLookup(hostname, input.appDomain)) {
-    return { type: 'custom-domain', value: hostname, source: 'custom-domain' };
-  }
-
-  return resolveExplicitSlugCandidate(
-    input.headerSlug,
-    input.queryTenantSlug,
-    input.defaultTenantSlug,
-  );
-}
-
-export function resolveInternalTenantCandidate(input: TenantResolutionInput): TenantResolutionCandidate | null {
-  const hostname = normalizeHostname(input.host);
-  const subdomainSlug = extractKnownSubdomainSlug(hostname, input.appDomain);
-
-  if (subdomainSlug) {
-    return { type: 'slug', value: subdomainSlug, source: 'subdomain' };
-  }
-
   const explicitSlugCandidate = resolveExplicitSlugCandidate(
     input.headerSlug,
     input.queryTenantSlug,
     input.defaultTenantSlug,
   );
-  if (explicitSlugCandidate) {
+
+  if (subdomainSlug) {
+    return { type: 'slug', value: subdomainSlug, source: 'subdomain' };
+  }
+
+  const authenticatedTenantId = isUuid(input.authenticatedTenantId)
+    ? input.authenticatedTenantId!.trim()
+    : null;
+  const shouldPreferExplicitTenantContext =
+    shouldSkipCustomDomainLookup(hostname, input.appDomain) ||
+    isPlatformHost(hostname, input.platformHosts) ||
+    isCrossHostRequest(hostname, input.originHost, input.referer);
+
+  if (shouldPreferExplicitTenantContext && authenticatedTenantId) {
+    return { type: 'tenant-id', value: authenticatedTenantId, source: 'auth' };
+  }
+
+  if (shouldPreferExplicitTenantContext && explicitSlugCandidate) {
     return explicitSlugCandidate;
   }
 
@@ -113,5 +158,9 @@ export function resolveInternalTenantCandidate(input: TenantResolutionInput): Te
     return { type: 'custom-domain', value: hostname, source: 'custom-domain' };
   }
 
-  return null;
+  if (authenticatedTenantId) {
+    return { type: 'tenant-id', value: authenticatedTenantId, source: 'auth' };
+  }
+
+  return explicitSlugCandidate;
 }

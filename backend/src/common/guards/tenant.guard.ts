@@ -7,6 +7,7 @@ import {
   ForbiddenException,
   HttpException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
 import { TenantPrismaService } from '../prisma/tenant-prisma.service';
 import { getNotificationTemplates } from '../../modules/notifications/template.utils';
@@ -26,7 +27,10 @@ export class TenantGuard implements CanActivate {
   private readonly tenantCache = new Map<string, { data: any; expiresAt: number }>();
   private readonly CACHE_TTL = 0;
 
-  constructor(private readonly prisma: TenantPrismaService) {}
+  constructor(
+    private readonly prisma: TenantPrismaService,
+    private readonly config: ConfigService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Request & { tenant: any }>();
@@ -56,14 +60,18 @@ export class TenantGuard implements CanActivate {
   private extractTenantCandidate(request: Request) {
     return resolveTenantCandidate({
       host: (request.headers['x-forwarded-host'] || request.headers.host || '') as string,
-      appDomain: process.env.APP_DOMAIN || 'saloniq.bg',
+      appDomain: this.config.get<string>('APP_DOMAIN', 'saloniq.bg'),
       headerSlug: request.headers['x-tenant-slug'] as string,
-      defaultTenantSlug: process.env.DEFAULT_TENANT_SLUG || '',
+      defaultTenantSlug: this.config.get<string>('DEFAULT_TENANT_SLUG', ''),
       queryTenantSlug: request.query['tenant'] as string,
+      originHost: request.headers.origin as string,
+      referer: request.headers.referer as string,
+      authenticatedTenantId: (request as Request & { user?: { tenantId?: string } }).user?.tenantId,
+      platformHosts: this.config.get<string>('BACKEND_HOST', ''),
     });
   }
 
-  private async resolveTenant(candidate: { type: 'slug' | 'custom-domain'; value: string }): Promise<any> {
+  private async resolveTenant(candidate: { type: 'tenant-id' | 'slug' | 'custom-domain'; value: string }): Promise<any> {
     const cacheKey = `${candidate.type}:${candidate.value}`;
     const cached = this.tenantCache.get(cacheKey);
 
@@ -74,7 +82,10 @@ export class TenantGuard implements CanActivate {
     let query: string;
     let params: string[];
 
-    if (candidate.type === 'slug') {
+    if (candidate.type === 'tenant-id') {
+      query = `SELECT * FROM public.tenants WHERE id = $1::uuid AND is_active = true LIMIT 1`;
+      params = [candidate.value];
+    } else if (candidate.type === 'slug') {
       query = `SELECT * FROM public.tenants WHERE slug = $1 AND is_active = true LIMIT 1`;
       params = [candidate.value];
     } else {

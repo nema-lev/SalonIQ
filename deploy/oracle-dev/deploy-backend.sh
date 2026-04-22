@@ -77,14 +77,30 @@ run_backend_up() {
 
 remove_stale_backend_containers() {
   local -a container_ids=()
+  local -a container_names=()
+  local container_id
+  local container_name
 
-  mapfile -t container_ids < <(docker ps -aq --filter "name=^/${BACKEND_CONTAINER_NAME}$")
+  mapfile -t container_ids < <(
+    docker ps -aq \
+      --filter "label=com.docker.compose.service=${BACKEND_SERVICE}" \
+      --filter "name=${BACKEND_CONTAINER_NAME}"
+  )
 
   if [[ "${#container_ids[@]}" -eq 0 ]]; then
-    fail "Detected recreate failure but could not find backend container ${BACKEND_CONTAINER_NAME} to remove"
+    fail "Detected recreate failure but could not find backend container(s) for service ${BACKEND_SERVICE} matching ${BACKEND_CONTAINER_NAME}"
   fi
 
-  log "Removing stale backend container(s) for ${BACKEND_CONTAINER_NAME}"
+  for container_id in "${container_ids[@]}"; do
+    container_name="$(docker inspect --format '{{.Name}}' "${container_id}" 2>/dev/null || true)"
+    container_name="${container_name#/}"
+
+    if [[ -n "${container_name}" ]]; then
+      container_names+=("${container_name}")
+    fi
+  done
+
+  log "Removing backend container(s): ${container_names[*]:-${container_ids[*]}}"
   docker rm -f "${container_ids[@]}" >/dev/null
 }
 
@@ -204,7 +220,7 @@ log "Rebuilding and restarting backend only"
 deploy_backend
 
 if ! wait_for_backend_health; then
-  compose logs "${BACKEND_SERVICE}" --tail=120 || true
+  compose logs --tail=120 "${BACKEND_SERVICE}" || true
   fail "Internal backend health check failed"
 fi
 

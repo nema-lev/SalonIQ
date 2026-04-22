@@ -7,6 +7,7 @@ ENV_FILE="${ENV_FILE:-${SCRIPT_DIR}/.env}"
 BACKUP_DIR="${BACKUP_DIR:-/opt/saloniq-backups/postgres}"
 BACKUP_RETENTION_COUNT="${BACKUP_RETENTION_COUNT:-14}"
 POSTGRES_SERVICE="${POSTGRES_SERVICE:-postgres}"
+COMPOSE_VERSION_LOGGED=0
 
 log() {
   printf '[oracle-postgres-backup] %s\n' "$*"
@@ -37,12 +38,23 @@ require_cmd() {
   fi
 }
 
+require_compose_v2() {
+  local compose_version
+
+  if ! compose_version="$(docker compose version 2>/dev/null)"; then
+    fail "Docker Compose v2 is required on the Oracle VM. Install the docker-compose-plugin and use 'docker compose'."
+  fi
+
+  if [[ "${COMPOSE_VERSION_LOGGED}" == "0" ]]; then
+    log "Using ${compose_version}"
+    COMPOSE_VERSION_LOGGED=1
+  fi
+}
+
 compose() {
   local -a compose_args=(-f docker-compose.yml --env-file "${ENV_FILE}")
 
-  if ! docker compose version >/dev/null 2>&1; then
-    fail "Docker Compose v2 is required on the Oracle VM. Install the docker-compose-plugin and use 'docker compose'."
-  fi
+  require_compose_v2
 
   (
     cd "${SCRIPT_DIR}"

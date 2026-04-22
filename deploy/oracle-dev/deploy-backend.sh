@@ -12,6 +12,8 @@ DEPLOY_EXPECTED_SHA="${DEPLOY_EXPECTED_SHA:-}"
 VERIFY_PUBLIC_HEALTH="${VERIFY_PUBLIC_HEALTH:-0}"
 BACKEND_SERVICE="${BACKEND_SERVICE:-backend}"
 BACKEND_CONTAINER_NAME="${BACKEND_CONTAINER_NAME:-saloniq-backend}"
+BACKEND_START_STATUS=0
+BACKEND_START_OUTPUT=""
 
 log() {
   printf '[oracle-backend-deploy] %s\n' "$*"
@@ -48,27 +50,34 @@ compose() {
   fail "Neither 'docker compose' nor 'docker-compose' is installed"
 }
 
-run_backend_up() {
-  local output_file compose_status
+capture_backend_start_attempt() {
+  local output_file
 
   output_file="$(mktemp)"
 
-  if compose up -d --no-deps "${BACKEND_SERVICE}" >"${output_file}" 2>&1; then
-    cat "${output_file}"
-    rm -f "${output_file}"
+  set +e
+  compose up -d --no-deps "${BACKEND_SERVICE}" >"${output_file}" 2>&1
+  BACKEND_START_STATUS=$?
+  set -e
+
+  BACKEND_START_OUTPUT="$(<"${output_file}")"
+  rm -f "${output_file}"
+}
+
+print_backend_start_output() {
+  local output="$1"
+  local stream="${2:-stdout}"
+
+  if [[ -z "${output}" ]]; then
     return 0
   fi
 
-  compose_status=$?
-  cat "${output_file}" >&2 || true
-
-  if grep -Fq "KeyError: 'ContainerConfig'" "${output_file}"; then
-    rm -f "${output_file}"
-    return 2
+  if [[ "${stream}" == "stderr" ]]; then
+    printf '%s\n' "${output}" >&2
+    return 0
   fi
 
-  rm -f "${output_file}"
-  return "${compose_status}"
+  printf '%s\n' "${output}"
 }
 
 remove_stale_backend_containers() {
@@ -101,42 +110,42 @@ remove_stale_backend_containers() {
 }
 
 deploy_backend() {
-  local up_status=0
-
   log "Starting backend container"
-  if run_backend_up; then
+  capture_backend_start_attempt
+
+  if [[ "${BACKEND_START_STATUS}" -eq 0 ]]; then
+    print_backend_start_output "${BACKEND_START_OUTPUT}"
     log "Backend container started on first attempt"
     return 0
   fi
-  up_status=$?
 
-  case "${up_status}" in
-    2)
-      log "Detected legacy docker-compose recreate bug; entering fallback cleanup"
-      remove_stale_backend_containers
+  if [[ "${BACKEND_START_OUTPUT}" == *"KeyError: 'ContainerConfig'"* ]]; then
+    print_backend_start_output "${BACKEND_START_OUTPUT}" stderr
+    log "Detected legacy docker-compose recreate bug; entering fallback cleanup"
+    remove_stale_backend_containers
 
-      log "Retrying backend start after cleanup"
-      if run_backend_up; then
-        log "Backend container started after fallback cleanup"
-        return 0
-      fi
-      up_status=$?
+    log "Retrying backend start after cleanup"
+    capture_backend_start_attempt
 
-      case "${up_status}" in
-        2)
-          fail "Backend recreate still fails with ContainerConfig after backend container cleanup"
-          ;;
-        *)
-          log "Backend start failed after fallback cleanup with status ${up_status}"
-          return "${up_status}"
-          ;;
-      esac
-      ;;
-    *)
-      log "Backend start failed without legacy recreate fallback (status ${up_status})"
-      return "${up_status}"
-      ;;
-  esac
+    if [[ "${BACKEND_START_STATUS}" -eq 0 ]]; then
+      print_backend_start_output "${BACKEND_START_OUTPUT}"
+      log "Backend container started after fallback cleanup"
+      return 0
+    fi
+
+    print_backend_start_output "${BACKEND_START_OUTPUT}" stderr
+    log "Backend start failed after fallback cleanup with status ${BACKEND_START_STATUS}"
+
+    if [[ "${BACKEND_START_OUTPUT}" == *"KeyError: 'ContainerConfig'"* ]]; then
+      fail "Backend recreate still fails with ContainerConfig after backend container cleanup"
+    fi
+
+    fail "Backend start failed after fallback cleanup"
+  fi
+
+  print_backend_start_output "${BACKEND_START_OUTPUT}" stderr
+  log "Backend start failed without legacy recreate fallback (status ${BACKEND_START_STATUS})"
+  fail "Backend start command failed"
 }
 
 wait_for_backend_health() {
@@ -174,7 +183,6 @@ wait_for_public_health() {
 require_cmd git
 require_cmd docker
 require_cmd curl
-require_cmd grep
 require_cmd mktemp
 require_cmd rm
 

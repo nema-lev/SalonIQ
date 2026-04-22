@@ -11,7 +11,7 @@ It does **not** include the frontend and it does **not** require Redis. For this
 ## Prerequisites
 
 - Docker Engine installed on the VM
-- Docker Compose plugin installed on the VM
+- `docker-compose` v1 installed on the VM
 - `saloniq.duckdns.org` resolving to the VM public IP
 - Ports `80/443` reachable from the internet
 
@@ -35,22 +35,25 @@ Fill these values in `.env`:
 
 ```bash
 cd /opt/saloniq/deploy/oracle-dev
-docker compose up -d postgres
-docker compose run --rm backend-tools npx prisma migrate deploy
-docker compose run --rm backend-tools npm run seed
-docker compose up -d backend caddy
+docker-compose up -d postgres
+docker-compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  < /opt/saloniq/backend/prisma/migrations/001_init.sql
+docker-compose run --rm backend-tools npm run seed
+docker-compose up -d backend caddy
 ```
 
 `npm run seed` creates a fresh demo tenant (`demo-business`) and resets only that tenant's demo data.
+This repo currently bootstraps the DB from `backend/prisma/migrations/001_init.sql`; it does not ship a standard Prisma migration directory for `prisma migrate deploy`.
 
 ## Validation
 
 Run these checks on the VM:
 
 ```bash
-docker compose ps
-docker compose logs backend --tail=100
-curl -fsS http://localhost:3001/api/v1/health
+docker-compose ps
+docker-compose logs backend --tail=100
+docker-compose exec -T backend curl -fsS http://localhost:3001/api/v1/health
+curl -fsSI -H 'Host: saloniq.duckdns.org' http://127.0.0.1/api/v1/health
 curl -fsS https://saloniq.duckdns.org/api/v1/health
 ```
 

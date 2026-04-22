@@ -1,49 +1,46 @@
-# Oracle VM dev/test backend deploy
+Oracle VM dev/test backend deploy
 
 This stack is intentionally limited to:
 
-- `caddy` on public ports `80/443`
-- `backend` on the internal Docker network only
-- `postgres` on the internal Docker network only
+caddy on public ports 80/443
+backend on the internal Docker network only
+postgres on the internal Docker network only
 
-It does **not** include the frontend and it does **not** require Redis. For this temporary dev/test VM, SalonIQ can boot without `REDIS_HOST`; immediate notifications are processed inline instead of using BullMQ.
+It does not include the frontend and it does not require Redis. For this temporary dev/test VM, SalonIQ can boot without REDIS_HOST; immediate notifications are processed inline instead of using BullMQ.
 
-## Why the old deploy model was fragile
+Why the old deploy model was fragile
 
 The previous Oracle backend deploy depended on copying repo files to the VM by hand. That created three problems:
 
-- the VM filesystem could drift away from GitHub without a clear deployed commit
-- updates were easy to miss because `deploy/oracle-dev/docker-compose.yml` builds from the local repo checkout at `../../backend`
-- repeated manual syncs made backend deploys depend on whoever last copied files to `/opt/saloniq`
+the VM filesystem could drift away from GitHub without a clear deployed commit
+updates were easy to miss because deploy/oracle-dev/docker-compose.yml builds from the local repo checkout at ../../backend
+repeated manual syncs made backend deploys depend on whoever last copied files to /opt/saloniq
 
-The safer model is to keep `/opt/saloniq` as a normal git checkout and let GitHub Actions trigger a small remote deploy script over SSH.
+The safer model is to keep /opt/saloniq as a normal git checkout and let GitHub Actions trigger a small remote deploy script over SSH.
 
-## Files used by the GitHub-based flow
+Files used by the GitHub-based flow
+deploy/oracle-dev/deploy-backend.sh
+.github/workflows/oracle-backend-deploy.yml
+deploy/oracle-dev/docker-compose.yml
+deploy/oracle-dev/.env.example
+What the deploy script does
 
-- `deploy/oracle-dev/deploy-backend.sh`
-- `.github/workflows/oracle-backend-deploy.yml`
-- `deploy/oracle-dev/docker-compose.yml`
-- `deploy/oracle-dev/.env.example`
+deploy/oracle-dev/deploy-backend.sh runs on the Oracle VM and performs this sequence:
 
-## What the deploy script does
+verifies that the server path is a clean git checkout
+fetches from GitHub and fast-forwards the deploy branch
+starts postgres if needed
+rebuilds and restarts the backend container only
+leaves the named postgres_data volume intact
+verifies http://localhost:3001/api/v1/health from inside the backend container
+optionally verifies the public HTTPS health endpoint
 
-`deploy/oracle-dev/deploy-backend.sh` runs on the Oracle VM and performs this sequence:
+It does not recreate the VM, remove Docker volumes, or expose any new ports.
 
-1. verifies that the server path is a clean git checkout
-2. fetches from GitHub and fast-forwards the deploy branch
-3. starts `postgres` if needed
-4. rebuilds and restarts the `backend` container only
-5. leaves the named `postgres_data` volume intact
-6. verifies `http://localhost:3001/api/v1/health` from inside the backend container
-7. optionally verifies the public HTTPS health endpoint
-
-It does **not** recreate the VM, remove Docker volumes, or expose any new ports.
-
-## Expected server path
+Expected server path
 
 The GitHub Action expects a git checkout at:
 
-```bash
 /opt/saloniq
 
 That path contains:
@@ -104,10 +101,11 @@ ssh-keyscan github.com >> ~/.ssh/known_hosts
 Then configure ~/.ssh/config so git can use that key:
 
 Host github.com
-  HostName github.com
-  User git
-  IdentityFile ~/.ssh/saloniq_github
-  IdentitiesOnly yes
+HostName github.com
+User git
+IdentityFile ~/.ssh/saloniq_github
+IdentitiesOnly yes
+
 3. Prepare the deploy path
 
 If this VM still has the old manually copied files, back up the existing deploy env first:
@@ -120,15 +118,19 @@ If the current /opt/saloniq directory is the old manual deploy directory, replac
 ts=$(date +%Y%m%d%H%M%S)
 docker stop saloniq-backend saloniq-caddy || true
 mv /opt/saloniq "/opt/saloniq-manual-${ts}"
-git clone git@github.com:nema-lev/SalonIQ.git /opt/saloniq
+git clone git@github.com
+:nema-lev/SalonIQ.git /opt/saloniq
 cp "/opt/saloniq-manual-${ts}/deploy/oracle-dev/.env" /opt/saloniq/deploy/oracle-dev/.env
 
 If /opt/saloniq does not exist yet, either let the GitHub Action clone it on first deploy or clone it manually:
 
-git clone git@github.com:nema-lev/SalonIQ.git /opt/saloniq
+git clone git@github.com
+:nema-lev/SalonIQ.git /opt/saloniq
 cd /opt/saloniq
 git checkout main
+
 4. Create the runtime env file
+
 cd /opt/saloniq/deploy/oracle-dev
 cp .env.example .env
 
@@ -148,8 +150,7 @@ For a first-time bootstrap only:
 
 cd /opt/saloniq/deploy/oracle-dev
 docker-compose up -d postgres
-docker-compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-  < /opt/saloniq/backend/prisma/migrations/001_init.sql
+docker-compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" < /opt/saloniq/backend/prisma/migrations/001_init.sql
 docker-compose run --rm backend-tools npm run seed
 docker-compose up -d backend caddy
 
@@ -180,8 +181,11 @@ cd /opt/saloniq/deploy/oracle-dev
 docker-compose ps
 docker-compose logs backend --tail=100
 docker-compose exec -T backend curl -fsS http://localhost:3001/api/v1/health
+
 curl -fsSI -H 'Host: saloniq.duckdns.org' http://127.0.0.1/api/v1/health
+
 curl -fsS https://saloniq.duckdns.org/api/v1/health
+
 Vercel frontend
 
 Point the frontend to the public backend URL:

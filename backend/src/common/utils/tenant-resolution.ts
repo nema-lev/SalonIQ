@@ -50,6 +50,29 @@ export type TenantResolutionCandidate =
   | { type: 'slug'; value: string; source: 'subdomain' | 'header' | 'default-env' | 'query' }
   | { type: 'custom-domain'; value: string; source: 'custom-domain' };
 
+function resolveExplicitSlugCandidate(
+  headerSlug: string | null | undefined,
+  queryTenantSlug: string | null | undefined,
+  defaultTenantSlug: string | null | undefined,
+) {
+  const normalizedHeaderSlug = normalizeSlug(headerSlug);
+  if (normalizedHeaderSlug) {
+    return { type: 'slug', value: normalizedHeaderSlug, source: 'header' } as const;
+  }
+
+  const normalizedQueryTenantSlug = normalizeSlug(queryTenantSlug);
+  if (normalizedQueryTenantSlug) {
+    return { type: 'slug', value: normalizedQueryTenantSlug, source: 'query' } as const;
+  }
+
+  const normalizedDefaultTenantSlug = normalizeSlug(defaultTenantSlug);
+  if (normalizedDefaultTenantSlug) {
+    return { type: 'slug', value: normalizedDefaultTenantSlug, source: 'default-env' } as const;
+  }
+
+  return null;
+}
+
 export function resolveTenantCandidate(input: TenantResolutionInput): TenantResolutionCandidate | null {
   const hostname = normalizeHostname(input.host);
   const subdomainSlug = extractKnownSubdomainSlug(hostname, input.appDomain);
@@ -62,19 +85,32 @@ export function resolveTenantCandidate(input: TenantResolutionInput): TenantReso
     return { type: 'custom-domain', value: hostname, source: 'custom-domain' };
   }
 
-  const headerSlug = normalizeSlug(input.headerSlug);
-  if (headerSlug) {
-    return { type: 'slug', value: headerSlug, source: 'header' };
+  return resolveExplicitSlugCandidate(
+    input.headerSlug,
+    input.queryTenantSlug,
+    input.defaultTenantSlug,
+  );
+}
+
+export function resolveInternalTenantCandidate(input: TenantResolutionInput): TenantResolutionCandidate | null {
+  const hostname = normalizeHostname(input.host);
+  const subdomainSlug = extractKnownSubdomainSlug(hostname, input.appDomain);
+
+  if (subdomainSlug) {
+    return { type: 'slug', value: subdomainSlug, source: 'subdomain' };
   }
 
-  const defaultTenantSlug = normalizeSlug(input.defaultTenantSlug);
-  if (defaultTenantSlug) {
-    return { type: 'slug', value: defaultTenantSlug, source: 'default-env' };
+  const explicitSlugCandidate = resolveExplicitSlugCandidate(
+    input.headerSlug,
+    input.queryTenantSlug,
+    input.defaultTenantSlug,
+  );
+  if (explicitSlugCandidate) {
+    return explicitSlugCandidate;
   }
 
-  const queryTenantSlug = normalizeSlug(input.queryTenantSlug);
-  if (queryTenantSlug) {
-    return { type: 'slug', value: queryTenantSlug, source: 'query' };
+  if (hostname && !shouldSkipCustomDomainLookup(hostname, input.appDomain)) {
+    return { type: 'custom-domain', value: hostname, source: 'custom-domain' };
   }
 
   return null;

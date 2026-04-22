@@ -34,7 +34,10 @@ import { TenantGuard } from '../../common/guards/tenant.guard';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentTenant } from '../../common/decorators/tenant.decorator';
 import { getNotificationTemplates } from '../notifications/template.utils';
-import { resolveTenantCandidate } from '../../common/utils/tenant-resolution';
+import {
+  resolveInternalTenantCandidate,
+  resolveTenantCandidate,
+} from '../../common/utils/tenant-resolution';
 import { TelegramService } from '../notifications/telegram.service';
 import { buildBulgarianPhoneVariants, normalizeBulgarianPhone } from '../../common/utils/phone';
 
@@ -973,15 +976,17 @@ export class TenantController {
   async getConfig(
     @Headers('x-forwarded-host') forwardedHost: string,
     @Headers('x-internal-key') internalKey: string,
+    @Headers('x-internal-api-key') internalApiKey: string,
     @Headers('x-tenant-slug') tenantSlug: string,
     @Query('tenant') queryTenantSlug: string,
   ) {
     const expectedKey = this.config.getOrThrow<string>('INTERNAL_API_KEY');
-    if (internalKey !== expectedKey) {
+    const providedInternalKey = internalKey || internalApiKey;
+    if (providedInternalKey !== expectedKey) {
       throw new UnauthorizedException('Невалиден вътрешен ключ.');
     }
 
-    const candidate = resolveTenantCandidate({
+    const candidate = resolveInternalTenantCandidate({
       host: forwardedHost,
       appDomain: this.config.get<string>('APP_DOMAIN', 'saloniq.bg'),
       headerSlug: tenantSlug,

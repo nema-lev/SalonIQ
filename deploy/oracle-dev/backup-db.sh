@@ -40,23 +40,14 @@ require_cmd() {
 compose() {
   local -a compose_args=(-f docker-compose.yml --env-file "${ENV_FILE}")
 
-  if docker compose version >/dev/null 2>&1; then
-    (
-      cd "${SCRIPT_DIR}"
-      docker compose "${compose_args[@]}" "$@"
-    )
-    return
+  if ! docker compose version >/dev/null 2>&1; then
+    fail "Docker Compose v2 is required on the Oracle VM. Install the docker-compose-plugin and use 'docker compose'."
   fi
 
-  if command -v docker-compose >/dev/null 2>&1; then
-    (
-      cd "${SCRIPT_DIR}"
-      docker-compose "${compose_args[@]}" "$@"
-    )
-    return
-  fi
-
-  fail "Neither 'docker compose' nor 'docker-compose' is installed"
+  (
+    cd "${SCRIPT_DIR}"
+    docker compose "${compose_args[@]}" "$@"
+  )
 }
 
 wait_for_postgres() {

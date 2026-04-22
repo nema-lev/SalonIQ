@@ -1,0 +1,81 @@
+name: Deploy Oracle Backend
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - 'deploy/oracle-dev/Caddyfile'
+      - 'deploy/oracle-dev/deploy-backend.sh'
+      - 'deploy/oracle-dev/docker-compose.yml'
+      - '.github/workflows/oracle-backend-deploy.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: oracle-backend-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ORACLE_DEPLOY_PATH: /opt/saloniq
+      ORACLE_DEPLOY_BRANCH: main
+      ORACLE_GIT_REMOTE: git@github.com:${{ github.repository }}.git
+    steps:
+      - name: Install SSH key
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.ORACLE_SSH_KEY }}" > ~/.ssh/oracle_deploy_key
+          chmod 600 ~/.ssh/oracle_deploy_key
+          printf '%s\n' "${{ secrets.ORACLE_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+
+      - name: Deploy backend on Oracle VM
+        shell: bash
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_PORT: ${{ secrets.ORACLE_PORT }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          : "${ORACLE_HOST:?Missing ORACLE_HOST secret}"
+          : "${ORACLE_USER:?Missing ORACLE_USER secret}"
+          ssh_port="${ORACLE_PORT:-22}"
+          ssh_target="${ORACLE_USER}@${ORACLE_HOST}"
+
+          ssh -i ~/.ssh/oracle_deploy_key \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            -p "${ssh_port}" \
+            "${ssh_target}" <<EOF
+          set -euo pipefail
+          deploy_path='${ORACLE_DEPLOY_PATH}'
+          deploy_branch='${ORACLE_DEPLOY_BRANCH}'
+          git_remote='${ORACLE_GIT_REMOTE}'
+
+          mkdir -p "\$(dirname "\${deploy_path}")"
+
+          if [ -d "\${deploy_path}" ] && [ ! -d "\${deploy_path}/.git" ]; then
+            echo "ERROR: \${deploy_path} exists but is not a git checkout. Migrate the manual deploy directory first." >&2
+            exit 1
+          fi
+
+          if [ ! -d "\${deploy_path}/.git" ]; then
+            git clone --branch "\${deploy_branch}" "\${git_remote}" "\${deploy_path}"
+          fi
+
+          cd "\${deploy_path}"
+          DEPLOY_BRANCH="\${deploy_branch}" \
+          DEPLOY_REMOTE=origin \
+          DEPLOY_EXPECTED_SHA='${GITHUB_SHA}' \
+          VERIFY_PUBLIC_HEALTH=1 \
+          ./deploy/oracle-dev/deploy-backend.sh
+          EOF

@@ -158,6 +158,107 @@ npm run seed creates a fresh demo tenant (demo-business) and resets only that te
 
 This repo currently bootstraps the DB from backend/prisma/migrations/001_init.sql; it does not ship a standard Prisma migration directory for prisma migrate deploy.
 
+Database backups and restore
+
+This deploy now includes two small ops scripts:
+
+deploy/oracle-dev/backup-db.sh
+deploy/oracle-dev/restore-db.sh
+
+They keep PostgreSQL private inside Docker and use `pg_dump` / `pg_restore` through the existing `postgres` service. No new ports are opened and no external backup service is introduced.
+
+Backup storage path
+
+Backups are stored on the Oracle VM host at:
+
+/opt/saloniq-backups/postgres
+
+The backup script creates timestamped PostgreSQL custom-format dumps like:
+
+/opt/saloniq-backups/postgres/saloniq_db_20260422-213000.dump
+
+Default retention policy
+
+`backup-db.sh` keeps the newest 14 `.dump` files in the backup directory and removes older ones after a successful backup.
+
+You can override that count when needed:
+
+BACKUP_RETENTION_COUNT=7 ./backup-db.sh
+
+One-time backup directory preparation on the VM
+
+If the deploy user does not already own the backup path, prepare it once:
+
+sudo mkdir -p /opt/saloniq-backups/postgres
+sudo chown <deploy-user>:<deploy-user> /opt/saloniq-backups/postgres
+sudo chmod 700 /opt/saloniq-backups/postgres
+
+Manual backup command
+
+Run this on the Oracle VM:
+
+cd /opt/saloniq/deploy/oracle-dev
+./backup-db.sh
+
+Optional overrides:
+
+ENV_FILE=/opt/saloniq/deploy/oracle-dev/.env BACKUP_RETENTION_COUNT=21 ./backup-db.sh
+
+The script will:
+
+ensure the `postgres` container is up
+wait until PostgreSQL is ready
+write a timestamped custom-format dump into `/opt/saloniq-backups/postgres`
+remove older `.dump` files beyond the retention count
+
+Manual restore flow
+
+Restore is intentionally explicit because it overwrites the current database objects.
+
+1. Take a fresh backup first so you can roll back if needed:
+
+cd /opt/saloniq/deploy/oracle-dev
+./backup-db.sh
+
+2. Stop the backend so application traffic does not interfere with restore:
+
+cd /opt/saloniq/deploy/oracle-dev
+docker compose stop backend
+
+If your VM only has `docker-compose`, use `docker-compose stop backend` instead.
+
+3. Restore the selected backup:
+
+cd /opt/saloniq/deploy/oracle-dev
+./restore-db.sh /opt/saloniq-backups/postgres/<backup-file>.dump
+
+The script will ask you to type:
+
+RESTORE <POSTGRES_DB>
+
+4. Start the backend again after restore:
+
+cd /opt/saloniq/deploy/oracle-dev
+docker compose up -d backend
+
+If you need a non-interactive restore, use:
+
+cd /opt/saloniq/deploy/oracle-dev
+./restore-db.sh --yes /opt/saloniq-backups/postgres/<backup-file>.dump
+
+Equivalent raw restore command
+
+If you ever need the underlying command flow without the wrapper script:
+
+cd /opt/saloniq/deploy/oracle-dev
+docker compose exec -T postgres sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" pg_restore --clean --if-exists --no-owner --no-privileges --single-transaction --exit-on-error -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < /opt/saloniq-backups/postgres/<backup-file>.dump
+
+Optional cron example
+
+Cron is not configured by this repo, but this is a safe later step if you want nightly backups:
+
+0 3 * * * cd /opt/saloniq/deploy/oracle-dev && ./backup-db.sh >> /var/log/saloniq-db-backup.log 2>&1
+
 GitHub Actions deploy behavior
 
 The workflow in .github/workflows/oracle-backend-deploy.yml runs on:

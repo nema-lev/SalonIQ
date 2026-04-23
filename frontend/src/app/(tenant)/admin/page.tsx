@@ -240,6 +240,11 @@ const STATUS_FILTER_OPTIONS = [
   { key: 'cancelled', label: 'Отказани / отменени' },
 ] as const;
 
+const CALENDAR_DENSITY_OPTIONS = [
+  { key: 'comfortable', label: 'Удобен' },
+  { key: 'compact', label: 'Компактен' },
+] as const;
+
 const REQUEST_OWNER_STATES = ['pending', 'requested', 'proposal_pending', 'proposal_sent'] as const;
 const BOOKED_OWNER_STATES = ['confirmed', 'approved', 'booked_direct', 'proposal_accepted', 'completed'] as const;
 const CANCELLED_OWNER_STATES = [
@@ -266,6 +271,7 @@ const DAY_VIEW_FETCH_BUFFER_DAYS = 3;
 
 type InboxBucket = 'actions' | 'updates';
 type CalendarStatusFilter = (typeof STATUS_FILTER_OPTIONS)[number]['key'];
+type CalendarDensity = (typeof CALENDAR_DENSITY_OPTIONS)[number]['key'];
 
 type CalendarColumnRegistryEntry = {
   element: HTMLDivElement | null;
@@ -273,6 +279,15 @@ type CalendarColumnRegistryEntry = {
   day: Date;
   rangeStartHour: number;
   pixelsPerHour: number;
+};
+
+type CalendarOverlay = {
+  id?: string;
+  top: number;
+  height: number;
+  label: string;
+  kind: 'outside-hours' | 'day-off' | 'exception';
+  block?: StaffException;
 };
 
 interface InboxItemView extends UpcomingAppointment {
@@ -411,24 +426,53 @@ function colorWithAlpha(color: string | undefined, alpha: string, fallback: stri
   return fallback;
 }
 
-function buildCalendarRange(items: Appointment[]) {
-  if (!items.length) {
-    return { startHour: 8, endHour: 20 };
+function getMinutesFromIso(value: string) {
+  const date = new Date(value);
+  return date.getHours() * 60 + date.getMinutes();
+}
+
+function buildCalendarRange({
+  appointments,
+  staffMembers,
+  exceptions,
+  days,
+}: {
+  appointments: Appointment[];
+  staffMembers: Array<Pick<CalendarBoardStaff, 'working_hours'>>;
+  exceptions: StaffException[];
+  days: Date[];
+}) {
+  const markers: number[] = [];
+
+  for (const appointment of appointments) {
+    markers.push(getMinutesFromIso(appointment.start_at), getMinutesFromIso(appointment.end_at));
   }
 
-  const starts = items.map((item) => {
-    const date = new Date(item.start_at);
-    return date.getHours() + date.getMinutes() / 60;
-  });
-  const ends = items.map((item) => {
-    const date = new Date(item.end_at);
-    return date.getHours() + date.getMinutes() / 60;
-  });
+  for (const exception of exceptions) {
+    markers.push(getMinutesFromIso(exception.start_at), getMinutesFromIso(exception.end_at));
+  }
 
-  const rawStart = Math.floor(Math.min(...starts)) - 1;
-  const rawEnd = Math.ceil(Math.max(...ends)) + 1;
-  const startHour = Math.max(6, rawStart);
-  const endHour = Math.min(23, Math.max(rawEnd, startHour + 8));
+  for (const day of days) {
+    const dayKey = getWorkingDayKey(day);
+    for (const staffMember of staffMembers) {
+      const schedule = staffMember.working_hours?.[dayKey];
+      if (!schedule?.isOpen) continue;
+
+      const openMinutes = timeLabelToMinutes(schedule.open);
+      const closeMinutes = timeLabelToMinutes(schedule.close);
+      if (openMinutes != null) markers.push(openMinutes);
+      if (closeMinutes != null) markers.push(closeMinutes);
+    }
+  }
+
+  if (!markers.length) {
+    return { startHour: 7, endHour: 21 };
+  }
+
+  const rawStart = Math.floor(Math.min(...markers) / 60) - 1;
+  const rawEnd = Math.ceil(Math.max(...markers) / 60) + 1;
+  const startHour = Math.max(5, rawStart);
+  const endHour = Math.min(23, Math.max(rawEnd, startHour + 10));
 
   return { startHour, endHour };
 }
@@ -466,6 +510,76 @@ function getExceptionTypeLabel(type: string) {
     partial_day: 'Частичен блок',
   };
   return labels[type] || 'Блокиран интервал';
+}
+
+function buildCalendarOverlays({
+  schedule,
+  exceptions,
+  calendarHeight,
+  rangeStartHour,
+  pixelsPerHour,
+  getExceptionWindow,
+}: {
+  schedule: CalendarBoardStaff['working_hours'][string] | undefined;
+  exceptions: StaffException[];
+  calendarHeight: number;
+  rangeStartHour: number;
+  pixelsPerHour: number;
+  getExceptionWindow: (block: StaffException) => { startAt: string; endAt: string };
+}) {
+  const overlays: CalendarOverlay[] = [];
+
+  if (!schedule?.isOpen) {
+    overlays.push({
+      top: 0,
+      height: calendarHeight,
+      label: 'Почивен ден',
+      kind: 'day-off',
+    });
+  } else {
+    const openMinutes = timeLabelToMinutes(schedule.open);
+    const closeMinutes = timeLabelToMinutes(schedule.close);
+
+    if (openMinutes != null) {
+      const openOffset = ((openMinutes - rangeStartHour * 60) / 60) * pixelsPerHour;
+      if (openOffset > 0) {
+        overlays.push({
+          top: 0,
+          height: openOffset,
+          label: 'Извън работно време',
+          kind: 'outside-hours',
+        });
+      }
+    }
+
+    if (closeMinutes != null) {
+      const closeOffset = ((closeMinutes - rangeStartHour * 60) / 60) * pixelsPerHour;
+      if (closeOffset < calendarHeight) {
+        overlays.push({
+          top: Math.max(closeOffset, 0),
+          height: Math.max(calendarHeight - closeOffset, 0),
+          label: 'Извън работно време',
+          kind: 'outside-hours',
+        });
+      }
+    }
+  }
+
+  for (const exception of exceptions) {
+    const window = getExceptionWindow(exception);
+    const top = Math.max((getMinuteOffset(window.startAt, rangeStartHour) / 60) * pixelsPerHour, 0);
+    const bottom = Math.min((getMinuteOffset(window.endAt, rangeStartHour) / 60) * pixelsPerHour, calendarHeight);
+    overlays.push({
+      id: exception.id,
+      top,
+      height: Math.max(bottom - top, 40),
+      label: exception.note?.trim() || getExceptionTypeLabel(exception.type),
+      kind: 'exception',
+      block: exception,
+    });
+  }
+
+  return overlays;
 }
 
 function getWaitlistStatusPresentation(status: WaitlistEntry['status']) {
@@ -520,6 +634,71 @@ function matchesCalendarStatusFilter(
 
 function isSecondaryOwnerState(ownerState?: string) {
   return SECONDARY_OWNER_STATES.includes((ownerState || 'pending') as (typeof SECONDARY_OWNER_STATES)[number]);
+}
+
+function isRequestOwnerState(ownerState?: string) {
+  return REQUEST_OWNER_STATES.includes((ownerState || 'pending') as (typeof REQUEST_OWNER_STATES)[number]);
+}
+
+function getCalendarOverlayClasses(kind: CalendarOverlay['kind']) {
+  if (kind === 'exception') {
+    return {
+      border: 'border-slate-400/70',
+      badge: 'border-slate-300 bg-white/95 text-slate-700',
+      background:
+        'repeating-linear-gradient(-45deg, rgba(100,116,139,0.18), rgba(100,116,139,0.18) 7px, rgba(226,232,240,0.82) 7px, rgba(226,232,240,0.82) 14px)',
+    };
+  }
+
+  if (kind === 'day-off') {
+    return {
+      border: 'border-slate-200/90',
+      badge: 'border-slate-200 bg-white/92 text-slate-600',
+      background: 'rgba(226,232,240,0.42)',
+    };
+  }
+
+  return {
+    border: 'border-slate-200/80',
+    badge: 'border-slate-200 bg-white/92 text-slate-500',
+    background:
+      'linear-gradient(180deg, rgba(226,232,240,0.35) 0%, rgba(241,245,249,0.52) 100%)',
+  };
+}
+
+function getAppointmentSurfaceStyle(appointment: Appointment) {
+  const ownerState = appointment.owner_view_state || appointment.status;
+  const isSecondary = isSecondaryOwnerState(ownerState);
+  const isRequest = isRequestOwnerState(ownerState);
+  const accent = appointment.service_color || appointment.staff_color || 'var(--color-primary)';
+
+  if (isSecondary) {
+    return {
+      accent,
+      isSecondary,
+      backgroundColor: 'rgba(248,250,252,0.97)',
+      borderColor: 'rgba(148,163,184,0.45)',
+      borderStyle: 'dashed' as const,
+    };
+  }
+
+  if (isRequest) {
+    return {
+      accent: '#f59e0b',
+      isSecondary,
+      backgroundColor: 'rgba(255,251,235,0.98)',
+      borderColor: 'rgba(245,158,11,0.42)',
+      borderStyle: 'solid' as const,
+    };
+  }
+
+  return {
+    accent,
+    isSecondary,
+    backgroundColor: colorWithAlpha(accent, '18', 'rgba(14, 165, 233, 0.1)'),
+    borderColor: colorWithAlpha(accent, '55', 'rgba(14, 165, 233, 0.3)'),
+    borderStyle: 'solid' as const,
+  };
 }
 
 function overlapsRange(startAt: string | Date, endAt: string | Date, otherStartAt: string | Date, otherEndAt: string | Date) {
@@ -589,7 +768,7 @@ export default function AdminCalendarPage() {
   const [touchMoveMode, setTouchMoveMode] = useState<'gesture' | 'confirm' | null>(null);
   const [pendingTouchPlacement, setPendingTouchPlacement] = useState<{ startAt: string; staffId: string } | null>(null);
   const [calendarView, setCalendarView] = useState<'grid' | 'list' | 'week' | 'month'>('grid');
-  const [calendarZoom, setCalendarZoom] = useState<'compact' | 'comfortable' | 'precise'>('comfortable');
+  const [calendarDensity, setCalendarDensity] = useState<CalendarDensity>('comfortable');
   const [staffFilter, setStaffFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<CalendarStatusFilter>('active');
   const [showUnavailable, setShowUnavailable] = useState(true);
@@ -1362,8 +1541,32 @@ export default function AdminCalendarPage() {
       ),
     [calendarBoard?.exceptions, currentDate, staffFilter],
   );
-  const calendarRange = useMemo(() => buildCalendarRange(appointmentsInView), [appointmentsInView]);
-  const pixelsPerHour = calendarZoom === 'compact' ? 72 : calendarZoom === 'precise' ? 112 : 88;
+  const calendarRangeDays = useMemo(
+    () => (calendarView === 'week' ? weekDays : [currentDate]),
+    [calendarView, currentDate, weekDays],
+  );
+  const calendarRangeExceptions = useMemo(
+    () =>
+      (calendarBoard?.exceptions ?? []).filter((exception) => {
+        if (staffFilter !== 'all' && exception.staff_id !== staffFilter) {
+          return false;
+        }
+
+        return calendarRangeDays.some((day) => isSameDay(new Date(exception.start_at), day));
+      }),
+    [calendarBoard?.exceptions, calendarRangeDays, staffFilter],
+  );
+  const calendarRange = useMemo(
+    () =>
+      buildCalendarRange({
+        appointments: appointmentsInView,
+        staffMembers: visibleStaffColumns,
+        exceptions: calendarRangeExceptions,
+        days: calendarRangeDays,
+      }),
+    [appointmentsInView, calendarRangeDays, calendarRangeExceptions, visibleStaffColumns],
+  );
+  const pixelsPerHour = calendarDensity === 'compact' ? 72 : 92;
   const desktopCalendarGrid = useMemo(
     () => buildCalendarGridMetrics(calendarRange, pixelsPerHour),
     [calendarRange, pixelsPerHour],
@@ -1483,6 +1686,14 @@ export default function AdminCalendarPage() {
 
     return 'Седмичен изглед по дни и специалисти';
   }, [calendarView, currentDate]);
+  const calendarContextBadge = useMemo(() => {
+    if (calendarView === 'week') {
+      const weekEnd = addDays(rangeEndExclusive, -1);
+      return `${format(rangeStart, 'EEE d MMM', { locale: bg })} - ${format(weekEnd, 'EEE d MMM', { locale: bg })}`;
+    }
+
+    return format(currentDate, 'EEE d MMM', { locale: bg });
+  }, [calendarView, currentDate, rangeEndExclusive, rangeStart]);
 
   const calendarEmptyState = useMemo(() => {
     if (appointmentsInView.length || visibleExceptions.length) {
@@ -1968,6 +2179,7 @@ export default function AdminCalendarPage() {
     const startTime = format(new Date(appointment.start_at), 'HH:mm');
     const endTime = format(new Date(appointment.end_at), 'HH:mm');
     const mode = height < 30 ? 'micro' : height < 72 ? 'tiny' : height < 104 ? 'compact' : 'full';
+    const statusPresentation = getOwnerStatusPresentation(appointment);
 
     if (mode === 'micro') {
       return (
@@ -1982,11 +2194,18 @@ export default function AdminCalendarPage() {
 
     return (
       <>
-        <div className="flex items-center gap-2">
-          <span className={`h-2.5 w-2.5 flex-shrink-0 rounded-full ${getAppointmentStatusCueClass(appointment)}`} />
-          <p className="text-[11px] font-bold text-gray-700">
-            {startTime} - {endTime}
-          </p>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className={`h-2.5 w-2.5 flex-shrink-0 rounded-full ${getAppointmentStatusCueClass(appointment)}`} />
+            <p className="truncate text-[11px] font-bold text-gray-700">
+              {startTime} - {endTime}
+            </p>
+          </div>
+          {mode === 'full' && (
+            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusPresentation.cls}`}>
+              {statusPresentation.label}
+            </span>
+          )}
         </div>
         <p className={`mt-1 font-black text-gray-900 ${mode === 'tiny' ? 'line-clamp-1 text-[13px]' : 'line-clamp-2 text-sm'}`}>
           {appointment.client_name}
@@ -2224,6 +2443,14 @@ export default function AdminCalendarPage() {
                   <p className="mt-1 text-xs capitalize text-gray-500 sm:text-sm">
                     {calendarSubtitle}
                   </p>
+                  <div className="mt-3 hidden items-center gap-2 lg:flex">
+                    <span className="rounded-full border border-[var(--color-primary)]/15 bg-[var(--color-primary)]/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--color-primary)]">
+                      {calendarView === 'week' ? 'Седмичен изглед' : 'Дневен изглед'}
+                    </span>
+                    <span className="rounded-full border border-gray-200 bg-white px-3 py-1 text-[11px] font-semibold text-gray-600">
+                      {calendarContextBadge}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
@@ -2268,6 +2495,22 @@ export default function AdminCalendarPage() {
                       ))}
                     </select>
                   </div>
+                  <div className="hidden items-center rounded-2xl border border-gray-200 bg-white p-1 lg:flex">
+                    {CALENDAR_DENSITY_OPTIONS.map((option) => (
+                      <button
+                        key={option.key}
+                        type="button"
+                        onClick={() => setCalendarDensity(option.key)}
+                        className={`rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
+                          calendarDensity === option.key
+                            ? 'bg-gray-900 text-white shadow-sm'
+                            : 'text-gray-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
 	                  <button
 		                    onClick={() =>
                           setCurrentDate(
@@ -2307,7 +2550,8 @@ export default function AdminCalendarPage() {
                     className="flex h-11 items-center gap-2 rounded-2xl border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50"
                   >
                     <CalendarDays className="w-4 h-4" />
-                    Избери дата
+                    <span className="hidden sm:inline">{calendarContextBadge}</span>
+                    <span className="sm:hidden">Дата</span>
                   </button>
                   {!isToday(currentDate) && (
                     <button
@@ -2388,21 +2632,47 @@ export default function AdminCalendarPage() {
 	                    </div>
 
                       <div className="flex flex-col gap-2 rounded-2xl border border-dashed border-gray-200 bg-gray-50/80 p-2.5 lg:flex-row lg:items-center lg:justify-between">
-                        <div className="flex flex-wrap gap-2">
-                          {STATUS_FILTER_OPTIONS.map((option) => (
-                            <button
-                              key={option.key}
-                              type="button"
-                              onClick={() => setStatusFilter(option.key as typeof statusFilter)}
-                              className={`rounded-2xl px-3 py-2 text-xs font-semibold transition-colors ${
-                                statusFilter === option.key
-                                  ? 'bg-gray-900 text-white'
-                                  : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-100'
-                              }`}
-                            >
-                              {option.label}
-                            </button>
-                          ))}
+                        <div className="flex flex-col gap-2">
+                          <div className="flex flex-wrap gap-2">
+                            {STATUS_FILTER_OPTIONS.map((option) => (
+                              <button
+                                key={option.key}
+                                type="button"
+                                onClick={() => setStatusFilter(option.key as typeof statusFilter)}
+                                className={`rounded-2xl px-3 py-2 text-xs font-semibold transition-colors ${
+                                  statusFilter === option.key
+                                    ? 'bg-gray-900 text-white'
+                                    : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-100'
+                                }`}
+                              >
+                                {option.label}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="hidden flex-wrap items-center gap-2 lg:flex">
+                            <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white px-3 py-1 text-[11px] font-semibold text-emerald-700">
+                              <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                              Запазени
+                            </span>
+                            <span className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-white px-3 py-1 text-[11px] font-semibold text-amber-700">
+                              <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
+                              Заявки
+                            </span>
+                            <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-600">
+                              <span
+                                className="h-2.5 w-2.5 rounded-sm"
+                                style={{
+                                  background:
+                                    'repeating-linear-gradient(-45deg, rgba(100,116,139,0.42), rgba(100,116,139,0.42) 4px, rgba(255,255,255,0.65) 4px, rgba(255,255,255,0.65) 8px)',
+                                }}
+                              />
+                              Блокирано
+                            </span>
+                            <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-500">
+                              <span className="h-2.5 w-2.5 rounded-sm bg-slate-200" />
+                              Извън работно време
+                            </span>
+                          </div>
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2">
@@ -2501,7 +2771,7 @@ export default function AdminCalendarPage() {
                                 <MobileDayBoard
                                   currentDate={currentDate}
                                   staffMembers={mobileBoardStaff}
-                                  calendarZoom={calendarZoom}
+                                  calendarZoom={calendarDensity}
                                   showUnavailable={showUnavailable}
                                   selectedRecordId={selectedRecordId}
                                   touchMoveTarget={touchMoveTarget}
@@ -2626,10 +2896,16 @@ export default function AdminCalendarPage() {
                                 </div>
                               </div>
                             ) : calendarView === 'week' ? (
-	                        <div className="hidden lg:block overflow-x-auto rounded-[28px] border border-white/70 bg-white/90 shadow-sm">
+	                        <div
+                            className="hidden lg:block overflow-x-auto overflow-y-hidden rounded-[28px] border border-white/70 bg-white/90 shadow-sm overscroll-x-contain"
+                            style={{ scrollbarGutter: 'stable both-edges' }}
+                          >
                           <div
-                            className="grid min-w-[1480px]"
-                            style={{ gridTemplateColumns: `64px repeat(${Math.max(weekGridColumns.length, 1)}, minmax(156px, 1fr))` }}
+                            className="grid"
+                            style={{
+                              minWidth: `${72 + Math.max(weekGridColumns.length, 1) * (calendarDensity === 'compact' ? 148 : 164)}px`,
+                              gridTemplateColumns: `72px repeat(${Math.max(weekGridColumns.length, 1)}, minmax(${calendarDensity === 'compact' ? 148 : 164}px, 1fr))`,
+                            }}
                           >
                             <div className="sticky top-0 z-10 border-b border-r border-gray-100 bg-white/95 px-3 py-4 backdrop-blur">
                               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">Час</p>
@@ -2664,8 +2940,8 @@ export default function AdminCalendarPage() {
                                 const top = (hour - calendarRange.startHour) * pixelsPerHour;
                                 return (
                                   <div key={hour}>
-                                    <div className="absolute left-0 right-0 border-t border-dashed border-gray-200" style={{ top: `${top}px` }} />
-                                    <div className="absolute left-0 top-0 -translate-y-1/2 px-3 text-xs font-semibold text-gray-400" style={{ top: `${top}px` }}>
+                                    <div className="absolute left-0 right-0 border-t border-slate-200" style={{ top: `${top}px` }} />
+                                    <div className="absolute left-2 top-0 -translate-y-1/2 rounded-full bg-white/95 px-2 py-1 text-[11px] font-semibold text-slate-500 shadow-sm" style={{ top: `${top}px` }}>
                                       {String(hour).padStart(2, '0')}:00
                                     </div>
                                   </div>
@@ -2692,77 +2968,28 @@ export default function AdminCalendarPage() {
                                 {showUnavailable && (() => {
                                   const dayKey = getWorkingDayKey(column.day);
                                   const schedule = column.staff.working_hours?.[dayKey];
-                                  const overlays: Array<{
-                                    id?: string;
-                                    top: number;
-                                    height: number;
-                                    label: string;
-                                    kind: 'closed' | 'exception';
-                                    block?: StaffException;
-                                  }> = [];
-
-                                  if (!schedule?.isOpen) {
-                                    overlays.push({
-                                      top: 0,
-                                      height: calendarHeight,
-                                      label: 'Почивен ден',
-                                      kind: 'closed',
-                                    });
-                                  } else {
-                                    const [openHour, openMinute] = schedule.open.split(':').map(Number);
-                                    const [closeHour, closeMinute] = schedule.close.split(':').map(Number);
-                                    const openOffset = (openHour * 60 + openMinute - calendarRange.startHour * 60) / 60 * pixelsPerHour;
-                                    const closeOffset = (closeHour * 60 + closeMinute - calendarRange.startHour * 60) / 60 * pixelsPerHour;
-
-                                    if (openOffset > 0) {
-                                      overlays.push({
-                                        top: 0,
-                                        height: openOffset,
-                                        label: 'Извън работно време',
-                                        kind: 'closed',
-                                      });
-                                    }
-                                    if (closeOffset < calendarHeight) {
-                                      overlays.push({
-                                        top: Math.max(closeOffset, 0),
-                                        height: Math.max(calendarHeight - closeOffset, 0),
-                                        label: 'Извън работно време',
-                                        kind: 'closed',
-                                      });
-                                    }
-                                  }
-
-                                  for (const exception of column.exceptions) {
-                                    const window = getExceptionWindow(exception);
-                                    const top = Math.max((getMinuteOffset(window.startAt, calendarRange.startHour) / 60) * pixelsPerHour, 0);
-                                    const bottom = Math.min((getMinuteOffset(window.endAt, calendarRange.startHour) / 60) * pixelsPerHour, calendarHeight);
-                                    const height = Math.max(bottom - top, 40);
-                                    overlays.push({
-                                      id: exception.id,
-                                      top,
-                                      height,
-                                      label: exception.note || 'Блокиран интервал',
-                                      kind: 'exception',
-                                      block: exception,
-                                    });
-                                  }
+                                  const overlays = buildCalendarOverlays({
+                                    schedule,
+                                    exceptions: column.exceptions,
+                                    calendarHeight,
+                                    rangeStartHour: calendarRange.startHour,
+                                    pixelsPerHour,
+                                    getExceptionWindow,
+                                  });
 
                                   return overlays.map((overlay, overlayIndex) => (
                                     <div
                                       key={overlay.id || `${column.key}-overlay-${overlayIndex}`}
-                                      className={`absolute left-0 right-0 z-0 border-y ${
-                                        overlay.kind === 'exception' ? 'border-slate-300/70' : 'border-gray-200/80'
-                                      }`}
+                                      className={`absolute left-0 right-0 z-[1] border-y ${getCalendarOverlayClasses(overlay.kind).border}`}
                                       style={{
                                         top: `${overlay.top}px`,
                                         height: `${overlay.height}px`,
-                                        background:
-                                          overlay.kind === 'exception'
-                                            ? 'repeating-linear-gradient(-45deg, rgba(148,163,184,0.16), rgba(148,163,184,0.16) 6px, rgba(148,163,184,0.05) 6px, rgba(148,163,184,0.05) 12px)'
-                                            : 'rgba(148,163,184,0.08)',
+                                        background: getCalendarOverlayClasses(overlay.kind).background,
                                       }}
                                     >
-                                      <span className="absolute left-2 top-2 rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-500 shadow-sm">
+                                      <span
+                                        className={`absolute left-2 top-2 rounded-full border px-2 py-1 text-[10px] font-semibold shadow-sm ${getCalendarOverlayClasses(overlay.kind).badge}`}
+                                      >
                                         {overlay.label}
                                       </span>
                                       {overlay.block && (
@@ -2789,6 +3016,17 @@ export default function AdminCalendarPage() {
                                     </div>
                                   ));
                                 })()}
+
+                                {hourSlots.slice(0, -1).map((hour, hourIndex) => (
+                                  <div
+                                    key={`band-${column.key}-${hour}`}
+                                    className={`absolute inset-x-0 z-0 ${hourIndex % 2 === 0 ? 'bg-white/0' : 'bg-slate-50/45'}`}
+                                    style={{
+                                      top: `${(hour - calendarRange.startHour) * pixelsPerHour}px`,
+                                      height: `${pixelsPerHour}px`,
+                                    }}
+                                  />
+                                ))}
 
                                 {moveDropSlots.map((slot) => {
                                   const [hour, minute] = slot.label.split(':').map(Number);
@@ -2881,13 +3119,8 @@ export default function AdminCalendarPage() {
                                     pixelsPerHour,
                                     6,
                                   );
-                                  const ownerState = appointment.owner_view_state || appointment.status;
                                   const isSelected = selectedRecordId === appointment.id;
-                                  const isSecondary = isSecondaryOwnerState(ownerState);
-                                  const accent = appointment.service_color || appointment.staff_color || 'var(--color-primary)';
-                                  const soft = isSecondary
-                                    ? 'rgba(248,250,252,0.95)'
-                                    : colorWithAlpha(accent, '18', 'rgba(14, 165, 233, 0.1)');
+                                  const surface = getAppointmentSurfaceStyle(appointment);
 
                                   return (
                                     <button
@@ -2904,19 +3137,24 @@ export default function AdminCalendarPage() {
                                         );
                                       }}
                                       onClick={() => focusRecord(appointment.id, appointment.start_at)}
-                                      className={`absolute left-2 right-2 z-[2] rounded-2xl border px-3 py-2 text-left shadow-sm transition-transform hover:scale-[1.01] ${
+                                      className={`absolute left-2 right-2 z-[2] overflow-hidden rounded-2xl border px-3 py-2 text-left shadow-sm transition-transform hover:scale-[1.01] ${
                                         isSelected ? 'ring-2 ring-[var(--color-primary)]/25' : ''
-                                      } ${isSecondary ? 'opacity-45 saturate-50' : ''} ${
+                                      } ${surface.isSecondary ? 'opacity-55 saturate-[0.72]' : ''} ${
                                         draggedAppointmentId === appointment.id ? 'opacity-20 scale-[0.99]' : ''
-                                      } overflow-hidden`}
+                                      }`}
                                       style={{
                                         top: `${metrics.top}px`,
                                         height: `${metrics.height}px`,
-                                        borderColor: colorWithAlpha(accent, isSecondary ? '28' : '55', 'rgba(14, 165, 233, 0.3)'),
-                                        backgroundColor: soft,
-                                        borderStyle: isSecondary ? 'dashed' : 'solid',
+                                        borderColor: surface.borderColor,
+                                        backgroundColor: surface.backgroundColor,
+                                        borderStyle: surface.borderStyle,
                                       }}
                                     >
+                                      <span
+                                        aria-hidden
+                                        className="absolute bottom-2 left-1.5 top-2 w-1 rounded-full"
+                                        style={{ backgroundColor: surface.accent }}
+                                      />
                                       {renderAppointmentCardBody(appointment, metrics.height)}
                                     </button>
                                   );
@@ -2927,10 +3165,16 @@ export default function AdminCalendarPage() {
                         </div>
 	                      ) : calendarView === 'grid' ? (
 			                    <div className="hidden lg:block">
-		                      <div className="overflow-x-auto rounded-[28px] border border-white/70 bg-white/90 shadow-sm">
+		                      <div
+                              className="overflow-x-auto overflow-y-hidden rounded-[28px] border border-white/70 bg-white/90 shadow-sm overscroll-x-contain"
+                              style={{ scrollbarGutter: 'stable both-edges' }}
+                            >
 	                        <div
-	                          className="grid min-w-[760px]"
-	                          style={{ gridTemplateColumns: `64px repeat(${Math.max(visibleStaffColumns.length, 1)}, minmax(190px, 1fr))` }}
+	                          className="grid"
+	                          style={{
+                              minWidth: `${72 + Math.max(visibleStaffColumns.length, 1) * (calendarDensity === 'compact' ? 188 : 212)}px`,
+                              gridTemplateColumns: `72px repeat(${Math.max(visibleStaffColumns.length, 1)}, minmax(${calendarDensity === 'compact' ? 188 : 212}px, 1fr))`,
+                            }}
 	                        >
 	                          <div className="sticky top-0 z-10 border-b border-r border-gray-100 bg-white/95 px-3 py-4 backdrop-blur">
 	                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">Час</p>
@@ -2961,10 +3205,10 @@ export default function AdminCalendarPage() {
 	                              return (
 	                                <div key={hour}>
 	                                  <div
-	                                    className="absolute left-0 right-0 border-t border-dashed border-gray-200"
+	                                    className="absolute left-0 right-0 border-t border-slate-200"
 	                                    style={{ top: `${top}px` }}
 	                                  />
-	                                  <div className="absolute left-0 top-0 -translate-y-1/2 px-3 text-xs font-semibold text-gray-400" style={{ top: `${top}px` }}>
+	                                  <div className="absolute left-2 top-0 -translate-y-1/2 rounded-full bg-white/95 px-2 py-1 text-[11px] font-semibold text-slate-500 shadow-sm" style={{ top: `${top}px` }}>
 	                                    {String(hour).padStart(2, '0')}:00
 	                                  </div>
 	                                </div>
@@ -2990,77 +3234,28 @@ export default function AdminCalendarPage() {
 		                                const dayKey = getWorkingDayKey(currentDate);
 		                                const schedule = staffMember.working_hours?.[dayKey];
 		                                const staffExceptions = visibleExceptions.filter((exception) => exception.staff_id === staffMember.id);
-                                const overlays: Array<{
-                                  id?: string;
-                                  top: number;
-                                  height: number;
-                                  label: string;
-                                  kind: 'closed' | 'exception';
-                                  block?: StaffException;
-                                }> = [];
-
-		                                if (!schedule?.isOpen) {
-		                                  overlays.push({
-		                                    top: 0,
-		                                    height: calendarHeight,
-		                                    label: 'Почивен ден',
-		                                    kind: 'closed',
-		                                  });
-		                                } else {
-		                                  const [openHour, openMinute] = schedule.open.split(':').map(Number);
-		                                  const [closeHour, closeMinute] = schedule.close.split(':').map(Number);
-		                                  const openOffset = (openHour * 60 + openMinute - calendarRange.startHour * 60) / 60 * pixelsPerHour;
-		                                  const closeOffset = (closeHour * 60 + closeMinute - calendarRange.startHour * 60) / 60 * pixelsPerHour;
-
-		                                  if (openOffset > 0) {
-		                                    overlays.push({
-		                                      top: 0,
-		                                      height: openOffset,
-		                                      label: 'Извън работно време',
-		                                      kind: 'closed',
-		                                    });
-		                                  }
-		                                  if (closeOffset < calendarHeight) {
-		                                    overlays.push({
-		                                      top: Math.max(closeOffset, 0),
-		                                      height: Math.max(calendarHeight - closeOffset, 0),
-		                                      label: 'Извън работно време',
-		                                      kind: 'closed',
-		                                    });
-		                                  }
-		                                }
-
-                                for (const exception of staffExceptions) {
-                                  const window = getExceptionWindow(exception);
-                                  const top = Math.max((getMinuteOffset(window.startAt, calendarRange.startHour) / 60) * pixelsPerHour, 0);
-                                  const bottom = Math.min((getMinuteOffset(window.endAt, calendarRange.startHour) / 60) * pixelsPerHour, calendarHeight);
-                                  const height = Math.max(bottom - top, 40);
-                                  overlays.push({
-                                    id: exception.id,
-                                    top,
-                                    height,
-                                    label: exception.note || 'Блокиран интервал',
-                                    kind: 'exception',
-                                    block: exception,
-                                  });
-                                }
+                                const overlays = buildCalendarOverlays({
+                                  schedule,
+                                  exceptions: staffExceptions,
+                                  calendarHeight,
+                                  rangeStartHour: calendarRange.startHour,
+                                  pixelsPerHour,
+                                  getExceptionWindow,
+                                });
 
                                 return overlays.map((overlay, index) => (
                                   <div
                                     key={overlay.id || `${staffMember.id}-overlay-${index}`}
-                                    className={`absolute left-0 right-0 z-0 border-y ${
-                                      overlay.kind === 'exception' ? 'border-slate-300/70' : 'border-gray-200/80'
-                                    }`}
+                                    className={`absolute left-0 right-0 z-[1] border-y ${getCalendarOverlayClasses(overlay.kind).border}`}
 		                                    style={{
 		                                      top: `${overlay.top}px`,
 		                                      height: `${overlay.height}px`,
-		                                      background:
-		                                        overlay.kind === 'exception'
-		                                          ? 'repeating-linear-gradient(-45deg, rgba(148,163,184,0.16), rgba(148,163,184,0.16) 6px, rgba(148,163,184,0.05) 6px, rgba(148,163,184,0.05) 12px)'
-		                                          : 'rgba(148,163,184,0.08)',
+		                                      background: getCalendarOverlayClasses(overlay.kind).background,
 		                                    }}
                                   >
-                                    <span className="absolute left-2 top-2 rounded-full bg-white/90 px-2 py-1 text-[10px] font-semibold text-slate-500 shadow-sm">
+                                    <span
+                                      className={`absolute left-2 top-2 rounded-full border px-2 py-1 text-[10px] font-semibold shadow-sm ${getCalendarOverlayClasses(overlay.kind).badge}`}
+                                    >
                                       {overlay.label}
                                     </span>
                                     {overlay.block && (
@@ -3087,6 +3282,17 @@ export default function AdminCalendarPage() {
                                   </div>
                                 ));
                               })()}
+
+                              {hourSlots.slice(0, -1).map((hour, hourIndex) => (
+                                <div
+                                  key={`band-${staffMember.id}-${hour}`}
+                                  className={`absolute inset-x-0 z-0 ${hourIndex % 2 === 0 ? 'bg-white/0' : 'bg-slate-50/45'}`}
+                                  style={{
+                                    top: `${(hour - calendarRange.startHour) * pixelsPerHour}px`,
+                                    height: `${pixelsPerHour}px`,
+                                  }}
+                                />
+                              ))}
 
 		                              {moveDropSlots.map((slot) => (
 		                                <div
@@ -3180,13 +3386,8 @@ export default function AdminCalendarPage() {
 		                                  pixelsPerHour,
 		                                  6,
 		                                );
-		                                const ownerState = appointment.owner_view_state || appointment.status;
 		                                const isSelected = selectedRecordId === appointment.id;
-		                                const isSecondary = isSecondaryOwnerState(ownerState);
-		                                const accent = appointment.service_color || appointment.staff_color || 'var(--color-primary)';
-		                                const soft = isSecondary
-		                                  ? 'rgba(248,250,252,0.95)'
-		                                  : colorWithAlpha(accent, '18', 'rgba(14, 165, 233, 0.1)');
+		                                const surface = getAppointmentSurfaceStyle(appointment);
 
 		                                return (
 			                                  <button
@@ -3203,22 +3404,27 @@ export default function AdminCalendarPage() {
                                         );
                                       }}
 				                                    onClick={() => focusRecord(appointment.id, appointment.start_at)}
-			                                    className={`absolute left-2 right-2 z-[2] rounded-2xl border px-3 py-2 text-left shadow-sm transition-transform hover:scale-[1.01] select-none ${
+			                                    className={`absolute left-2 right-2 z-[2] overflow-hidden rounded-2xl border px-3 py-2 text-left shadow-sm transition-transform hover:scale-[1.01] select-none ${
 			                                      isSelected ? 'ring-2 ring-[var(--color-primary)]/25' : ''
-			                                    } ${isSecondary ? 'opacity-45 saturate-50' : ''} ${
+			                                    } ${surface.isSecondary ? 'opacity-55 saturate-[0.72]' : ''} ${
                                         draggedAppointmentId === appointment.id ? 'opacity-20 scale-[0.99]' : ''
-                                      } overflow-hidden`}
+                                      }`}
 		                                    style={{
 		                                      top: `${metrics.top}px`,
 		                                      height: `${metrics.height}px`,
-		                                      borderColor: colorWithAlpha(accent, isSecondary ? '28' : '55', 'rgba(14, 165, 233, 0.3)'),
-		                                      backgroundColor: soft,
-		                                      borderStyle: isSecondary ? 'dashed' : 'solid',
+		                                      borderColor: surface.borderColor,
+		                                      backgroundColor: surface.backgroundColor,
+		                                      borderStyle: surface.borderStyle,
 		                                      boxShadow: isSelected ? '0 0 0 1px rgba(99, 102, 241, 0.2)' : undefined,
                                           WebkitTouchCallout: 'none',
                                           touchAction: touchMoveTarget ? 'none' : 'manipulation',
 		                                    }}
 		                                  >
+                                    <span
+                                      aria-hidden
+                                      className="absolute bottom-2 left-1.5 top-2 w-1 rounded-full"
+                                      style={{ backgroundColor: surface.accent }}
+                                    />
 		                                    {renderAppointmentCardBody(appointment, metrics.height)}
 			                                  </button>
 			                                );

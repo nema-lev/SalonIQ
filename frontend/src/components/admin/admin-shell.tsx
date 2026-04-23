@@ -22,26 +22,34 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         <>{children}</>
       ) : (
         <div
-          className="min-h-screen bg-gray-50"
-          style={{ minHeight: '100vh', background: '#f5f6fb', width: '100%', overflowX: 'clip' }}
+          className="h-dvh overflow-hidden bg-gray-50"
+          style={{
+            height: '100dvh',
+            minHeight: '100dvh',
+            background: '#f5f6fb',
+            width: '100%',
+            overflow: 'hidden',
+          }}
         >
           <AdminSidebar mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
-          <div className="min-h-screen min-w-0" style={{ minHeight: '100vh', minWidth: 0 }}>
+          <div className="min-h-0 min-w-0" style={{ minHeight: 0, minWidth: 0, height: '100%' }}>
             <div
-              className="flex min-h-screen min-w-0 flex-col"
-              style={{ display: 'flex', minHeight: '100vh', minWidth: 0 }}
+              className="flex h-full min-h-0 min-w-0 flex-col"
+              style={{ display: 'flex', height: '100%', minHeight: 0, minWidth: 0 }}
             >
               <AdminHeader onOpenMenu={() => setMobileNavOpen(true)} />
               <main
                 data-admin-scroll-root
-                className="flex-1 overflow-y-auto overflow-x-hidden"
+                className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
                 style={{
                   flex: 1,
+                  minHeight: 0,
                   padding: '20px 16px calc(env(safe-area-inset-bottom, 0px) + 104px)',
                   overflowY: 'auto',
                   overflowX: 'clip',
                   overscrollBehaviorX: 'none',
                   overscrollBehaviorY: 'contain',
+                  scrollbarGutter: 'stable',
                   WebkitOverflowScrolling: 'touch',
                 }}
               >

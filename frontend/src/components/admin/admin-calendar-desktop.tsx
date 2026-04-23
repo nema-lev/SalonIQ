@@ -56,6 +56,8 @@ type AdminCalendarDesktopProps = {
   dropPreview: CalendarDropPreview;
   activeDragDurationMinutes: number | null;
   requestsPanel: ReactNode;
+  feedbackMessage: string | null;
+  showRequestsPanel: boolean;
   onShiftDate: (direction: 'prev' | 'next') => void;
   onJumpToToday: () => void;
   onPickDate: (value: string) => void;
@@ -85,6 +87,8 @@ export function AdminCalendarDesktop({
   dropPreview,
   activeDragDurationMinutes,
   requestsPanel,
+  feedbackMessage,
+  showRequestsPanel,
   onShiftDate,
   onJumpToToday,
   onPickDate,
@@ -97,8 +101,11 @@ export function AdminCalendarDesktop({
   onStartAppointmentDrag,
   registerColumn,
 }: AdminCalendarDesktopProps) {
+  const minColumnWidth = dayColumns.length === 1 ? 420 : 320;
+  const maxColumnWidth = dayColumns.length === 1 ? 760 : dayColumns.length === 2 ? 520 : 420;
+
   return (
-    <div className="flex min-h-full flex-col gap-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
       <section className="rounded-[30px] border border-white/70 bg-white/92 px-4 py-4 shadow-[0_24px_60px_rgba(15,23,42,0.08)] backdrop-blur">
         <div className="flex flex-wrap items-center gap-2">
           <div className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 p-1">
@@ -179,7 +186,7 @@ export function AdminCalendarDesktop({
         </div>
       </section>
 
-      <div className="grid min-h-0 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className={`grid min-h-0 flex-1 gap-4 ${showRequestsPanel ? 'xl:grid-cols-[minmax(0,1fr)_332px]' : 'grid-cols-1'}`}>
         <section className="min-h-0 overflow-hidden rounded-[34px] border border-white/70 bg-white/95 shadow-[0_28px_80px_rgba(15,23,42,0.08)] backdrop-blur">
           <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
             <div>
@@ -191,6 +198,8 @@ export function AdminCalendarDesktop({
             <div className="rounded-full border px-4 py-2 text-sm font-semibold">
               {previewLabel ? (
                 <span className="text-emerald-700">{previewLabel}</span>
+              ) : feedbackMessage ? (
+                <span className="text-emerald-700">{feedbackMessage}</span>
               ) : (
                 <span className="text-slate-500">
                   {view === 'day'
@@ -226,8 +235,10 @@ export function AdminCalendarDesktop({
 
               <div className="min-w-0 flex-1 overflow-auto">
                 <div
-                  className="grid min-w-[840px]"
-                  style={{ gridTemplateColumns: `repeat(${Math.max(dayColumns.length, 1)}, minmax(280px, 1fr))` }}
+                  className="grid w-max min-w-full"
+                  style={{
+                    gridTemplateColumns: `repeat(${Math.max(dayColumns.length, 1)}, minmax(${minColumnWidth}px, ${maxColumnWidth}px))`,
+                  }}
                 >
                   {dayColumns.map(({ staff, appointments, exceptions }) => {
                     const overlays = buildExceptionBlocks(
@@ -343,6 +354,11 @@ export function AdminCalendarDesktop({
                             const accent = isRequestOwnerState(appointment)
                               ? tone.accent
                               : appointment.service_color || appointment.staff_color || '#0f172a';
+                            const canMove = !isCancelledCalendarItem(appointment);
+                            const isCompact = metrics.height < 94;
+                            const isVeryCompact = metrics.height < 78;
+                            const showService = metrics.height >= 68;
+                            const showRequestChip = isRequestOwnerState(appointment) && !isVeryCompact;
 
                             return (
                               <article
@@ -362,49 +378,62 @@ export function AdminCalendarDesktop({
                                   opacity: isSecondary ? 0.7 : 1,
                                 }}
                               >
-                                <div className="flex h-full flex-col px-3 py-3">
+                                <button
+                                  type="button"
+                                  onClick={() => onOpenDetails(appointment.id)}
+                                  className={`absolute inset-y-0 right-0 rounded-[24px] ${canMove ? 'left-14' : 'left-0'}`}
+                                  aria-label={`Отвори детайли за часа на ${appointment.client_name}`}
+                                />
+
+                                {canMove && (
+                                  <button
+                                    type="button"
+                                    onPointerDown={(event) => onStartAppointmentDrag(event, appointment)}
+                                    className="absolute left-3 top-1/2 z-[2] flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-2xl border border-slate-200 bg-white/94 text-slate-500 shadow-sm touch-none cursor-grab active:cursor-grabbing"
+                                    aria-label={`Премести часа на ${appointment.client_name}`}
+                                  >
+                                    <GripVertical className="h-4 w-4" />
+                                  </button>
+                                )}
+
+                                <div className={`relative z-[1] flex h-full flex-col py-3 pr-3 pointer-events-none ${canMove ? 'pl-14' : 'pl-3'}`}>
                                   <div className="flex items-start justify-between gap-2">
                                     <div className="min-w-0">
                                       <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                                         {formatTimeLabel(appointment.start_at)} - {formatTimeLabel(appointment.end_at)}
                                       </p>
-                                      <button
-                                        type="button"
-                                        onClick={() => onOpenDetails(appointment.id)}
-                                        className="mt-1 w-full truncate text-left text-sm font-black text-slate-900"
+                                      <p
+                                        className={`truncate font-black text-slate-900 ${
+                                          isCompact ? 'mt-0.5 text-[13px] leading-4' : 'mt-1 text-sm'
+                                        }`}
                                       >
                                         {appointment.client_name}
-                                      </button>
-                                      <p className="mt-1 truncate text-xs text-slate-600">{appointment.service_name}</p>
+                                      </p>
+                                      {showService && (
+                                        <p className={`truncate text-slate-600 ${isCompact ? 'mt-0.5 text-[11px]' : 'mt-1 text-xs'}`}>
+                                          {appointment.service_name}
+                                        </p>
+                                      )}
                                     </div>
-                                    {isRequestOwnerState(appointment) && (
-                                      <span className={`shrink-0 rounded-full border px-2 py-1 text-[10px] font-semibold ${tone.chip}`}>
-                                        {appointment.owner_view_label || tone.label}
-                                      </span>
-                                    )}
-                                  </div>
-
-                                  <div className="mt-auto flex items-center gap-2 pt-3">
-                                    {!isCancelledCalendarItem(appointment) && (
-                                      <button
-                                        type="button"
-                                        onPointerDown={(event) => onStartAppointmentDrag(event, appointment)}
-                                        className="flex h-9 w-9 items-center justify-center rounded-2xl border border-slate-200 bg-white/92 text-slate-500 touch-none"
-                                        aria-label={`Премести часа на ${appointment.client_name}`}
-                                      >
-                                        <GripVertical className="h-4 w-4" />
-                                      </button>
-                                    )}
-                                    {isRequestOwnerState(appointment) && (
-                                      <button
-                                        type="button"
-                                        onClick={() => onConfirmAppointment(appointment.id)}
-                                        className="flex h-9 w-9 items-center justify-center rounded-2xl bg-emerald-600 text-white"
-                                        aria-label={`Потвърди часа на ${appointment.client_name}`}
-                                      >
-                                        <Check className="h-4 w-4" />
-                                      </button>
-                                    )}
+                                    <div className="pointer-events-auto flex shrink-0 items-start gap-2">
+                                      {showRequestChip && (
+                                        <span className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${tone.chip}`}>
+                                          {appointment.owner_view_label || tone.label}
+                                        </span>
+                                      )}
+                                      {isRequestOwnerState(appointment) && (
+                                        <button
+                                          type="button"
+                                          onClick={() => onConfirmAppointment(appointment.id)}
+                                          className={`flex shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-white ${
+                                            isVeryCompact ? 'h-8 w-8' : 'h-9 w-9'
+                                          }`}
+                                          aria-label={`Потвърди часа на ${appointment.client_name}`}
+                                        >
+                                          <Check className="h-4 w-4" />
+                                        </button>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
                               </article>
@@ -462,9 +491,11 @@ export function AdminCalendarDesktop({
           )}
         </section>
 
-        <aside className="min-h-0 overflow-hidden rounded-[34px] border border-white/70 bg-white/96 shadow-[0_28px_80px_rgba(15,23,42,0.08)] backdrop-blur">
-          {requestsPanel}
-        </aside>
+        {showRequestsPanel && (
+          <aside className="min-h-0 overflow-hidden rounded-[34px] border border-white/70 bg-white/96 shadow-[0_28px_80px_rgba(15,23,42,0.08)] backdrop-blur">
+            {requestsPanel}
+          </aside>
+        )}
       </div>
     </div>
   );

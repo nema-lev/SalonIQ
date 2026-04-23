@@ -2,8 +2,8 @@
 
 import { format } from 'date-fns';
 import { bg } from 'date-fns/locale';
-import { Check, ChevronDown, ChevronLeft, ChevronRight, GripVertical, Loader2, Plus } from 'lucide-react';
-import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Loader2, Plus } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import type {
   Appointment,
@@ -58,6 +58,7 @@ type AdminCalendarMobileProps = {
   isDragging: boolean;
   requestsCount: number;
   requestsContent: ReactNode;
+  feedbackMessage: string | null;
   onShiftDate: (direction: 'prev' | 'next') => void;
   onJumpToToday: () => void;
   onPickDate: (value: string) => void;
@@ -67,7 +68,7 @@ type AdminCalendarMobileProps = {
   onOpenBookingAtSlot: (day: Date, staffId: string, preferredSlot?: string) => void;
   onOpenDetails: (appointmentId: string) => void;
   onConfirmAppointment: (appointmentId: string) => void;
-  onStartAppointmentDrag: (event: ReactPointerEvent<HTMLButtonElement>, appointment: Appointment) => void;
+  onMoveAppointment: (appointment: Appointment) => void;
   registerColumn: (key: string, staffId: string, day: Date) => (node: HTMLDivElement | null) => void;
 };
 
@@ -89,6 +90,7 @@ export function AdminCalendarMobile({
   isDragging,
   requestsCount,
   requestsContent,
+  feedbackMessage,
   onShiftDate,
   onJumpToToday,
   onPickDate,
@@ -98,7 +100,7 @@ export function AdminCalendarMobile({
   onOpenBookingAtSlot,
   onOpenDetails,
   onConfirmAppointment,
-  onStartAppointmentDrag,
+  onMoveAppointment,
   registerColumn,
 }: AdminCalendarMobileProps) {
   const [sheetExpanded, setSheetExpanded] = useState(false);
@@ -113,7 +115,7 @@ export function AdminCalendarMobile({
   const selectedStaff = staffList.find((staff) => staff.id === selectedStaffId) || dayColumn?.staff || null;
 
   return (
-    <div className="flex min-h-full flex-col gap-4 pb-24 lg:hidden">
+    <div className="flex h-full min-h-0 flex-1 flex-col gap-4 lg:hidden">
       <section className="rounded-[28px] border border-white/70 bg-white/94 px-4 py-4 shadow-[0_20px_54px_rgba(15,23,42,0.08)] backdrop-blur">
         <div className="flex items-center gap-2">
           <button
@@ -193,13 +195,15 @@ export function AdminCalendarMobile({
         </div>
       </section>
 
-      <section className="min-h-0 overflow-hidden rounded-[30px] border border-white/70 bg-white/96 shadow-[0_26px_70px_rgba(15,23,42,0.08)] backdrop-blur">
+      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[30px] border border-white/70 bg-white/96 shadow-[0_26px_70px_rgba(15,23,42,0.08)] backdrop-blur">
         <div className="border-b border-slate-200 px-4 py-3">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
             {selectedStaff?.name || 'График'}
           </p>
           <p className="mt-1 text-sm font-semibold text-slate-600">
-            {previewLabel || (view === 'day' ? 'Календарът остава основният фокус.' : 'Седмицата е само вторичен преглед.')}
+            {previewLabel ||
+              feedbackMessage ||
+              (view === 'day' ? 'Календарът остава основният фокус.' : 'Седмицата е само вторичен преглед.')}
           </p>
         </div>
 
@@ -209,7 +213,14 @@ export function AdminCalendarMobile({
           </div>
         ) : view === 'day' ? (
           dayColumn ? (
-            <div className="h-[calc(100dvh-290px)] min-h-[560px] overflow-auto">
+            <div
+              className="min-h-0 flex-1 overflow-y-auto"
+              style={{
+                paddingBottom: sheetVisible ? 'calc(env(safe-area-inset-bottom, 0px) + 96px)' : '24px',
+                overscrollBehaviorY: 'contain',
+                WebkitOverflowScrolling: 'touch',
+              }}
+            >
               <div className="grid grid-cols-[62px_minmax(0,1fr)]">
                 <div className="sticky left-0 z-10 border-r border-slate-200 bg-white">
                   <div className="relative" style={{ height: gridMetrics.height }}>
@@ -307,6 +318,8 @@ export function AdminCalendarMobile({
                       ? tone.accent
                       : appointment.service_color || appointment.staff_color || '#0f172a';
                     const isSecondary = appointment.status === 'completed' || isCancelledCalendarItem(appointment);
+                    const isCompact = metrics.height < 90;
+                    const showService = metrics.height >= 68;
 
                     return (
                       <article
@@ -324,45 +337,53 @@ export function AdminCalendarMobile({
                           opacity: isSecondary ? 0.72 : 1,
                         }}
                       >
-                        <div className="flex h-full flex-col px-3 py-3">
+                        <button
+                          type="button"
+                          onClick={() => onOpenDetails(appointment.id)}
+                          className="absolute inset-0 rounded-[24px]"
+                          aria-label={`Отвори детайли за часа на ${appointment.client_name}`}
+                        />
+
+                        <div className="relative z-[1] flex h-full flex-col px-3 py-3 pointer-events-none">
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
                               <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                                 {formatTimeLabel(appointment.start_at)} - {formatTimeLabel(appointment.end_at)}
                               </p>
-                              <button
-                                type="button"
-                                onClick={() => onOpenDetails(appointment.id)}
-                                className="mt-1 w-full truncate text-left text-sm font-black text-slate-900"
+                              <p
+                                className={`truncate font-black text-slate-900 ${
+                                  isCompact ? 'mt-0.5 text-[13px] leading-4' : 'mt-1 text-sm'
+                                }`}
                               >
                                 {appointment.client_name}
-                              </button>
-                              <p className="mt-1 truncate text-xs text-slate-600">{appointment.service_name}</p>
+                              </p>
+                              {showService && (
+                                <p className={`truncate text-slate-600 ${isCompact ? 'mt-0.5 text-[11px]' : 'mt-1 text-xs'}`}>
+                                  {appointment.service_name}
+                                </p>
+                              )}
                             </div>
-                            {isRequestOwnerState(appointment) && (
-                              <button
-                                type="button"
-                                onClick={() => onConfirmAppointment(appointment.id)}
-                                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-white"
-                                aria-label={`Потвърди часа на ${appointment.client_name}`}
-                              >
-                                <Check className="h-4 w-4" />
-                              </button>
-                            )}
-                          </div>
-
-                          <div className="mt-auto flex items-center gap-2 pt-3">
-                            {!isCancelledCalendarItem(appointment) && (
-                              <button
-                                type="button"
-                                onPointerDown={(event) => onStartAppointmentDrag(event, appointment)}
-                                className="flex h-9 w-9 items-center justify-center rounded-2xl border border-slate-200 bg-white/92 text-slate-500 touch-none"
-                                aria-label={`Премести часа на ${appointment.client_name}`}
-                              >
-                                <GripVertical className="h-4 w-4" />
-                              </button>
-                            )}
-                            <div className="truncate text-xs text-slate-500">{dayColumn.staff.name}</div>
+                            <div className="pointer-events-auto flex shrink-0 items-center gap-2">
+                              {!isCancelledCalendarItem(appointment) && (
+                                <button
+                                  type="button"
+                                  onClick={() => onMoveAppointment(appointment)}
+                                  className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700"
+                                >
+                                  Премести
+                                </button>
+                              )}
+                              {isRequestOwnerState(appointment) && (
+                                <button
+                                  type="button"
+                                  onClick={() => onConfirmAppointment(appointment.id)}
+                                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-white"
+                                  aria-label={`Потвърди часа на ${appointment.client_name}`}
+                                >
+                                  <Check className="h-4 w-4" />
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </article>
@@ -375,45 +396,54 @@ export function AdminCalendarMobile({
             <div className="px-4 py-12 text-center text-sm text-slate-500">Няма активен специалист за деня.</div>
           )
         ) : (
-          <div className="space-y-3 px-4 py-4">
-            {weekRows.map((row) => (
-              <div key={row.day.toISOString()} className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-black text-slate-900">
-                    {format(row.day, "EEEE, d MMMM", { locale: bg })}
-                  </h3>
-                  <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-500">
-                    {row.appointments.length}
-                  </span>
-                </div>
-                {row.appointments.length ? (
-                  <div className="mt-3 space-y-2">
-                    {sortByStartAt(row.appointments).slice(0, 4).map((appointment) => (
-                      <button
-                        key={appointment.id}
-                        type="button"
-                        onClick={() => onOpenDetails(appointment.id)}
-                        className="w-full rounded-[18px] border border-slate-200 bg-white px-3 py-3 text-left"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-black text-slate-900">{appointment.client_name}</p>
-                            <p className="mt-1 truncate text-sm text-slate-600">{appointment.service_name}</p>
+          <div
+            className="min-h-0 flex-1 overflow-y-auto px-4 py-4"
+            style={{
+              paddingBottom: sheetVisible ? 'calc(env(safe-area-inset-bottom, 0px) + 96px)' : '24px',
+              overscrollBehaviorY: 'contain',
+              WebkitOverflowScrolling: 'touch',
+            }}
+          >
+            <div className="space-y-3">
+              {weekRows.map((row) => (
+                <div key={row.day.toISOString()} className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-black text-slate-900">
+                      {format(row.day, "EEEE, d MMMM", { locale: bg })}
+                    </h3>
+                    <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-500">
+                      {row.appointments.length}
+                    </span>
+                  </div>
+                  {row.appointments.length ? (
+                    <div className="mt-3 space-y-2">
+                      {sortByStartAt(row.appointments).slice(0, 4).map((appointment) => (
+                        <button
+                          key={appointment.id}
+                          type="button"
+                          onClick={() => onOpenDetails(appointment.id)}
+                          className="w-full rounded-[18px] border border-slate-200 bg-white px-3 py-3 text-left"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-black text-slate-900">{appointment.client_name}</p>
+                              <p className="mt-1 truncate text-sm text-slate-600">{appointment.service_name}</p>
+                            </div>
+                            <span className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-semibold text-slate-600">
+                              {formatTimeLabel(appointment.start_at)}
+                            </span>
                           </div>
-                          <span className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-semibold text-slate-600">
-                            {formatTimeLabel(appointment.start_at)}
-                          </span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="mt-3 rounded-[18px] border border-dashed border-slate-200 bg-white px-3 py-6 text-center text-sm text-slate-500">
-                    Няма записи
-                  </div>
-                )}
-              </div>
-            ))}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="mt-3 rounded-[18px] border border-dashed border-slate-200 bg-white px-3 py-6 text-center text-sm text-slate-500">
+                      Няма записи
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </section>
@@ -444,7 +474,7 @@ export function AdminCalendarMobile({
             </div>
           </button>
 
-          <div className="max-h-[56dvh] overflow-y-auto px-4 pb-4">
+          <div className="max-h-[56dvh] overflow-y-auto px-4 pb-4" style={{ overscrollBehaviorY: 'contain' }}>
             {requestsContent}
           </div>
         </div>

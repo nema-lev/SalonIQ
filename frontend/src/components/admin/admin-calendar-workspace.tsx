@@ -151,6 +151,7 @@ export function AdminCalendarWorkspace() {
   const [dragOverlay, setDragOverlay] = useState<DragOverlayState | null>(null);
   const [firstAvailableId, setFirstAvailableId] = useState<string | null>(null);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [placementNotice, setPlacementNotice] = useState<string | null>(null);
   const dragStateRef = useRef<ActivePointerDrag | null>(null);
   const columnRegistryRef = useRef<Record<string, ColumnRegistryEntry>>({});
 
@@ -323,6 +324,16 @@ export function AdminCalendarWorkspace() {
     };
   }, [dragOverlay]);
 
+  useEffect(() => {
+    if (!placementNotice || typeof window === 'undefined') return;
+
+    const timeoutId = window.setTimeout(() => {
+      setPlacementNotice(null);
+    }, 5000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [placementNotice]);
+
   const invalidateCalendar = useCallback(async () => {
     await refetch();
     queryClient.invalidateQueries({ queryKey: ['appointments-calendar-board'] });
@@ -387,11 +398,16 @@ export function AdminCalendarWorkspace() {
 
       return created;
     },
-    onSuccess: async (created) => {
+    onSuccess: async (created, variables) => {
       await invalidateCalendar();
       setCurrentDate(new Date(created.startAt));
-      setDetail({ type: 'appointment', id: created.id });
-      toast.success('Заявката е превърната в записан час.');
+      setDetail(null);
+      setPlacementNotice(
+        `Заявката е поставена за ${format(new Date(created.startAt), "d MMM '·' HH:mm", { locale: bg })} · ${
+          staffList.find((staff) => staff.id === variables.staffId)?.name || 'специалист'
+        }.`,
+      );
+      toast.success('Заявката е поставена в календара.');
     },
     onError: (error: unknown) => {
       toast.error(getErrorMessage(error, 'Неуспешно създаване на час от заявката.'));
@@ -856,6 +872,7 @@ export function AdminCalendarWorkspace() {
   const previewLabel = getSlotPreviewLabel(dropPreview, staffList);
   const calendarTitle = buildHeaderLabel(currentDate, view);
   const requestsCount = activeWaitlist.length + pendingTimedAppointments.length;
+  const hasActionableRequests = requestsCount > 0;
   const candidateStaffName =
     dragOverlay?.candidateStaffId != null
       ? staffList.find((staff) => staff.id === dragOverlay.candidateStaffId)?.name || 'Специалист'
@@ -912,8 +929,8 @@ export function AdminCalendarWorkspace() {
         : desktopStaffFilter;
 
   return (
-    <div className="min-h-full bg-[linear-gradient(180deg,#f6f7fb_0%,#eef2f7_100%)] text-slate-900">
-      <div className="mx-auto max-w-[1660px]">
+    <div className="flex h-full min-h-0 flex-col bg-[linear-gradient(180deg,#f6f7fb_0%,#eef2f7_100%)] text-slate-900">
+      <div className="mx-auto flex min-h-0 w-full max-w-[1660px] flex-1 flex-col">
         {isMobileViewport ? (
           <AdminCalendarMobile
             currentDate={currentDate}
@@ -933,6 +950,7 @@ export function AdminCalendarWorkspace() {
             isDragging={Boolean(dragOverlay)}
             requestsCount={requestsCount}
             requestsContent={requestSectionsMobile}
+            feedbackMessage={placementNotice}
             onShiftDate={(direction) =>
               setCurrentDate((current) => (view === 'week' ? addDays(current, direction === 'next' ? 7 : -7) : addDays(current, direction === 'next' ? 1 : -1)))
             }
@@ -947,7 +965,7 @@ export function AdminCalendarWorkspace() {
             onOpenBookingAtSlot={openBookingAtSlot}
             onOpenDetails={(appointmentId) => setDetail({ type: 'appointment', id: appointmentId })}
             onConfirmAppointment={handleConfirmAppointment}
-            onStartAppointmentDrag={startAppointmentDrag}
+            onMoveAppointment={setMoveTarget}
             registerColumn={registerMobileColumn}
           />
         ) : (
@@ -967,6 +985,8 @@ export function AdminCalendarWorkspace() {
             dropPreview={dropPreview}
             activeDragDurationMinutes={activeDragDurationMinutes}
             requestsPanel={requestSectionsDesktop}
+            feedbackMessage={placementNotice}
+            showRequestsPanel={hasActionableRequests}
             onShiftDate={(direction) =>
               setCurrentDate((current) => (view === 'week' ? addDays(current, direction === 'next' ? 7 : -7) : addDays(current, direction === 'next' ? 1 : -1)))
             }

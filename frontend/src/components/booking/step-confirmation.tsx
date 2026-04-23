@@ -29,8 +29,24 @@ export function StepConfirmation({ formData, onBack, onSuccess }: StepConfirmati
   const copy = getBusinessCopy(tenant.businessType);
 
   const mutation = useMutation({
-    mutationFn: () =>
-      apiClient.post<{ id: string; status: string }>('/appointments', {
+    mutationFn: () => {
+      if (formData.bookingMode === 'request') {
+        return apiClient.post<{ id: string; status: string }>('/appointments/request', {
+          serviceId: formData.serviceId,
+          preferredStaffId: formData.preferredStaffId || undefined,
+          desiredDate: formData.requestDate || undefined,
+          desiredTimePeriod: formData.requestTimePeriod || 'any',
+          clientName: formData.clientName,
+          clientPhone: formData.clientPhone,
+          clientEmail: tenant.collectClientEmail ? formData.clientEmail || undefined : undefined,
+          notes: formData.notes || undefined,
+          consentGiven: true,
+          publicBaseUrl: typeof window !== 'undefined' ? window.location.origin : undefined,
+          deviceToken: getOrCreatePublicDeviceToken(tenant.slug),
+        });
+      }
+
+      return apiClient.post<{ id: string; status: string }>('/appointments', {
         serviceId: formData.serviceId,
         staffId: formData.staffId,
         startAt: formData.startAt,
@@ -41,7 +57,8 @@ export function StepConfirmation({ formData, onBack, onSuccess }: StepConfirmati
         consentGiven: true,
         publicBaseUrl: typeof window !== 'undefined' ? window.location.origin : undefined,
         deviceToken: getOrCreatePublicDeviceToken(tenant.slug),
-      }),
+      });
+    },
     onSuccess: (data) => {
       onSuccess(data);
     },
@@ -64,13 +81,17 @@ export function StepConfirmation({ formData, onBack, onSuccess }: StepConfirmati
     },
     {
       icon: <Calendar className="w-4 h-4 text-[var(--color-primary)]" />,
-      label: 'Дата',
-      value: formData.displayDate,
+      label: formData.bookingMode === 'request' ? 'Предпочитан ден' : 'Дата',
+      value: formData.bookingMode === 'request'
+        ? formData.requestDate || 'Няма предпочитан ден'
+        : formData.displayDate || '—',
     },
     {
       icon: <Clock className="w-4 h-4 text-[var(--color-primary)]" />,
-      label: 'Час',
-      value: formData.timeSlot,
+      label: formData.bookingMode === 'request' ? 'Част от деня' : 'Час',
+      value: formData.bookingMode === 'request'
+        ? formData.requestTimePeriodLabel || 'Няма значение'
+        : formData.timeSlot || '—',
     },
     {
       icon: <User className="w-4 h-4 text-gray-400" />,
@@ -103,7 +124,11 @@ export function StepConfirmation({ formData, onBack, onSuccess }: StepConfirmati
       </button>
 
       <h2 className="text-2xl font-bold mb-2" style={{ color: 'var(--text-strong)' }}>Потвърдете данните</h2>
-      <p className="mb-6" style={{ color: 'var(--text-soft)' }}>Проверете детайлите преди да потвърдите {copy.bookingLabel}а</p>
+      <p className="mb-6" style={{ color: 'var(--text-soft)' }}>
+        {formData.bookingMode === 'request'
+          ? 'Проверете детайлите преди да изпратите заявката.'
+          : `Проверете детайлите преди да потвърдите ${copy.bookingLabel}а`}
+      </p>
 
       {/* Summary card */}
       <div className="rounded-2xl p-5 mb-5 space-y-3.5" style={{ background: 'var(--surface-pill)', border: '1px solid var(--line-soft)' }}>
@@ -172,7 +197,7 @@ export function StepConfirmation({ formData, onBack, onSuccess }: StepConfirmati
         ) : (
           <>
             <CheckCircle2 className="w-5 h-5" />
-            Потвърди резервацията
+            {formData.bookingMode === 'request' ? 'Изпрати заявката' : 'Потвърди резервацията'}
           </>
         )}
       </button>

@@ -13,6 +13,7 @@ import { randomUUID } from 'crypto';
 
 import { TenantPrismaService } from '../../common/prisma/tenant-prisma.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
+import { CreateBookingRequestDto } from './dto/create-booking-request.dto';
 import { AppointmentStatus, NotificationJobType } from '../../common/types/enums';
 import { buildBulgarianPhoneVariants, normalizeBulgarianPhone } from '../../common/utils/phone';
 import type { Tenant } from '@prisma/client';
@@ -1291,6 +1292,34 @@ export class AppointmentsService {
       `,
       hasRange ? [from, to] : [],
     );
+  }
+
+  async createBookingRequest(tenant: Tenant, dto: CreateBookingRequestDto) {
+    const requestedWindow =
+      dto.desiredTimePeriod === 'morning'
+        ? { desiredFrom: '09:00', desiredTo: '12:00' }
+        : dto.desiredTimePeriod === 'afternoon'
+          ? { desiredFrom: '12:00', desiredTo: '17:00' }
+          : dto.desiredTimePeriod === 'evening'
+            ? { desiredFrom: '17:00', desiredTo: '20:00' }
+            : { desiredFrom: null, desiredTo: null };
+
+    const created = await this.createWaitlistEntry(tenant, {
+      clientName: dto.clientName,
+      clientPhone: dto.clientPhone,
+      clientEmail: dto.clientEmail,
+      serviceId: dto.serviceId,
+      staffId: dto.preferredStaffId || null,
+      desiredDate: dto.desiredDate || null,
+      desiredFrom: requestedWindow.desiredFrom,
+      desiredTo: requestedWindow.desiredTo,
+      notes: dto.notes || null,
+    });
+
+    return {
+      id: created.id,
+      status: 'pending',
+    };
   }
 
   async createWaitlistEntry(

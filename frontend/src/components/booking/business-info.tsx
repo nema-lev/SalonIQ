@@ -39,8 +39,6 @@ export function BusinessInfo() {
         }}
       />
 
-      <ClientUpcomingLookup />
-
       {hasWorkingHours && (
         <div className="bg-white rounded-2xl border border-gray-100 p-5" style={{ background: 'var(--bg-card)', border: '1px solid var(--line-soft)', borderRadius: 28, padding: 22, boxShadow: 'var(--shadow-soft)', backdropFilter: 'blur(24px) saturate(140%)', WebkitBackdropFilter: 'blur(24px) saturate(140%)' }}>
           <h3 className="flex items-center gap-2 font-bold text-gray-900 mb-4" style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '0 0 16px', fontSize: 22, fontWeight: 900, color: 'var(--text-strong)', letterSpacing: '-0.03em' }}>
@@ -129,6 +127,8 @@ export function BusinessInfo() {
           )}
         </div>
       )}
+
+      <ClientUpcomingLookup />
 
       <p className="text-center text-xs pb-4" style={{ textAlign: 'center', fontSize: 12, color: 'var(--text-soft)', paddingBottom: 16, margin: 0, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
         {tenant.theme.poweredByText || 'Powered by SalonIQ'}

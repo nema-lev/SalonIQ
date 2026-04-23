@@ -136,7 +136,31 @@ export function StepDetails({ formData, onNext, onBack }: StepDetailsProps) {
       </button>
 
       <h2 className="text-2xl font-bold mb-2" style={{ color: 'var(--text-strong)' }}>Данни за контакт</h2>
-      <p className="mb-6" style={{ color: 'var(--text-soft)' }}>{copy.detailsHint}</p>
+      <p className="mb-6" style={{ color: 'var(--text-soft)' }}>
+        {formData.bookingMode === 'request'
+          ? 'Оставете телефон и салонът ще ви предложи удобен час.'
+          : copy.detailsHint}
+      </p>
+
+      <div
+        className="mb-5 rounded-[26px] border border-gray-200 bg-white px-4 py-4"
+        style={{ boxShadow: '0 14px 36px rgba(15,23,42,0.05)' }}
+      >
+        <p className="text-xs font-semibold uppercase tracking-[0.14em]" style={{ color: 'var(--text-soft)' }}>
+          {formData.bookingMode === 'request' ? 'Изпращате заявка' : 'Избраният час'}
+        </p>
+        <p className="mt-2 text-sm font-semibold" style={{ color: 'var(--text-strong)' }}>
+          {formData.serviceName} · {formData.staffName}
+        </p>
+        <p className="mt-1 text-sm" style={{ color: 'var(--text-soft)' }}>
+          {formData.bookingMode === 'request'
+            ? [
+                formData.requestDate || 'Без предпочитан ден',
+                formData.requestTimePeriodLabel || 'Няма значение',
+              ].join(' · ')
+            : [formData.displayDate, formData.timeSlot].filter(Boolean).join(' · ')}
+        </p>
+      </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         {/* Имена */}

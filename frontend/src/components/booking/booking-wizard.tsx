@@ -21,7 +21,7 @@ export function BookingWizard() {
   const copy = getBusinessCopy(tenant.businessType);
   const [step, setStep] = useState<BookingStep>('service');
   const [direction, setDirection] = useState<1 | -1>(1);
-  const [formData, setFormData] = useState<Partial<BookingFormData>>({});
+  const [formData, setFormData] = useState<Partial<BookingFormData>>({ bookingMode: 'slot' });
   const [createdAppointment, setCreatedAppointment] = useState<{ id: string; status: string } | null>(null);
 
   const currentIndex = STEPS.indexOf(step);
@@ -58,11 +58,11 @@ export function BookingWizard() {
 
   if (step === 'success' && createdAppointment) {
     return (
-      <BookingSuccess
-        appointment={createdAppointment}
-        formData={formData as BookingFormData}
-        onNewBooking={() => {
-          setFormData({});
+        <BookingSuccess
+          appointment={createdAppointment}
+          formData={formData as BookingFormData}
+          onNewBooking={() => {
+          setFormData({ bookingMode: 'slot' });
           setStep('service');
           setCreatedAppointment(null);
         }}
@@ -198,6 +198,8 @@ export function BookingWizard() {
             <StepDateTime
               serviceId={formData.serviceId!}
               staffId={formData.staffId!}
+              preferredStaffId={formData.preferredStaffId}
+              preferredStaffName={formData.preferredStaffName}
               onNext={goNext}
               onBack={goBack}
             />

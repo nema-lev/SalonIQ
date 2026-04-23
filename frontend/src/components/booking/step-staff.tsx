@@ -44,11 +44,21 @@ export function StepStaff({ serviceId, onNext, onBack }: StepStaffProps) {
     if (!member && resolvedStaff?.length) {
       // "Без предпочитание" — избери случаен
       const random = resolvedStaff[Math.floor(Math.random() * resolvedStaff.length)];
-      onNext({ staffId: random.id, staffName: 'Без предпочитание' });
+      onNext({
+        staffId: random.id,
+        staffName: 'Без предпочитание',
+        preferredStaffId: undefined,
+        preferredStaffName: undefined,
+      });
       return;
     }
     if (member) {
-      onNext({ staffId: member.id, staffName: member.name });
+      onNext({
+        staffId: member.id,
+        staffName: member.name,
+        preferredStaffId: member.id,
+        preferredStaffName: member.name,
+      });
     }
   };
 

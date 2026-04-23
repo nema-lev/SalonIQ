@@ -1,4 +1,6 @@
 export interface BookingFormData {
+  bookingMode: 'slot' | 'request';
+
   // Step 1 — Услуга
   serviceId: string;
   serviceName: string;
@@ -8,12 +10,17 @@ export interface BookingFormData {
   // Step 2 — Специалист
   staffId: string;
   staffName: string;
+  preferredStaffId?: string;
+  preferredStaffName?: string;
 
   // Step 3 — Дата & Час
-  date: string;           // yyyy-MM-dd
-  timeSlot: string;       // HH:mm
-  startAt: string;        // ISO 8601
-  displayDate: string;    // "Вторник, 15 април 2025 г."
+  date?: string;          // yyyy-MM-dd
+  timeSlot?: string;      // HH:mm
+  startAt?: string;       // ISO 8601
+  displayDate?: string;   // "Вторник, 15 април 2025 г."
+  requestDate?: string;   // yyyy-MM-dd
+  requestTimePeriod?: 'morning' | 'afternoon' | 'evening' | 'any';
+  requestTimePeriodLabel?: string;
 
   // Step 4 — Данни за клиента
   clientName: string;

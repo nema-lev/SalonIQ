@@ -20,6 +20,7 @@ import type { Response } from 'express';
 
 import { AppointmentsService } from './appointments.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
+import { CreateBookingRequestDto } from './dto/create-booking-request.dto';
 import { GetSlotsDto } from './dto/get-slots.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -67,6 +68,18 @@ export class AppointmentsController {
     @CurrentTenant() tenant: Tenant,
   ) {
     return this.appointmentsService.create(tenant, dto);
+  }
+
+  @Post('request')
+  @UseGuards(TenantGuard)
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Изпрати заявка без точен час' })
+  async createRequest(
+    @Body() dto: CreateBookingRequestDto,
+    @CurrentTenant() tenant: Tenant,
+  ) {
+    return this.appointmentsService.createBookingRequest(tenant, dto);
   }
 
   // ─── Защитени ендпойнти (admin панел) ────────────────────────────────────

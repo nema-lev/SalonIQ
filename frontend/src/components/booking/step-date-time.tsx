@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { DayPicker } from 'react-day-picker';
-import { format, addDays, startOfToday, isBefore } from 'date-fns';
+import { addDays, format, isBefore, startOfToday } from 'date-fns';
 import { bg } from 'date-fns/locale';
 import { ChevronLeft, Clock, Loader2 } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
@@ -21,6 +21,8 @@ interface TimeSlot {
 interface StepDateTimeProps {
   serviceId: string;
   staffId: string;
+  preferredStaffId?: string;
+  preferredStaffName?: string;
   onNext: (data: Partial<BookingFormData>) => void;
   onBack: () => void;
 }
@@ -29,15 +31,31 @@ const DAY_MAP: Record<number, string> = {
   0: 'sun', 1: 'mon', 2: 'tue', 3: 'wed', 4: 'thu', 5: 'fri', 6: 'sat',
 };
 
-export function StepDateTime({ serviceId, staffId, onNext, onBack }: StepDateTimeProps) {
+const REQUEST_PERIODS = [
+  { key: 'morning', label: 'Сутрин', hint: '09:00 - 12:00' },
+  { key: 'afternoon', label: 'Следобед', hint: '12:00 - 17:00' },
+  { key: 'evening', label: 'Вечер', hint: '17:00 - 20:00' },
+  { key: 'any', label: 'Няма значение', hint: 'Първият удобен за салона слот' },
+] as const;
+
+export function StepDateTime({
+  serviceId,
+  staffId,
+  preferredStaffId,
+  preferredStaffName,
+  onNext,
+  onBack,
+}: StepDateTimeProps) {
   const tenant = useTenant();
+  const [mode, setMode] = useState<'slot' | 'request'>('slot');
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  const [requestDate, setRequestDate] = useState<Date | undefined>();
+  const [requestPeriod, setRequestPeriod] = useState<(typeof REQUEST_PERIODS)[number]['key']>('any');
 
   const today = startOfToday();
   const maxDate = addDays(today, tenant.maxAdvanceBookingDays);
 
-  // Намери дните, в които салонът е отворен (за да ги показва в календара)
   const disabledDays = (date: Date) => {
     const dayKey = DAY_MAP[date.getDay()];
     const daySchedule = tenant.workingHours[dayKey];
@@ -47,7 +65,6 @@ export function StepDateTime({ serviceId, staffId, onNext, onBack }: StepDateTim
     return isPast || isTooFar || isClosedDay;
   };
 
-  // Зареди слотовете за избраната дата
   const { data: slots, isLoading: slotsLoading, error: slotsError } = useQuery({
     queryKey: ['slots', serviceId, staffId, selectedDate ? format(selectedDate, 'yyyy-MM-dd') : null],
     queryFn: () =>
@@ -56,24 +73,32 @@ export function StepDateTime({ serviceId, staffId, onNext, onBack }: StepDateTim
         staffId,
         date: format(selectedDate!, 'yyyy-MM-dd'),
       }),
-    enabled: !!selectedDate,
-    staleTime: 30 * 1000, // 30 секунди — слотовете се променят бързо
+    enabled: mode === 'slot' && !!selectedDate,
+    staleTime: 30 * 1000,
   });
+
   const resolvedSlots = slotsError || !slots ? [] : slots;
 
-  const handleSelectSlot = (slot: string) => {
-    setSelectedSlot(slot);
-  };
-
   const handleContinue = () => {
+    if (mode === 'request') {
+      const period = REQUEST_PERIODS.find((entry) => entry.key === requestPeriod)!;
+      onNext({
+        bookingMode: 'request',
+        requestDate: requestDate ? format(requestDate, 'yyyy-MM-dd') : undefined,
+        requestTimePeriod: requestPeriod,
+        requestTimePeriodLabel: period.label,
+      });
+      return;
+    }
+
     if (!selectedDate || !selectedSlot) return;
 
-    // Конструирай пълен ISO datetime
     const [hours, minutes] = selectedSlot.split(':').map(Number);
     const dateTime = new Date(selectedDate);
     dateTime.setHours(hours, minutes, 0, 0);
 
     onNext({
+      bookingMode: 'slot',
       date: format(selectedDate, 'yyyy-MM-dd'),
       timeSlot: selectedSlot,
       startAt: dateTime.toISOString(),
@@ -85,100 +110,181 @@ export function StepDateTime({ serviceId, staffId, onNext, onBack }: StepDateTim
     <div>
       <button
         onClick={onBack}
-        className="flex items-center gap-1 text-sm mb-4 transition-colors"
+        className="mb-4 flex items-center gap-1 text-sm transition-colors"
         style={{ color: 'var(--text-soft)' }}
       >
         <ChevronLeft className="w-4 h-4" />
         Назад
       </button>
 
-      <h2 className="text-2xl font-bold mb-2" style={{ color: 'var(--text-strong)' }}>Изберете дата и час</h2>
-      <p className="mb-6" style={{ color: 'var(--text-soft)' }}>Показваме само свободните часове в реално време</p>
+      <h2 className="mb-2 text-2xl font-bold" style={{ color: 'var(--text-strong)' }}>Дата и час</h2>
+      <p className="mb-6" style={{ color: 'var(--text-soft)' }}>
+        Изберете точен свободен час или изпратете заявка без фиксиран слот.
+      </p>
 
-      {/* Calendar */}
-      <div
-        className="mb-6 overflow-hidden rounded-[28px] border border-white/70 bg-white/80 p-3 shadow-[0_18px_48px_rgba(73,39,142,0.08)] backdrop-blur-xl"
-        style={{ ['--rdp-cell-size' as string]: 'min(48px, calc((100vw - 76px) / 7))' }}
-      >
-        <DayPicker
-          mode="single"
-          selected={selectedDate}
-          onSelect={(date) => {
-            setSelectedDate(date);
-            setSelectedSlot(null);
-          }}
-          disabled={disabledDays}
-          locale={bg}
-          fromDate={today}
-          toDate={maxDate}
-          className="booking-day-picker"
-        />
+      <div className="mb-6 grid gap-3 sm:grid-cols-2">
+        <button
+          type="button"
+          onClick={() => setMode('slot')}
+          className={`rounded-[28px] border p-5 text-left transition-colors ${
+            mode === 'slot' ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/5' : 'border-gray-200 bg-white'
+          }`}
+        >
+          <p className="text-sm font-black" style={{ color: 'var(--text-strong)' }}>Избирам точен час</p>
+          <p className="mt-2 text-sm" style={{ color: 'var(--text-soft)' }}>
+            Виждате само реално свободните слотове.
+          </p>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode('request')}
+          className={`rounded-[28px] border p-5 text-left transition-colors ${
+            mode === 'request' ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/5' : 'border-gray-200 bg-white'
+          }`}
+        >
+          <p className="text-sm font-black" style={{ color: 'var(--text-strong)' }}>Нямам точен час</p>
+          <p className="mt-2 text-sm" style={{ color: 'var(--text-soft)' }}>
+            Изпращате заявка и салонът я подрежда в pending requests.
+          </p>
+        </button>
       </div>
 
-      {/* Time slots */}
-      {selectedDate && (
-        <div>
-          <h3 className="font-semibold mb-3" style={{ color: 'var(--text-strong)' }}>
-            {format(selectedDate, "d MMMM", { locale: bg })} — свободни часове:
-          </h3>
+      {mode === 'slot' ? (
+        <>
+          <div
+            className="mb-6 overflow-hidden rounded-[28px] border border-white/70 bg-white/80 p-3 shadow-[0_18px_48px_rgba(15,23,42,0.08)] backdrop-blur-xl"
+            style={{ ['--rdp-cell-size' as string]: 'min(48px, calc((100vw - 76px) / 7))' }}
+          >
+            <DayPicker
+              mode="single"
+              selected={selectedDate}
+              onSelect={(date) => {
+                setSelectedDate(date);
+                setSelectedSlot(null);
+              }}
+              disabled={disabledDays}
+              locale={bg}
+              fromDate={today}
+              toDate={maxDate}
+              className="booking-day-picker"
+            />
+          </div>
 
-          {slotsLoading ? (
-            <div className="flex justify-center py-8">
-              <Loader2 className="w-6 h-6 animate-spin text-[var(--color-primary)]" />
-            </div>
-          ) : resolvedSlots && resolvedSlots.length > 0 ? (
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-              {resolvedSlots.map((slot) => (
-                <button
-                  key={slot.start}
-                  onClick={() => handleSelectSlot(slot.start)}
-                  className={`
-                    py-2.5 px-3 rounded-lg text-sm font-medium transition-all duration-150
-                    ${selectedSlot === slot.start
-                      ? 'bg-[var(--color-primary)] text-white shadow-md scale-105'
-                      : 'border border-gray-200'
-                    }
-                  `}
-                  style={
-                    selectedSlot === slot.start
-                      ? undefined
-                      : {
-                          background: 'var(--surface-pill)',
-                          color: 'var(--text-strong)',
-                          borderColor: 'var(--line-soft)',
+          {selectedDate && (
+            <div>
+              <h3 className="mb-3 font-semibold" style={{ color: 'var(--text-strong)' }}>
+                {format(selectedDate, "d MMMM", { locale: bg })} — свободни часове:
+              </h3>
+
+              {slotsLoading ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-[var(--color-primary)]" />
+                </div>
+              ) : resolvedSlots.length > 0 ? (
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                  {resolvedSlots.map((slot) => (
+                    <button
+                      key={slot.start}
+                      onClick={() => setSelectedSlot(slot.start)}
+                      className={`
+                        rounded-lg py-2.5 px-3 text-sm font-medium transition-all duration-150
+                        ${selectedSlot === slot.start
+                          ? 'bg-[var(--color-primary)] text-white shadow-md scale-105'
+                          : 'border border-gray-200'
                         }
-                  }
+                      `}
+                      style={
+                        selectedSlot === slot.start
+                          ? undefined
+                          : {
+                              background: 'var(--surface-pill)',
+                              color: 'var(--text-strong)',
+                              borderColor: 'var(--line-soft)',
+                            }
+                      }
+                    >
+                      <span className="flex items-center justify-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {slot.start}
+                      </span>
+                      {typeof slot.remainingSpots === 'number' && typeof slot.capacity === 'number' && (
+                        <span className="mt-1 block text-[11px] opacity-80">
+                          {slot.remainingSpots} / {slot.capacity} места
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-xl py-8 text-center" style={{ background: 'var(--surface-pill)', border: '1px solid var(--line-soft)' }}>
+                  <p className="font-medium" style={{ color: 'var(--text-soft)' }}>Няма свободни часове за тази дата</p>
+                  <p className="mt-1 text-sm" style={{ color: 'var(--text-soft)' }}>Изберете друга дата</p>
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="space-y-5 rounded-[30px] border border-gray-200 bg-white p-5 shadow-[0_18px_48px_rgba(15,23,42,0.08)]">
+          <div>
+            <h3 className="text-lg font-black" style={{ color: 'var(--text-strong)' }}>Какво е най-удобно?</h3>
+            <p className="mt-2 text-sm" style={{ color: 'var(--text-soft)' }}>
+              Предпочитан специалист: {preferredStaffName || 'Без предпочитание'}.
+            </p>
+          </div>
+
+          <div>
+            <label className="mb-2 block text-sm font-semibold" style={{ color: 'var(--text-strong)' }}>
+              Предпочитан ден <span style={{ color: 'var(--text-soft)', fontWeight: 400 }}>(по избор)</span>
+            </label>
+            <div className="overflow-hidden rounded-[24px] border border-white/70 bg-white/80 p-3">
+              <DayPicker
+                mode="single"
+                selected={requestDate}
+                onSelect={setRequestDate}
+                disabled={disabledDays}
+                locale={bg}
+                fromDate={today}
+                toDate={maxDate}
+                className="booking-day-picker"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-2 block text-sm font-semibold" style={{ color: 'var(--text-strong)' }}>
+              Част от деня
+            </label>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {REQUEST_PERIODS.map((period) => (
+                <button
+                  key={period.key}
+                  type="button"
+                  onClick={() => setRequestPeriod(period.key)}
+                  className={`rounded-[22px] border p-4 text-left transition-colors ${
+                    requestPeriod === period.key
+                      ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/5'
+                      : 'border-gray-200 bg-[var(--surface-pill)]'
+                  }`}
                 >
-                  <span className="flex items-center gap-1 justify-center">
-                    <Clock className="w-3 h-3" />
-                    {slot.start}
-                  </span>
-                  {typeof slot.remainingSpots === 'number' && typeof slot.capacity === 'number' && (
-                    <span className="mt-1 block text-[11px] opacity-80">
-                      {slot.remainingSpots} / {slot.capacity} места
-                    </span>
-                  )}
+                  <p className="text-sm font-black" style={{ color: 'var(--text-strong)' }}>{period.label}</p>
+                  <p className="mt-1 text-sm" style={{ color: 'var(--text-soft)' }}>{period.hint}</p>
                 </button>
               ))}
             </div>
-          ) : (
-            <div className="text-center py-8 rounded-xl" style={{ background: 'var(--surface-pill)', border: '1px solid var(--line-soft)' }}>
-              <p className="font-medium" style={{ color: 'var(--text-soft)' }}>Няма свободни часове за тази дата</p>
-              <p className="text-sm mt-1" style={{ color: 'var(--text-soft)' }}>Изберете друга дата</p>
-            </div>
-          )}
+          </div>
+
+          <div className="rounded-[24px] border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
+            Следващата стъпка ще изпрати заявка без точен час. Тя влиза директно в pending requests на салона.
+          </div>
         </div>
       )}
 
-      {/* Continue button */}
-      {selectedDate && selectedSlot && (
+      {((mode === 'slot' && selectedDate && selectedSlot) || mode === 'request') && (
         <button
           onClick={handleContinue}
-          className="
-            w-full mt-6 py-4 rounded-xl font-semibold text-white
-            bg-[var(--color-primary)] hover:opacity-90 active:scale-[0.99]
-            transition-all duration-150 shadow-lg shadow-[var(--color-primary)]/25
-          "
+          className="mt-6 w-full rounded-xl py-4 font-semibold text-white transition-all duration-150 shadow-lg shadow-[var(--color-primary)]/25 hover:opacity-90 active:scale-[0.99]"
+          style={{ background: 'var(--color-primary)' }}
         >
           Продължи →
         </button>

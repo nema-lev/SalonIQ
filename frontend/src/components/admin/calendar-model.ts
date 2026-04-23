@@ -1,4 +1,4 @@
-import { differenceInMinutes, format } from 'date-fns';
+import { differenceInMinutes, format, isSameDay } from 'date-fns';
 import { bg } from 'date-fns/locale';
 
 export interface Appointment {
@@ -145,6 +145,11 @@ export interface AppointmentContextResponse {
 }
 
 export const CALENDAR_SLOT_MINUTES = 15;
+export type CalendarViewMode = 'day' | 'week';
+export type CalendarDropPreview = {
+  staffId: string;
+  startAt: string;
+} | null;
 export const REQUEST_OWNER_STATES = ['pending', 'requested', 'proposal_pending', 'proposal_sent'] as const;
 export const BOOKED_OWNER_STATES = ['confirmed', 'approved', 'booked_direct', 'proposal_accepted', 'completed'] as const;
 export const CANCELLED_OWNER_STATES = [
@@ -321,6 +326,77 @@ export function buildCalendarGridMetrics(
       };
     }),
   };
+}
+
+export function buildExceptionBlocks(
+  schedule: CalendarBoardStaff['working_hours'][string] | undefined,
+  exceptions: StaffException[],
+  day: Date,
+  calendarHeight: number,
+  rangeStartHour: number,
+  pixelsPerHour: number,
+) {
+  const overlays: Array<{
+    id?: string;
+    top: number;
+    height: number;
+    label: string;
+    tone: 'quiet' | 'blocked';
+    block?: StaffException;
+  }> = [];
+
+  if (!schedule?.isOpen) {
+    overlays.push({
+      top: 0,
+      height: calendarHeight,
+      label: 'Почивен ден',
+      tone: 'quiet',
+    });
+  } else {
+    const openMinutes = timeLabelToMinutes(schedule.open);
+    const closeMinutes = timeLabelToMinutes(schedule.close);
+
+    if (openMinutes != null) {
+      const openOffset = ((openMinutes - rangeStartHour * 60) / 60) * pixelsPerHour;
+      if (openOffset > 0) {
+        overlays.push({
+          top: 0,
+          height: openOffset,
+          label: 'Извън работно време',
+          tone: 'quiet',
+        });
+      }
+    }
+
+    if (closeMinutes != null) {
+      const closeOffset = ((closeMinutes - rangeStartHour * 60) / 60) * pixelsPerHour;
+      if (closeOffset < calendarHeight) {
+        overlays.push({
+          top: Math.max(closeOffset, 0),
+          height: Math.max(calendarHeight - closeOffset, 0),
+          label: 'Извън работно време',
+          tone: 'quiet',
+        });
+      }
+    }
+  }
+
+  for (const exception of exceptions) {
+    if (!isSameDay(new Date(exception.start_at), day)) continue;
+
+    const top = Math.max((getMinuteOffset(exception.start_at, rangeStartHour) / 60) * pixelsPerHour, 0);
+    const bottom = Math.min((getMinuteOffset(exception.end_at, rangeStartHour) / 60) * pixelsPerHour, calendarHeight);
+    overlays.push({
+      id: exception.id,
+      top,
+      height: Math.max(bottom - top, 38),
+      label: exception.note?.trim() || 'Блокирано време',
+      tone: 'blocked',
+      block: exception,
+    });
+  }
+
+  return overlays;
 }
 
 export function colorWithAlpha(color: string | undefined, alpha: string, fallback: string) {

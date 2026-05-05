@@ -2,19 +2,15 @@
 
 import { useMemo, useState } from 'react';
 import { addDays, endOfDay, format, startOfDay } from 'date-fns';
-import { bg } from 'date-fns/locale';
 import { ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
 import { useAdminCalendarBoardData } from '../../use-admin-calendar-board-data';
 import { NativeSchedulerV2Spike } from '../native-scheduler-spike/NativeSchedulerV2Spike';
-import {
-  buildCalendarV2RealDataProjection,
-  getCalendarV2RealDataStatusLabel,
-} from './calendar-v2-real-data-mappers';
+import type { NativeSchedulerNotice } from '../native-scheduler-spike/NativeSchedulerGrid';
+import { buildCalendarV2RealDataProjection } from './calendar-v2-real-data-mappers';
 import { CALENDAR_V2_READONLY_NOTICE } from './calendar-v2-readonly-actions';
 
 export function CalendarV2RealDataAdapter() {
   const [currentDate, setCurrentDate] = useState(() => startOfDay(new Date()));
-  const [showFixtureDemo, setShowFixtureDemo] = useState(false);
 
   const rangeStart = useMemo(() => startOfDay(currentDate), [currentDate]);
   const rangeEndExclusive = useMemo(() => addDays(endOfDay(currentDate), 1), [currentDate]);
@@ -49,7 +45,7 @@ export function CalendarV2RealDataAdapter() {
       <button
         type="button"
         onClick={() => setCurrentDate((date) => addDays(date, -1))}
-        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700"
+        className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-950"
         aria-label="Previous day"
       >
         <ChevronLeft className="h-4 w-4" />
@@ -61,12 +57,12 @@ export function CalendarV2RealDataAdapter() {
           if (!event.target.value) return;
           setCurrentDate(startOfDay(new Date(`${event.target.value}T12:00:00`)));
         }}
-        className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm font-bold text-slate-700 outline-none"
+        className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-800 shadow-sm outline-none transition hover:border-slate-300 focus:border-slate-500"
       />
       <button
         type="button"
         onClick={() => setCurrentDate((date) => addDays(date, 1))}
-        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700"
+        className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-950"
         aria-label="Next day"
       >
         <ChevronRight className="h-4 w-4" />
@@ -74,7 +70,7 @@ export function CalendarV2RealDataAdapter() {
       <button
         type="button"
         onClick={() => setCurrentDate(startOfDay(new Date()))}
-        className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-xs font-black text-slate-700"
+        className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-950"
       >
         <RotateCcw className="h-3.5 w-3.5" />
         Today
@@ -82,25 +78,20 @@ export function CalendarV2RealDataAdapter() {
     </div>
   );
 
-  if (showFixtureDemo) {
-    return (
-      <NativeSchedulerV2Spike
-        toolbarEyebrow="Calendar V2 fixture demo"
-        readOnlyNotice="Fixture demo · local-only commands"
-      />
-    );
-  }
-
   if (error) {
     return (
-      <section className="rounded-lg border border-rose-200 bg-white p-5 text-sm text-slate-700">
+      <section className="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-700 shadow-sm">
         <div className="max-w-3xl">
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-rose-600">
-            Calendar V2 Preview
+          <p className="text-xs font-black uppercase text-slate-500">Calendar V2 Preview · Read-only</p>
+          <h2 className="mt-2 text-xl font-black text-slate-950">Calendar data is unavailable.</h2>
+          <p className="mt-2 max-w-2xl font-semibold leading-6 text-slate-600">
+            The current admin calendar read did not complete. Fixture data is not shown on this production
+            preview route.
           </p>
-          <h2 className="mt-2 text-lg font-black text-slate-900">Could not load current admin calendar data.</h2>
-          <p className="mt-2 font-semibold text-slate-600">{getErrorMessage(error)}</p>
-          <div className="mt-4 flex flex-wrap gap-2">
+          <p className="mt-3 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">
+            {getErrorMessage(error)}
+          </p>
+          <div className="mt-5 flex flex-wrap items-center gap-3">
             <button
               type="button"
               onClick={() => {
@@ -108,46 +99,55 @@ export function CalendarV2RealDataAdapter() {
                 void refetchWaitlist();
                 void refetchServices();
               }}
-              className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-black text-white"
+              className="rounded-lg bg-slate-950 px-4 py-2.5 text-xs font-black text-white shadow-sm"
             >
               Retry read
             </button>
-            <button
-              type="button"
-              onClick={() => setShowFixtureDemo(true)}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-700"
-            >
-              Show fixture demo
-            </button>
+            <span className="text-xs font-bold text-slate-500">
+              The current /admin calendar remains the default calendar.
+            </span>
           </div>
         </div>
       </section>
     );
   }
 
-  const schedulerNotice = isInitialLoading
-    ? 'Loading real admin calendar data...'
-    : projection.resources.length === 0
-      ? 'No staff resources were returned by the current calendar board.'
-      : null;
+  const fixtureLabelIssue = !isInitialLoading && hasFixtureLikeDataLabel(projection);
+  const visibleProjection = fixtureLabelIssue
+    ? {
+        resources: [],
+        calendarBlocks: [],
+        demandItems: [],
+        actionItems: [],
+      }
+    : projection;
+  const visibleAppointmentCount = visibleProjection.calendarBlocks.filter(
+    (block) => block.kind === 'appointment',
+  ).length;
+  const schedulerNotice = getSchedulerNotice({
+    isInitialLoading,
+    hasFixtureLabelIssue: fixtureLabelIssue,
+    resourceCount: visibleProjection.resources.length,
+    appointmentCount: visibleAppointmentCount,
+  });
+  const toolbarNote = isInitialLoading
+    ? 'Reading from the current admin calendar.'
+    : isFetching
+      ? 'Refreshing current calendar reads.'
+      : 'The current /admin calendar remains default.';
 
   return (
     <NativeSchedulerV2Spike
       date={currentDate}
-      resources={projection.resources}
-      calendarBlocks={projection.calendarBlocks}
-      demandItems={projection.demandItems}
-      actionItems={projection.actionItems}
+      resources={visibleProjection.resources}
+      calendarBlocks={visibleProjection.calendarBlocks}
+      demandItems={visibleProjection.demandItems}
+      actionItems={visibleProjection.actionItems}
       readOnly
       readOnlyNotice={CALENDAR_V2_READONLY_NOTICE}
       schedulerNotice={schedulerNotice}
       toolbarEyebrow="Calendar V2 Preview"
-      toolbarPills={[
-        'Current calendar remains production',
-        'Real data',
-        getCalendarV2RealDataStatusLabel(projection),
-        isFetching ? 'Refreshing' : 'Read-only',
-      ]}
+      toolbarNote={toolbarNote}
       toolbarControls={headerControls}
     />
   );
@@ -159,4 +159,86 @@ function getErrorMessage(error: unknown) {
   }
 
   return 'The existing calendar read endpoint returned an unknown error.';
+}
+
+function getSchedulerNotice({
+  isInitialLoading,
+  hasFixtureLabelIssue,
+  resourceCount,
+  appointmentCount,
+}: {
+  isInitialLoading: boolean;
+  hasFixtureLabelIssue: boolean;
+  resourceCount: number;
+  appointmentCount: number;
+}): NativeSchedulerNotice | null {
+  if (isInitialLoading) {
+    return {
+      tone: 'loading',
+      title: 'Loading calendar data',
+      message: 'Reading the current admin calendar.',
+    };
+  }
+
+  if (hasFixtureLabelIssue) {
+    return {
+      tone: 'warning',
+      title: 'Calendar data needs production staff labels',
+      message:
+        'The current read returned demo-labeled staff or resources, so this preview is not rendering them as real data.',
+    };
+  }
+
+  if (resourceCount === 0) {
+    return {
+      tone: 'warning',
+      title: 'No staff available for this date',
+      message: 'Calendar V2 needs staff resources from the current calendar read before it can draw the day grid.',
+    };
+  }
+
+  if (appointmentCount === 0) {
+    return {
+      tone: 'empty',
+      title: 'No appointments scheduled',
+      message: 'This date has no scheduled appointments in the current calendar data.',
+    };
+  }
+
+  return null;
+}
+
+function hasFixtureLikeDataLabel(projection: {
+  resources: Array<{ name: string }>;
+  calendarBlocks: Array<{
+    kind: string;
+    title: string;
+    subtitle?: string | null;
+    appointment?: {
+      client: { name: string };
+      service: { name: string };
+      staff: { name?: string | null };
+    } | null;
+  }>;
+  demandItems: Array<{
+    client: { name: string };
+    service: { name: string };
+    preferredStaff?: { name?: string | null } | null;
+  }>;
+}) {
+  const labels = [
+    ...projection.resources.map((resource) => resource.name),
+    ...projection.calendarBlocks.flatMap((block) => [
+      block.kind === 'blocked_time' ? block.subtitle : undefined,
+      block.appointment?.staff.name,
+    ]),
+    ...projection.demandItems.map((item) => item.preferredStaff?.name),
+  ];
+
+  return labels.some((label) => isFixtureLikeLabel(label));
+}
+
+function isFixtureLikeLabel(label: string | null | undefined) {
+  if (!label) return false;
+  return /\b(demo|fixture)\b/i.test(label);
 }

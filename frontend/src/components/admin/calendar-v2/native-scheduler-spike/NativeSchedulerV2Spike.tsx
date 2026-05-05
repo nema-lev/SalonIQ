@@ -20,7 +20,11 @@ import type {
   CalendarV2TimeTarget,
 } from '..';
 import { NativeSchedulerActionInboxMock } from './NativeSchedulerActionInboxMock';
-import { NativeSchedulerGrid, type NativeSchedulerGridDropPreview } from './NativeSchedulerGrid';
+import {
+  NativeSchedulerGrid,
+  type NativeSchedulerGridDropPreview,
+  type NativeSchedulerNotice,
+} from './NativeSchedulerGrid';
 import {
   NativeSchedulerPlacementPreview,
   type NativeSchedulerPlacementPreviewState,
@@ -81,9 +85,10 @@ type NativeSchedulerV2SpikeProps = {
   actionItems?: ActionInboxItem[];
   readOnly?: boolean;
   readOnlyNotice?: string;
-  schedulerNotice?: string | null;
+  schedulerNotice?: NativeSchedulerNotice | null;
   toolbarEyebrow?: string;
   toolbarPills?: string[];
+  toolbarNote?: string;
   toolbarControls?: ReactNode;
 };
 
@@ -98,6 +103,7 @@ export function NativeSchedulerV2Spike({
   schedulerNotice,
   toolbarEyebrow = 'Calendar V2 native preview',
   toolbarPills,
+  toolbarNote,
   toolbarControls,
 }: NativeSchedulerV2SpikeProps = {}) {
   const sourceBlocks = calendarBlocks ?? nativeSchedulerCalendarBlocks;
@@ -130,7 +136,7 @@ export function NativeSchedulerV2Spike({
     [blocks, selectedBlockId],
   );
   const dateLabel = format(schedulerDate, "EEEE, d MMMM yyyy 'г.'", { locale: bg });
-  const visibleToolbarPills = toolbarPills ?? ['15 min slots', '08:00-20:00'];
+  const visibleToolbarPills = toolbarPills ?? [];
 
   useEffect(() => {
     setBlocks(sourceBlocks);
@@ -423,21 +429,24 @@ export function NativeSchedulerV2Spike({
             </div>
 
             <div className={styles.toolbarMeta}>
-              {toolbarControls}
-              {readOnlyNotice && (
-                <span className={readOnly ? styles.readOnlyPill : styles.toolbarPill}>{readOnlyNotice}</span>
-              )}
-              {visibleToolbarPills.map((pill) => (
-                <span key={pill} className={styles.toolbarPill}>
-                  {pill}
-                </span>
-              ))}
-              {!readOnly && (
-                <button type="button" className={styles.resetButton} onClick={resetLocalState}>
-                  <RotateCcw size={14} strokeWidth={2.5} />
-                  Reset local
-                </button>
-              )}
+              <div className={styles.toolbarControlRow}>
+                {toolbarControls}
+                {readOnlyNotice && (
+                  <span className={readOnly ? styles.readOnlyPill : styles.toolbarPill}>{readOnlyNotice}</span>
+                )}
+                {visibleToolbarPills.map((pill) => (
+                  <span key={pill} className={styles.toolbarPill}>
+                    {pill}
+                  </span>
+                ))}
+                {!readOnly && (
+                  <button type="button" className={styles.resetButton} onClick={resetLocalState}>
+                    <RotateCcw size={14} strokeWidth={2.5} />
+                    Reset local
+                  </button>
+                )}
+              </div>
+              {toolbarNote && <p className={styles.toolbarNote}>{toolbarNote}</p>}
             </div>
           </header>
 
@@ -471,7 +480,11 @@ export function NativeSchedulerV2Spike({
                 onStartDemandDrag={handleStartDemandDrag}
                 readOnly={readOnly}
               />
-              <NativeSchedulerPreviewPanel selectedBlock={selectedBlock} lastCommand={lastCommand} />
+              <NativeSchedulerPreviewPanel
+                selectedBlock={selectedBlock}
+                lastCommand={lastCommand}
+                readOnly={readOnly}
+              />
             </aside>
           </div>
         </div>

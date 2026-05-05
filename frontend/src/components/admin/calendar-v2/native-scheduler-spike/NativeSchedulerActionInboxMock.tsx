@@ -1,7 +1,7 @@
 'use client';
 
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { AlertCircle, GripVertical } from 'lucide-react';
+import { AlertCircle, CheckCircle2, GripVertical } from 'lucide-react';
 import type { ActionInboxItem, CalendarV2DemandItem } from '..';
 import styles from './native-scheduler.module.css';
 
@@ -30,16 +30,34 @@ export function NativeSchedulerActionInboxMock({
   const secondaryActions = requiresAction.filter(
     (item) => item.source !== 'waitlist' || !demandById.has(item.sourceId),
   );
+  const hasRequiredItems = draggableDemandActions.length > 0 || secondaryActions.length > 0;
 
   return (
     <section className={styles.inboxPanel}>
       <div className={styles.panelHeader}>
-        <p className={styles.panelTitle}>Action Inbox</p>
+        <div className={styles.panelHeaderText}>
+          <p className={styles.panelTitle}>Action Inbox</p>
+          <p className={styles.panelSubtitle}>Requests and booking updates</p>
+        </div>
         <span className={styles.panelCount}>{requiresAction.length}</span>
       </div>
 
       <div className={styles.inboxContent}>
-        <p className={styles.inboxSectionLabel}>Requires action</p>
+        {hasRequiredItems ? (
+          <p className={styles.inboxSectionLabel}>Requires action</p>
+        ) : (
+          <div className={styles.inboxEmptyState}>
+            <span className={styles.emptyIcon}>
+              <CheckCircle2 size={17} strokeWidth={2.5} />
+            </span>
+            <div className={styles.emptyText}>
+              <p className={styles.emptyTitle}>No action items</p>
+              <p className={styles.emptyCopy}>
+                New requests and recovery items from the current calendar will appear here.
+              </p>
+            </div>
+          </div>
+        )}
 
         {draggableDemandActions.map((action) => {
           const demand = demandById.get(action.sourceId);
@@ -65,7 +83,7 @@ export function NativeSchedulerActionInboxMock({
                 <p className={styles.inboxSubtitle}>
                   {demand.service.name} · {demand.preferredWindow.label}
                 </p>
-                <span className={styles.inboxTag}>{readOnly ? 'Read-only' : 'Drag to place'}</span>
+                <span className={styles.inboxTag}>{readOnly ? 'Waitlist' : 'Drag to place'}</span>
               </div>
             </article>
           );
@@ -83,17 +101,19 @@ export function NativeSchedulerActionInboxMock({
           </article>
         ))}
 
-        <details className={styles.updatesDetails}>
-          <summary className={styles.updatesSummary}>Updates · {updates.length}</summary>
-          {updates.map((action) => (
-            <article key={action.id} className={`${styles.inboxItem} ${styles.secondaryItem}`}>
-              <div className={styles.inboxText}>
-                <p className={styles.inboxTitle}>{action.title}</p>
-                <p className={styles.inboxSubtitle}>{action.subtitle}</p>
-              </div>
-            </article>
-          ))}
-        </details>
+        {updates.length > 0 && (
+          <details className={styles.updatesDetails}>
+            <summary className={styles.updatesSummary}>Updates · {updates.length}</summary>
+            {updates.map((action) => (
+              <article key={action.id} className={`${styles.inboxItem} ${styles.secondaryItem}`}>
+                <div className={styles.inboxText}>
+                  <p className={styles.inboxTitle}>{action.title}</p>
+                  <p className={styles.inboxSubtitle}>{action.subtitle}</p>
+                </div>
+              </article>
+            ))}
+          </details>
+        )}
       </div>
     </section>
   );

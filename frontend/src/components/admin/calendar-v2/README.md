@@ -7,6 +7,9 @@ This folder contains renderer-independent contracts for a future admin Calendar 
 - The preview route is enabled by default and can be disabled with `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW=true`.
 - The current `/admin` calendar remains the default production calendar.
 - Calendar V2 write actions are intentionally disabled in the deployed preview.
+- The preview UI is desktop-first: the scheduler is the hero, the right rail stays lightweight, and the header keeps only date controls plus one subtle `Calendar V2 Preview · Read-only` indicator.
+- The production preview does not show fixture/demo data. If the current read returns demo-labeled staff/resources, the scheduler shows an honest fallback state instead of presenting those labels as real calendar data.
+- Empty states are intentional for missing staff resources, empty appointment days, empty Action Inbox content, no selected booking, and read errors.
 - Domain types, command shapes, projections, and Action Inbox helpers must stay independent of calendar rendering libraries.
 - FullCalendar, Bryntum, DayPilot, Mobiscroll, Schedule-X, or another scheduler must be hidden behind an adapter when added later.
 - Desktop and tablet landscape should use a scheduler-engine adapter.

@@ -1,7 +1,7 @@
 import type { CalendarV2CommandType } from '../commands';
 
 export const CALENDAR_V2_READONLY_NOTICE =
-  'Calendar V2 Preview · Read-only · Does not change appointments';
+  'Calendar V2 Preview · Read-only';
 
 export type CalendarV2ReadOnlyAction =
   | Extract<CalendarV2CommandType, 'moveAppointment' | 'placeRequest' | 'confirmRequest' | 'declineRequest' | 'cancelAppointment'>

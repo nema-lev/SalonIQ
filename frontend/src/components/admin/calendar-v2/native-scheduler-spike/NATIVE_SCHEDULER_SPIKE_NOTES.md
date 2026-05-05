@@ -6,7 +6,7 @@
 - Gate: enabled by default unless `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW === "true"`.
 - Visibility: direct URL only and unlinked from admin navigation.
 - Default route data: read-only real data through the current admin calendar board, waitlist, and services read endpoints.
-- Fixture data is preserved for the isolated native scheduler demo and for the route's safe debug fallback after a real-data read error.
+- Fixture data is preserved for isolated native scheduler component work only. The deployed `/admin/calendar-v2` real-data preview no longer links to fixture data after a read error.
 
 ## Package and Library Verdict
 
@@ -69,7 +69,7 @@ In the read-only real-data route, appointment move handles are disabled.
 - Timed appointment request states are projected into Action Inbox with `buildActionInboxItems(...)`.
 - Staff exceptions from the existing calendar board response are projected as read-only blocked-time blocks.
 - All Calendar V2 write actions remain disabled on the real-data route: no appointment move, no waitlist placement, no appointment creation, no status transition, no optimistic persistence, and no write API call.
-- The fixture scheduler path remains available as local-only debug fallback after a real-data read error.
+- The fixture scheduler remains isolated for local component work; the real-data route shows an honest read-error state instead of linking to fixtures.
 - Known limitations: scheduler hours are still fixed at 08:00-20:00, phone width still shows the separate agenda notice, and global notification/FYI items are not included because this pass only reuses the current shared calendar board/waitlist/services read path.
 
 ## Main read-only preview promotion
@@ -103,6 +103,18 @@ In the read-only real-data route, appointment move handles are disabled.
 - Fixes made: no application source fix was required in this QA pass.
 - Remaining risks: the browser data source was a transient mock backend, not the live production database; the blocked staff exception was verified by DOM query and is below the first desktop screenshot viewport; tablet portrait remains caveated as in the spike notes.
 - Verdict: pass with caveats.
+
+## Preview UI Cleanup Pass
+
+- Date of pass: 2026-05-05.
+- Visual cleanup: simplified the toolbar to date navigation, date picker, Today, and one subtle `Calendar V2 Preview · Read-only` indicator; removed the noisy `Real data`/status pill set from the production preview.
+- Calendar hierarchy: the scheduler remains left and Action Inbox remains right, but read-only staff columns now expand to fill the desktop calendar canvas instead of leaving unused horizontal space.
+- Right rail: Action Inbox and Booking Detail use lighter headers, compact counts, and designed empty states.
+- Honest data states: the real-data route no longer offers fixture data after read errors, and demo-labeled staff/resource values are replaced by an explicit fallback state.
+- Empty states covered: loading, no staff resources, no scheduled appointments, empty Action Inbox, no selected booking, and real-data read error.
+- Read-only contract preserved: drag grips and waitlist placement controls stay hidden on the real-data route, and no Calendar V2 write API calls are made.
+- Screenshots captured under `screenshots/`: `calendar-v2-ui-cleanup-1440x900.png`, `calendar-v2-ui-cleanup-1366x768.png`, `calendar-v2-ui-cleanup-390x844.png`, and `calendar-v2-ui-cleanup-empty-1440x900.png`.
+- Visual QA result from `/private/tmp/saloniq-calendar-v2-ui-qa-results.json`: requested viewports rendered, phone fallback remained visible, demo labels were absent, the old fixture fallback button was absent, appointment drag grip count was `0`, waitlist placement button count was `0`, and `writesAfterV2` was empty.
 
 ## Short-Card Readability Verdict
 

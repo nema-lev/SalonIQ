@@ -1,7 +1,7 @@
 'use client';
 
 import type { PointerEvent as ReactPointerEvent, RefObject } from 'react';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CalendarV2CalendarBlock } from '..';
 import {
   NATIVE_SCHEDULER_GEOMETRY,
@@ -17,6 +17,12 @@ import {
 } from './native-scheduler-geometry';
 import { NativeSchedulerEventCard } from './NativeSchedulerEventCard';
 import styles from './native-scheduler.module.css';
+
+export type NativeSchedulerNotice = {
+  title: string;
+  message?: string;
+  tone?: 'empty' | 'loading' | 'warning';
+};
 
 export type NativeSchedulerGridDropPreview = {
   kind: 'appointment' | 'demand_item';
@@ -41,7 +47,7 @@ type NativeSchedulerGridProps = {
     block: CalendarV2CalendarBlock,
   ) => void;
   readOnly?: boolean;
-  schedulerNotice?: string | null;
+  schedulerNotice?: NativeSchedulerNotice | null;
 };
 
 const HEADER_HEIGHT = 56;
@@ -60,19 +66,61 @@ export function NativeSchedulerGrid({
   readOnly = false,
   schedulerNotice,
 }: NativeSchedulerGridProps) {
-  const gridHeight = getGridHeight();
+  const containerRef = useRef<HTMLElement | null>(null);
+  const [availableWidth, setAvailableWidth] = useState(0);
+  const resourceColumnWidth = useMemo(
+    () =>
+      readOnly && resources.length > 0 && availableWidth > GUTTER_WIDTH
+        ? Math.max(
+            NATIVE_SCHEDULER_GEOMETRY.resourceColumnWidth,
+            Math.floor((availableWidth - GUTTER_WIDTH) / resources.length),
+          )
+        : NATIVE_SCHEDULER_GEOMETRY.resourceColumnWidth,
+    [availableWidth, readOnly, resources.length],
+  );
+  const geometry = useMemo(
+    () => ({
+      ...NATIVE_SCHEDULER_GEOMETRY,
+      resourceColumnWidth,
+    }),
+    [resourceColumnWidth],
+  );
+  const gridHeight = getGridHeight(geometry);
   const visibleColumnCount = Math.max(resources.length, 1);
-  const columnsWidth = visibleColumnCount * NATIVE_SCHEDULER_GEOMETRY.resourceColumnWidth;
-  const slots = useMemo(() => getTimeSlots(), []);
+  const columnsWidth = visibleColumnCount * geometry.resourceColumnWidth;
+  const slots = useMemo(() => getTimeSlots(geometry), [geometry]);
   const laneMap = useMemo(() => detectLocalOverlap(blocks), [blocks]);
   const appointmentBlocks = blocks.filter((block) => block.kind === 'appointment');
   const blockedBlocks = blocks.filter((block) => block.kind === 'blocked_time');
   const previewRect = dropPreview
-    ? calendarBlockToColumnRect(dropPreview, resources, NATIVE_SCHEDULER_GEOMETRY, 8)
+    ? calendarBlockToColumnRect(dropPreview, resources, geometry, 8)
     : null;
 
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node || typeof ResizeObserver === 'undefined') return;
+
+    const updateWidth = () => setAvailableWidth(node.clientWidth);
+    updateWidth();
+
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(node);
+
+    return () => observer.disconnect();
+  }, []);
+
+  if (resources.length === 0) {
+    return (
+      <section ref={containerRef} className={styles.schedulerPanel}>
+        <div className={styles.schedulerEmptyCanvas}>
+          <SchedulerNotice notice={schedulerNotice} />
+        </div>
+      </section>
+    );
+  }
+
   return (
-    <section className={styles.schedulerPanel}>
+    <section ref={containerRef} className={styles.schedulerPanel}>
       <div className={styles.schedulerScroll}>
         <div
           className={styles.schedulerCanvas}
@@ -87,7 +135,7 @@ export function NativeSchedulerGrid({
           <div
             className={styles.staffHeaderRow}
             style={{
-              gridTemplateColumns: `repeat(${visibleColumnCount}, ${NATIVE_SCHEDULER_GEOMETRY.resourceColumnWidth}px)`,
+              gridTemplateColumns: `repeat(${visibleColumnCount}, ${geometry.resourceColumnWidth}px)`,
             }}
           >
             {resources.map((resource) => (
@@ -124,12 +172,11 @@ export function NativeSchedulerGrid({
             style={{
               width: columnsWidth,
               height: gridHeight,
+              backgroundSize: `${geometry.resourceColumnWidth}px 100%, 100% 30px`,
             }}
           >
             {schedulerNotice && (
-              <div className={styles.schedulerNotice}>
-                {schedulerNotice}
-              </div>
+              <SchedulerNotice notice={schedulerNotice} />
             )}
 
             {resources.map((resource, index) => (
@@ -137,8 +184,8 @@ export function NativeSchedulerGrid({
                 key={resource.id}
                 className={styles.resourceColumn}
                 style={{
-                  left: index * NATIVE_SCHEDULER_GEOMETRY.resourceColumnWidth,
-                  width: NATIVE_SCHEDULER_GEOMETRY.resourceColumnWidth,
+                  left: index * geometry.resourceColumnWidth,
+                  width: geometry.resourceColumnWidth,
                 }}
               />
             ))}
@@ -153,12 +200,12 @@ export function NativeSchedulerGrid({
 
             <span
               className={styles.currentTimeLine}
-              style={{ top: timeToY(MOCK_CURRENT_TIME_MINUTES) }}
+              style={{ top: timeToY(MOCK_CURRENT_TIME_MINUTES, geometry) }}
               aria-hidden="true"
             />
 
             {blockedBlocks.map((block) => {
-              const rect = calendarBlockToColumnRect(block, resources);
+              const rect = calendarBlockToColumnRect(block, resources, geometry);
               if (!rect) return null;
 
               return (
@@ -198,7 +245,7 @@ export function NativeSchedulerGrid({
             )}
 
             {appointmentBlocks.map((block) => {
-              const rect = appointmentToRect(block, resources, laneMap.get(block.id));
+              const rect = appointmentToRect(block, resources, laneMap.get(block.id), geometry);
               if (!rect) return null;
 
               return (
@@ -219,6 +266,23 @@ export function NativeSchedulerGrid({
       </div>
     </section>
   );
+}
+
+function SchedulerNotice({ notice }: { notice?: NativeSchedulerNotice | null }) {
+  if (!notice) return null;
+
+  return (
+    <div className={`${styles.schedulerNotice} ${getNoticeToneClass(notice.tone)}`}>
+      <p className={styles.schedulerNoticeTitle}>{notice.title}</p>
+      {notice.message && <p className={styles.schedulerNoticeText}>{notice.message}</p>}
+    </div>
+  );
+}
+
+function getNoticeToneClass(tone: NativeSchedulerNotice['tone']) {
+  if (tone === 'warning') return styles.schedulerNoticeWarning;
+  if (tone === 'loading') return styles.schedulerNoticeLoading;
+  return styles.schedulerNoticeEmpty;
 }
 
 function formatDropPreview(preview: NativeSchedulerGridDropPreview) {

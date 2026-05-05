@@ -87,16 +87,20 @@ export function slotFromPointer({
   const x = clientX - gridRect.left;
   const y = clientY - gridRect.top;
 
-  if (x < 0 || y < 0 || x > gridRect.width || y > gridRect.height) {
+  if (x < 0 || x > gridRect.width) {
     return null;
   }
+
+  // Vertical overrun clamps into business hours; horizontal overrun stays invalid
+  // because it would otherwise imply the wrong staff/resource column.
+  const clampedY = Math.min(Math.max(y, 0), gridRect.height);
 
   const resourceMatch = getResourceFromX(x, resources, config.resourceColumnWidth);
   if (!resourceMatch) {
     return null;
   }
 
-  const rawStartMinutes = config.businessStartMinutes + y / config.pixelsPerMinute;
+  const rawStartMinutes = config.businessStartMinutes + clampedY / config.pixelsPerMinute;
   const startMinutes = clampToBusinessHours(
     snapToSlot(rawStartMinutes, config.slotMinutes),
     durationMinutes,

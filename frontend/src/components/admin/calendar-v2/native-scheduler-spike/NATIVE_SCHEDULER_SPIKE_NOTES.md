@@ -82,6 +82,20 @@ The spike keeps the calendar as the hero. The admin shell has its existing page 
 - Remaining risks: tablet portrait still uses the desktop/tablet scheduler renderer and is cramped; production still needs touch-device regression tests, keyboard parity, and server validation/rollback tests.
 - Verdict: pass with caveats.
 
+## Regression Guard Pass
+
+- Date of pass: 2026-05-05.
+- Existing frontend test framework: none found. `frontend/package.json` has no test script, and no Jest/Vitest/Playwright/Cypress setup was present. No new test framework or package was added.
+- Checks added: lightweight pure TypeScript regression checks in `native-scheduler-regression-checks.ts` with a local Node runner in `run-native-scheduler-regression-checks.mjs`.
+- Geometry coverage added: pixel conversion, business start/end mapping, 15-minute snapping, business-hour clamping, pointer y clamping above/below the grid, staff-column x resolution, invalid x returning `null`, short appointment minimum rect height, adjacent bookings not overlapping, and real overlaps receiving lanes.
+- Command-shape coverage added: `placeRequest` preview includes request id, target staff/start/end, source surface, idempotency key, and appointment draft details; `moveAppointment` preview includes appointment id, target staff/time, source surface, idempotency key, and optimistic previous target.
+- Invalid drop coverage added: pointer x outside staff columns returns `null`, so the helper path does not produce a scheduler target or command.
+- Grip guard added: event cards now expose `data-native-scheduler-role="drag-grip"` and `data-native-scheduler-role="event-body"` markers, plus an inline contract comment that only the grip owns pointer drag while the body remains select-only.
+- How to run: from `frontend/`, run `node src/components/admin/calendar-v2/native-scheduler-spike/run-native-scheduler-regression-checks.mjs`.
+- What remains manual: browser proof that body click opens preview without drag, hover/selection/drag states keep the grip visible, the short-card grip remains visible and usable, Action Inbox drag target labels match the visual slot, touch scrolling does not fight pointer drag, and phone width keeps the separate agenda note.
+- Remaining risks: the checks are runner-based self-checks, not integrated into a package test script; React DOM behavior still needs a real component/browser test harness before production integration.
+- Recommended next step: add a normal frontend test runner or browser-level interaction tests when the project adopts one, then wire this runner into CI or migrate these cases into that framework.
+
 ## Recommended Next Step
 
-Add focused tests for geometry helpers and pointer command emission, then wire the renderer to a read-only Calendar V2 projection adapter fed by the current calendar board data.
+Wire these regression checks into the project's future frontend test workflow, then connect the renderer to a read-only Calendar V2 projection adapter fed by the current calendar board data.

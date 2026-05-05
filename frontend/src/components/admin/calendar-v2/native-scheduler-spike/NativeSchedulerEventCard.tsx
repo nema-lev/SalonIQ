@@ -48,12 +48,15 @@ export function NativeSchedulerEventCard({
         ['--event-accent' as string]: accent,
         ['--event-border' as string]: colorWithAlpha(accent, '55'),
       }}
+      data-native-scheduler-card={isShort ? 'short' : 'normal'}
     >
+      {/* Regression contract: only this grip owns pointer drag; the card body stays select-only. */}
       <button
         type="button"
         className={styles.eventGrip}
         aria-label={`Move ${summary?.title ?? block.title}`}
         onPointerDown={(event) => onStartDrag(event, block)}
+        data-native-scheduler-role="drag-grip"
       >
         <GripVertical size={15} strokeWidth={2.6} />
       </button>
@@ -62,6 +65,7 @@ export function NativeSchedulerEventCard({
         type="button"
         className={styles.eventBody}
         onClick={() => onSelect(block.id)}
+        data-native-scheduler-role="event-body"
       >
         {isShort ? (
           <>

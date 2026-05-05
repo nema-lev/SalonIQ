@@ -1,0 +1,406 @@
+import type {
+  CalendarV2Appointment,
+  CalendarV2CalendarBlock,
+  CalendarV2DemandItem,
+} from '..';
+import {
+  NATIVE_SCHEDULER_GEOMETRY,
+  appointmentToRect,
+  clampToBusinessHours,
+  dateAndMinutesToIso,
+  detectLocalOverlap,
+  getGridHeight,
+  getMinutesFromDateTime,
+  getResourceFromX,
+  minutesToPixels,
+  slotFromPointer,
+  snapToSlot,
+  timeToY,
+  yToTime,
+  type NativeSchedulerResource,
+} from './native-scheduler-geometry';
+import {
+  commandPreviewLabel,
+  createMoveAppointmentCommand,
+  createPlaceRequestCommand,
+  hasPassedDragThreshold,
+} from './native-scheduler-drag';
+
+export type NativeSchedulerRegressionCheckResult = {
+  name: string;
+  passed: true;
+};
+
+type RegressionCheck = {
+  name: string;
+  run: () => void;
+};
+
+const CHECK_DATE = new Date(2026, 4, 5);
+const RESOURCES: NativeSchedulerResource[] = [
+  { id: 'staff-1', name: 'Mira' },
+  { id: 'staff-2', name: 'Boris' },
+  { id: 'staff-3', name: 'Nina' },
+  { id: 'staff-4', name: 'Ivo' },
+];
+
+const GRID_RECT = {
+  left: 100,
+  top: 200,
+  width: RESOURCES.length * NATIVE_SCHEDULER_GEOMETRY.resourceColumnWidth,
+  height: getGridHeight(),
+};
+
+const checks: RegressionCheck[] = [
+  {
+    name: 'geometry maps business hours and pixels consistently',
+    run: () => {
+      assertEqual(minutesToPixels(15), 30, '15 minutes should map to 30px');
+      assertEqual(timeToY(8 * 60), 0, 'business start should map to top of grid');
+      assertEqual(timeToY(20 * 60), getGridHeight(), 'business end should map to grid bottom');
+      assertEqual(getMinutesFromDateTime(yToTime(0, CHECK_DATE)), 8 * 60, 'grid top should map to 08:00');
+    },
+  },
+  {
+    name: 'geometry snaps and clamps 15-minute slots safely',
+    run: () => {
+      assertEqual(snapToSlot(487), 480, '487 minutes should snap down to 08:00');
+      assertEqual(snapToSlot(488), 495, '488 minutes should snap up to 08:15');
+      assertEqual(clampToBusinessHours(6 * 60, 60), 8 * 60, 'early starts clamp to business start');
+      assertEqual(clampToBusinessHours(20 * 60, 60), 19 * 60, '60-minute event clamps to latest valid start');
+      assertEqual(clampToBusinessHours(21 * 60, 15), 19 * 60 + 45, '15-minute event clamps to 19:45');
+    },
+  },
+  {
+    name: 'pointer slots clamp vertically and reject invalid resource columns',
+    run: () => {
+      const firstColumn = slotFromPointer({
+        clientX: GRID_RECT.left + 12,
+        clientY: GRID_RECT.top + timeToY(9 * 60),
+        gridRect: GRID_RECT,
+        resources: RESOURCES,
+        date: CHECK_DATE,
+        durationMinutes: 60,
+      });
+      assertDefined(firstColumn, 'first staff column should resolve');
+      assertEqual(firstColumn.resource.id, 'staff-1', 'x inside first column should resolve staff-1');
+      assertEqual(firstColumn.startMinutes, 9 * 60, 'pointer y should resolve 09:00');
+
+      const thirdColumn = slotFromPointer({
+        clientX: GRID_RECT.left + NATIVE_SCHEDULER_GEOMETRY.resourceColumnWidth * 2 + 16,
+        clientY: GRID_RECT.top + timeToY(10 * 60 + 30),
+        gridRect: GRID_RECT,
+        resources: RESOURCES,
+        date: CHECK_DATE,
+        durationMinutes: 45,
+      });
+      assertDefined(thirdColumn, 'third staff column should resolve');
+      assertEqual(thirdColumn.resource.id, 'staff-3', 'x inside third column should resolve staff-3');
+      assertEqual(thirdColumn.startMinutes, 10 * 60 + 30, 'pointer y should resolve 10:30');
+
+      const aboveGrid = slotFromPointer({
+        clientX: GRID_RECT.left + 20,
+        clientY: GRID_RECT.top - 6,
+        gridRect: GRID_RECT,
+        resources: RESOURCES,
+        date: CHECK_DATE,
+        durationMinutes: 60,
+      });
+      assertDefined(aboveGrid, 'slightly above-grid y should clamp to a safe slot');
+      assertEqual(aboveGrid.startMinutes, 8 * 60, 'above-grid y should clamp to business start');
+
+      const belowGrid = slotFromPointer({
+        clientX: GRID_RECT.left + 20,
+        clientY: GRID_RECT.top + GRID_RECT.height + 6,
+        gridRect: GRID_RECT,
+        resources: RESOURCES,
+        date: CHECK_DATE,
+        durationMinutes: 60,
+      });
+      assertDefined(belowGrid, 'slightly below-grid y should clamp to a safe slot');
+      assertEqual(belowGrid.startMinutes, 19 * 60, 'below-grid y should clamp to latest valid start');
+
+      assertEqual(
+        getResourceFromX(-1, RESOURCES),
+        null,
+        'negative resource x should return null instead of first staff',
+      );
+      assertEqual(
+        getResourceFromX(GRID_RECT.width + 1, RESOURCES),
+        null,
+        'x outside resource columns should return null',
+      );
+      assertEqual(
+        slotFromPointer({
+          clientX: GRID_RECT.left + GRID_RECT.width + 12,
+          clientY: GRID_RECT.top + timeToY(9 * 60),
+          gridRect: GRID_RECT,
+          resources: RESOURCES,
+          date: CHECK_DATE,
+          durationMinutes: 60,
+        }),
+        null,
+        'drop outside staff columns should not produce a slot target',
+      );
+    },
+  },
+  {
+    name: 'appointment rects keep short cards usable',
+    run: () => {
+      const shortRect = appointmentToRect(
+        calendarBlock('short-appointment', 'staff-1', 10 * 60 + 15, 10 * 60 + 25),
+        RESOURCES,
+        undefined,
+      );
+      assertDefined(shortRect, 'short appointment should produce a rect');
+      assertEqual(
+        shortRect.height,
+        NATIVE_SCHEDULER_GEOMETRY.minimumEventHeight,
+        '10-minute appointment should use minimum visible card height',
+      );
+    },
+  },
+  {
+    name: 'overlap detection separates real overlaps without flagging adjacent bookings',
+    run: () => {
+      const adjacentLayout = detectLocalOverlap([
+        calendarBlock('adjacent-a', 'staff-1', 9 * 60, 10 * 60),
+        calendarBlock('adjacent-b', 'staff-1', 10 * 60, 11 * 60),
+      ]);
+      assertEqual(adjacentLayout.get('adjacent-a')?.laneCount, 1, 'first adjacent booking should use one lane');
+      assertEqual(adjacentLayout.get('adjacent-b')?.laneCount, 1, 'second adjacent booking should use one lane');
+
+      const overlapLayout = detectLocalOverlap([
+        calendarBlock('overlap-a', 'staff-1', 9 * 60, 10 * 60),
+        calendarBlock('overlap-b', 'staff-1', 9 * 60 + 30, 10 * 60 + 30),
+      ]);
+      assertEqual(overlapLayout.get('overlap-a')?.laneCount, 2, 'first overlapping booking should see two lanes');
+      assertEqual(overlapLayout.get('overlap-b')?.laneCount, 2, 'second overlapping booking should see two lanes');
+      assert(
+        overlapLayout.get('overlap-a')?.lane !== overlapLayout.get('overlap-b')?.lane,
+        'overlapping bookings should occupy different lanes',
+      );
+    },
+  },
+  {
+    name: 'command previews preserve typed scheduler intent',
+    run: () => {
+      const target = {
+        staffId: 'staff-2',
+        staffName: 'Boris',
+        startAt: dateAndMinutesToIso(CHECK_DATE, 11 * 60),
+        endAt: dateAndMinutesToIso(CHECK_DATE, 12 * 60),
+      };
+      const demandItem = demandFixture();
+      const placeCommand = createPlaceRequestCommand({
+        demandItem,
+        target,
+        timezone: 'Europe/Sofia',
+      });
+
+      assertEqual(placeCommand.type, 'placeRequest', 'place command type should be placeRequest');
+      assertEqual(placeCommand.entity.id, demandItem.id, 'place command should carry request id');
+      assertEqual(placeCommand.entity.kind, 'demand_item', 'place command should target a demand item');
+      assertEqual(placeCommand.target.staffId, 'staff-2', 'place command should carry staff id');
+      assertEqual(placeCommand.target.startAt, target.startAt, 'place command should carry start time');
+      assertEqual(placeCommand.target.endAt, target.endAt, 'place command should carry end time');
+      assertEqual(placeCommand.sourceSurface, 'desktop_scheduler', 'place command should identify scheduler surface');
+      assert(
+        placeCommand.idempotencyKey?.startsWith('calendar-v2-spike:placeRequest:demand-1:') === true,
+        'place command should carry a local idempotency key',
+      );
+      assertEqual(placeCommand.createAppointmentDraft?.serviceId, 'service-1', 'place draft should carry service id');
+      assertEqual(placeCommand.createAppointmentDraft?.clientId, 'client-1', 'place draft should carry client id');
+      assertEqual(commandPreviewLabel(placeCommand), `placeRequest -> ${target.startAt}`, 'place label should be stable');
+
+      const appointment = appointmentFixture();
+      const moveCommand = createMoveAppointmentCommand({
+        appointment,
+        target,
+        previousTarget: {
+          staffId: appointment.staff.id,
+          startAt: appointment.startAt,
+          endAt: appointment.endAt,
+        },
+        timezone: 'Europe/Sofia',
+      });
+
+      assertEqual(moveCommand.type, 'moveAppointment', 'move command type should be moveAppointment');
+      assertEqual(moveCommand.entity.id, appointment.id, 'move command should carry appointment id');
+      assertEqual(moveCommand.entity.kind, 'appointment', 'move command should target an appointment');
+      assertEqual(moveCommand.target.staffId, 'staff-2', 'move command should carry target staff');
+      assertEqual(moveCommand.target.startAt, target.startAt, 'move command should carry target start');
+      assertEqual(moveCommand.sourceSurface, 'desktop_scheduler', 'move command should identify scheduler surface');
+      assert(
+        moveCommand.idempotencyKey?.startsWith('calendar-v2-spike:moveAppointment:appointment-1:') === true,
+        'move command should carry a local idempotency key',
+      );
+      assertEqual(
+        moveCommand.optimistic?.previousStaffId,
+        appointment.staff.id,
+        'move command should keep previous staff for future rollback',
+      );
+      assertEqual(
+        commandPreviewLabel(moveCommand),
+        `moveAppointment -> ${target.startAt}`,
+        'move label should be stable',
+      );
+    },
+  },
+  {
+    name: 'drag helper threshold separates click/select from drag intent',
+    run: () => {
+      assertEqual(
+        hasPassedDragThreshold({ x: 10, y: 10 }, { x: 12, y: 12 }),
+        false,
+        'small pointer movement should remain a click/select candidate',
+      );
+      assertEqual(
+        hasPassedDragThreshold({ x: 10, y: 10 }, { x: 15, y: 10 }),
+        true,
+        'larger pointer movement should become drag intent',
+      );
+    },
+  },
+];
+
+export function runNativeSchedulerRegressionChecks(): NativeSchedulerRegressionCheckResult[] {
+  return checks.map((check) => {
+    check.run();
+    return { name: check.name, passed: true };
+  });
+}
+
+function calendarBlock(
+  id: string,
+  staffId: string,
+  startMinutes: number,
+  endMinutes: number,
+): CalendarV2CalendarBlock {
+  const appointment = appointmentFixture({
+    id,
+    staffId,
+    startMinutes,
+    endMinutes,
+  });
+
+  return {
+    id,
+    sourceEntityType: 'appointment',
+    sourceEntityId: id,
+    kind: 'appointment',
+    startAt: appointment.startAt,
+    endAt: appointment.endAt,
+    staffId,
+    title: appointment.client.name,
+    subtitle: appointment.service.name,
+    color: appointment.service.color,
+    schedulingState: 'scheduled',
+    actionState: 'none',
+    appointment,
+    cardSummary: {
+      title: appointment.client.name,
+      subtitle: appointment.service.name,
+      timeLabel: `${formatMinutes(startMinutes)}-${formatMinutes(endMinutes)}`,
+      staffLabel: appointment.staff.name,
+      tone: 'default',
+      actionState: 'none',
+    },
+  };
+}
+
+function appointmentFixture(
+  options: {
+    id?: string;
+    staffId?: string;
+    startMinutes?: number;
+    endMinutes?: number;
+  } = {},
+): CalendarV2Appointment {
+  const id = options.id ?? 'appointment-1';
+  const staffId = options.staffId ?? 'staff-1';
+  const startMinutes = options.startMinutes ?? 9 * 60;
+  const endMinutes = options.endMinutes ?? 10 * 60;
+
+  return {
+    id,
+    version: 1,
+    startAt: dateAndMinutesToIso(CHECK_DATE, startMinutes),
+    endAt: dateAndMinutesToIso(CHECK_DATE, endMinutes),
+    schedulingState: 'scheduled',
+    requestState: 'none',
+    visitProgress: 'scheduled',
+    confirmationState: 'confirmed',
+    actionState: 'none',
+    communicationState: 'none',
+    client: {
+      id: 'client-1',
+      name: 'Mira Ivanova',
+      phone: '+359888000000',
+    },
+    service: {
+      id: 'service-1',
+      name: 'Cut and style',
+      durationMinutes: endMinutes - startMinutes,
+      color: '#64748b',
+    },
+    staff: {
+      id: staffId,
+      name: RESOURCES.find((resource) => resource.id === staffId)?.name ?? staffId,
+      color: '#64748b',
+    },
+  };
+}
+
+function demandFixture(): CalendarV2DemandItem {
+  return {
+    id: 'demand-1',
+    version: 2,
+    source: 'booking_request',
+    schedulingState: 'unscheduled',
+    requestState: 'requested',
+    actionState: 'requires_action',
+    communicationState: 'pending',
+    client: {
+      id: 'client-1',
+      name: 'Mira Ivanova',
+      phone: '+359888000000',
+    },
+    service: {
+      id: 'service-1',
+      name: 'Cut and style',
+      durationMinutes: 60,
+      color: '#64748b',
+    },
+    preferredWindow: {
+      date: '2026-05-05',
+      startTime: null,
+      endTime: null,
+      label: 'Today',
+    },
+    notes: 'Fixture-only regression guard',
+    createdAt: dateAndMinutesToIso(CHECK_DATE, 8 * 60),
+  };
+}
+
+function formatMinutes(minutes: number) {
+  return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+}
+
+function assert(value: unknown, message: string): asserts value {
+  if (!value) {
+    throw new Error(message);
+  }
+}
+
+function assertDefined<T>(value: T | null | undefined, message: string): asserts value is T {
+  if (value === null || value === undefined) {
+    throw new Error(message);
+  }
+}
+
+function assertEqual<T>(actual: T, expected: T, message: string) {
+  if (actual !== expected) {
+    throw new Error(`${message}. Expected ${String(expected)}, received ${String(actual)}.`);
+  }
+}

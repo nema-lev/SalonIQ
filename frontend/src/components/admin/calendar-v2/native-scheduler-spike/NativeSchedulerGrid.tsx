@@ -98,7 +98,16 @@ export function NativeSchedulerGrid({
 
           <div className={styles.timeGutter}>
             {slots.filter((slot) => slot.isHour).map((slot) => (
-              <span key={slot.minutes} className={styles.timeLabel} style={{ top: slot.top }}>
+              <span
+                key={slot.minutes}
+                className={styles.timeLabel}
+                style={{
+                  top:
+                    slot.minutes === NATIVE_SCHEDULER_GEOMETRY.businessStartMinutes
+                      ? slot.top + 8
+                      : slot.top,
+                }}
+              >
                 {slot.label}
               </span>
             ))}

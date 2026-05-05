@@ -68,6 +68,20 @@ The spike keeps the calendar as the hero. The admin shell has its existing page 
 - Fixture commands are emitted locally and logged; production command transport is not implemented.
 - The existing admin header title falls back to `Admin` for the hidden route because the route is intentionally not added to visible navigation/header mappings.
 
+## Visual QA Pass
+
+- Date of pass: 2026-05-05.
+- Local run: frontend dev server with `NEXT_PUBLIC_ENABLE_CALENDAR_V2_SPIKE=true`.
+- Tenant/auth shell: rendered through the normal admin shell using a transient local mock backend for `/tenants/config`, `/auth/login`, and `/auth/me`; the spike itself still uses fixture data only and makes no appointment API calls.
+- Viewports checked: 1440x900 desktop, 1366x768 laptop, 1024x768 tablet landscape, 768x1024 tablet portrait, 390x844 phone.
+- Screenshots saved under `frontend/src/components/admin/calendar-v2/native-scheduler-spike/screenshots/`.
+- Saved screenshots: `desktop-1440x900.png`, `laptop-1366x768.png`, `tablet-landscape-1024x768.png`, `tablet-portrait-768x1024.png`, `phone-390x844.png`, `desktop-1440x900-placement-preview.png`, `desktop-1440x900-after-interactions.png`.
+- Interaction checks passed: body click opens preview, body drag does not move appointments, appointment grip move emits local command, short-card grip move emits local command, Action Inbox demand drag opens placement preview with target staff/time, invalid outside drop does not create broken state.
+- Issues found: staff header name and hours were visually glued together; first time label was clipped under the sticky header; Action Inbox content could clip at shorter laptop height.
+- Fixes made: staff subline now renders as its own line, the first time-gutter label is offset into view, and Action Inbox content can scroll inside its docked panel instead of clipping.
+- Remaining risks: tablet portrait still uses the desktop/tablet scheduler renderer and is cramped; production still needs touch-device regression tests, keyboard parity, and server validation/rollback tests.
+- Verdict: pass with caveats.
+
 ## Recommended Next Step
 
 Add focused tests for geometry helpers and pointer command emission, then wire the renderer to a read-only Calendar V2 projection adapter fed by the current calendar board data.

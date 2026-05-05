@@ -1,0 +1,166 @@
+[
+  {
+    "viewport": {
+      "name": "desktop-1440x900",
+      "width": 1440,
+      "height": 900,
+      "mobile": false
+    },
+    "screenshotPath": "/Users/macbook/Documents/Codex project/saloniq/frontend/src/components/admin/calendar-v2/native-scheduler-spike/screenshots/desktop-1440x900.png",
+    "observations": {
+      "innerWidth": 1440,
+      "innerHeight": 900,
+      "documentScrollHeight": 900,
+      "documentClientHeight": 900,
+      "adminScrollHeight": 822,
+      "adminClientHeight": 822,
+      "adminHasPageScroll": false,
+      "schedulerVisible": true,
+      "gridVisible": true,
+      "inboxVisible": true,
+      "phoneNoticeVisible": false,
+      "staffNames": [
+        "Мира",
+        "Ивайло",
+        "Елена",
+        "Боряна"
+      ],
+      "shortGripVisible": true,
+      "shortCardText": "А\n10:15-10:30",
+      "selectedPreview": true
+    }
+  },
+  {
+    "viewport": {
+      "name": "laptop-1366x768",
+      "width": 1366,
+      "height": 768,
+      "mobile": false
+    },
+    "screenshotPath": "/Users/macbook/Documents/Codex project/saloniq/frontend/src/components/admin/calendar-v2/native-scheduler-spike/screenshots/laptop-1366x768.png",
+    "observations": {
+      "innerWidth": 1366,
+      "innerHeight": 768,
+      "documentScrollHeight": 768,
+      "documentClientHeight": 768,
+      "adminScrollHeight": 690,
+      "adminClientHeight": 690,
+      "adminHasPageScroll": false,
+      "schedulerVisible": true,
+      "gridVisible": true,
+      "inboxVisible": true,
+      "phoneNoticeVisible": false,
+      "staffNames": [
+        "Мира",
+        "Ивайло",
+        "Елена",
+        "Боряна"
+      ],
+      "shortGripVisible": true,
+      "shortCardText": "А\n10:15-10:30",
+      "selectedPreview": true
+    }
+  },
+  {
+    "viewport": {
+      "name": "tablet-landscape-1024x768",
+      "width": 1024,
+      "height": 768,
+      "mobile": false
+    },
+    "screenshotPath": "/Users/macbook/Documents/Codex project/saloniq/frontend/src/components/admin/calendar-v2/native-scheduler-spike/screenshots/tablet-landscape-1024x768.png",
+    "observations": {
+      "innerWidth": 1024,
+      "innerHeight": 768,
+      "documentScrollHeight": 768,
+      "documentClientHeight": 768,
+      "adminScrollHeight": 690,
+      "adminClientHeight": 690,
+      "adminHasPageScroll": false,
+      "schedulerVisible": true,
+      "gridVisible": true,
+      "inboxVisible": true,
+      "phoneNoticeVisible": false,
+      "staffNames": [
+        "Мира",
+        "Ивайло",
+        "Елена",
+        "Боряна"
+      ],
+      "shortGripVisible": true,
+      "shortCardText": "А\n10:15-10:30",
+      "selectedPreview": true
+    }
+  },
+  {
+    "viewport": {
+      "name": "tablet-portrait-768x1024",
+      "width": 768,
+      "height": 1024,
+      "mobile": false
+    },
+    "screenshotPath": "/Users/macbook/Documents/Codex project/saloniq/frontend/src/components/admin/calendar-v2/native-scheduler-spike/screenshots/tablet-portrait-768x1024.png",
+    "observations": {
+      "innerWidth": 768,
+      "innerHeight": 1024,
+      "documentScrollHeight": 1024,
+      "documentClientHeight": 1024,
+      "adminScrollHeight": 946,
+      "adminClientHeight": 946,
+      "adminHasPageScroll": false,
+      "schedulerVisible": true,
+      "gridVisible": true,
+      "inboxVisible": true,
+      "phoneNoticeVisible": false,
+      "staffNames": [
+        "Мира",
+        "Ивайло",
+        "Елена",
+        "Боряна"
+      ],
+      "shortGripVisible": true,
+      "shortCardText": "А\n10:15-10:30",
+      "selectedPreview": true
+    }
+  },
+  {
+    "viewport": {
+      "name": "phone-390x844",
+      "width": 390,
+      "height": 844,
+      "mobile": true
+    },
+    "screenshotPath": "/Users/macbook/Documents/Codex project/saloniq/frontend/src/components/admin/calendar-v2/native-scheduler-spike/screenshots/phone-390x844.png",
+    "observations": {
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "documentScrollHeight": 844,
+      "documentClientHeight": 844,
+      "adminScrollHeight": 766,
+      "adminClientHeight": 766,
+      "adminHasPageScroll": false,
+      "schedulerVisible": false,
+      "gridVisible": false,
+      "inboxVisible": false,
+      "phoneNoticeVisible": true,
+      "staffNames": [],
+      "shortGripVisible": false,
+      "shortCardText": "А10:15-10:30",
+      "selectedPreview": false
+    }
+  },
+  {
+    "viewport": {
+      "name": "desktop-1440x900-interactions"
+    },
+    "screenshotPath": "/Users/macbook/Documents/Codex project/saloniq/frontend/src/components/admin/calendar-v2/native-scheduler-spike/screenshots/desktop-1440x900-after-interactions.png",
+    "observations": {
+      "bodyClickOpensPreview": true,
+      "bodyDragDidNotMove": true,
+      "gripMoveCommandVisible": true,
+      "shortGripMoveCommandVisible": true,
+      "placementPreviewCorrect": true,
+      "invalidDropNoPlacement": true
+    }
+  }
+]

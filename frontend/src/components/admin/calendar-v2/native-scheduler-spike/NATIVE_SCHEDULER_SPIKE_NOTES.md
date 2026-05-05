@@ -72,6 +72,25 @@ In the read-only real-data route, appointment move handles are disabled.
 - The fixture scheduler path remains available as local-only debug fallback after a real-data read error.
 - Known limitations: scheduler hours are still fixed at 08:00-20:00, phone width still shows the separate agenda notice, and global notification/FYI items are not included because this pass only reuses the current shared calendar board/waitlist/services read path.
 
+## Current Calendar Parity QA
+
+- Date of pass: 2026-05-05.
+- Branch checked: `calendar-v2-native-scheduler-spike`.
+- Code parity checks: `useAdminCalendarBoardData(...)` keeps the current calendar board endpoint as `GET /appointments/calendar-board`, keeps the query key shape `['appointments-calendar-board', rangeStartIso, rangeEndExclusiveIso]`, and keeps the same `from`/`to` range values passed by `admin-calendar-workspace.tsx`.
+- Query behavior checked: calendar board `staleTime` remains 10 seconds, `refetchInterval` remains 10 seconds, and `refetchOnWindowFocus` remains `always`; waitlist and service query timings remain in the shared hook with the same values used by the current calendar path.
+- Refetch behavior checked: `admin-calendar-workspace.tsx` still routes post-mutation refreshes through the same `invalidateCalendar` flow, including calendar board refetch plus invalidation of `appointments-calendar-board`, `appointments-waitlist`, and `appointment-context`.
+- Shape assumptions checked: the current calendar still reads `calendarBoard.appointments`, `calendarBoard.staff`, and `calendarBoard.exceptions` from the shared hook result.
+- Browser checks were done with a transient local mock backend and the frontend dev server running with `NEXT_PUBLIC_ENABLE_CALENDAR_V2_SPIKE=true`.
+- Current calendar desktop screenshot captured: `screenshots/parity-current-admin-desktop.png`. It shows the visible admin calendar desktop layout with staff columns, scheduled appointments, and waitlist/request sections.
+- Current calendar interaction checks done: a visible appointment detail drawer opened in browser, and current calendar quick-action wiring remained active against the local mock backend.
+- Calendar V2 desktop screenshot captured: `screenshots/parity-calendar-v2-desktop-real-data.png`. It shows the read-only Calendar V2 preview with real-data appointments, staff resources, and Action Inbox items from the shared read path.
+- Calendar V2 phone screenshot captured: `screenshots/parity-calendar-v2-phone-fallback.png`. It shows the separate agenda renderer notice at 390x844.
+- Calendar V2 read-only checks from `/private/tmp/saloniq-calendar-v2-readonly-results.json`: read-only badge visible, real appointments rendered, staff resources rendered, waitlist items rendered, blocked staff exception rendered, appointment drag grip count `0`, demand placement button count `0`, preview panel opened, and `writesAfterV2` was empty.
+- Issues found: no application code parity issue was found. One browser automation attempt against the current calendar clicked a mock quick-action control while checking detail behavior; that produced mock-only PATCH requests and was not part of the clean Calendar V2 read-only write check.
+- Fixes made: no application source fix was required in this QA pass.
+- Remaining risks: the browser data source was a transient mock backend, not the live production database; the blocked staff exception was verified by DOM query and is below the first desktop screenshot viewport; tablet portrait remains caveated as in the spike notes.
+- Verdict: pass with caveats.
+
 ## Short-Card Readability Verdict
 
 Feasible. The 15-minute fixture uses a short-card variant that keeps initials, a useful time cue, and the drag grip visible. Text is intentionally compact instead of disappearing.

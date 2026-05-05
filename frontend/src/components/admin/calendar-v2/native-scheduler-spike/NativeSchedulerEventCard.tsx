@@ -16,6 +16,7 @@ type NativeSchedulerEventCardProps = {
     event: ReactPointerEvent<HTMLButtonElement>,
     block: CalendarV2CalendarBlock,
   ) => void;
+  readOnly?: boolean;
 };
 
 export function NativeSchedulerEventCard({
@@ -25,6 +26,7 @@ export function NativeSchedulerEventCard({
   isDragging,
   onSelect,
   onStartDrag,
+  readOnly = false,
 }: NativeSchedulerEventCardProps) {
   const appointment = block.appointment;
   const summary = block.cardSummary;
@@ -39,6 +41,7 @@ export function NativeSchedulerEventCard({
         isShort ? styles.eventCardShort : '',
         isSelected ? styles.eventCardSelected : '',
         isDragging ? styles.eventCardDragging : '',
+        readOnly ? styles.eventCardReadOnly : '',
       ].filter(Boolean).join(' ')}
       style={{
         top: rect.top,
@@ -51,15 +54,17 @@ export function NativeSchedulerEventCard({
       data-native-scheduler-card={isShort ? 'short' : 'normal'}
     >
       {/* Regression contract: only this grip owns pointer drag; the card body stays select-only. */}
-      <button
-        type="button"
-        className={styles.eventGrip}
-        aria-label={`Move ${summary?.title ?? block.title}`}
-        onPointerDown={(event) => onStartDrag(event, block)}
-        data-native-scheduler-role="drag-grip"
-      >
-        <GripVertical size={15} strokeWidth={2.6} />
-      </button>
+      {!readOnly && (
+        <button
+          type="button"
+          className={styles.eventGrip}
+          aria-label={`Move ${summary?.title ?? block.title}`}
+          onPointerDown={(event) => onStartDrag(event, block)}
+          data-native-scheduler-role="drag-grip"
+        >
+          <GripVertical size={15} strokeWidth={2.6} />
+        </button>
+      )}
 
       <button
         type="button"

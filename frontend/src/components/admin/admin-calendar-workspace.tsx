@@ -24,15 +24,14 @@ import { AdminCalendarMobile } from './admin-calendar-mobile';
 import { AppointmentMoveModal } from './appointment-move-modal';
 import { CalendarDetailDrawer, type CalendarDetailState } from './calendar-detail-drawer';
 import { CalendarRequestSections } from './calendar-request-sections';
+import { useAdminCalendarBoardData } from './use-admin-calendar-board-data';
 import {
   CALENDAR_SLOT_MINUTES,
   type Appointment,
   type AppointmentContextResponse,
-  type CalendarBoardResponse,
   type CalendarBoardStaff,
   type CalendarDropPreview,
   type CalendarViewMode,
-  type Service,
   type Slot,
   type StaffException,
   type WaitlistEntry,
@@ -164,30 +163,15 @@ export function AdminCalendarWorkspace() {
     [currentDate, view],
   );
 
-  const { data: calendarBoard, isLoading, refetch } = useQuery({
-    queryKey: ['appointments-calendar-board', rangeStart.toISOString(), rangeEndExclusive.toISOString()],
-    queryFn: () =>
-      apiClient.get<CalendarBoardResponse>('/appointments/calendar-board', {
-        from: rangeStart.toISOString(),
-        to: rangeEndExclusive.toISOString(),
-      }),
-    staleTime: 10 * 1000,
-    refetchInterval: 10 * 1000,
-    refetchOnWindowFocus: 'always',
-  });
-
-  const { data: waitlistEntries = [] } = useQuery({
-    queryKey: ['appointments-waitlist'],
-    queryFn: () => apiClient.get<WaitlistEntry[]>('/appointments/waitlist'),
-    staleTime: 15 * 1000,
-    refetchInterval: 15 * 1000,
-    refetchOnWindowFocus: 'always',
-  });
-
-  const { data: services = [] } = useQuery({
-    queryKey: ['admin-calendar-services'],
-    queryFn: () => apiClient.get<Service[]>('/services/admin'),
-    staleTime: 60 * 1000,
+  const {
+    calendarBoard,
+    waitlistEntries,
+    services,
+    isCalendarBoardLoading: isLoading,
+    refetchCalendarBoard,
+  } = useAdminCalendarBoardData({
+    rangeStart,
+    rangeEndExclusive,
   });
 
   const selectedAppointmentId = detail?.type === 'appointment' ? detail.id : null;
@@ -335,11 +319,11 @@ export function AdminCalendarWorkspace() {
   }, [placementNotice]);
 
   const invalidateCalendar = useCallback(async () => {
-    await refetch();
+    await refetchCalendarBoard();
     queryClient.invalidateQueries({ queryKey: ['appointments-calendar-board'] });
     queryClient.invalidateQueries({ queryKey: ['appointments-waitlist'] });
     queryClient.invalidateQueries({ queryKey: ['appointment-context'] });
-  }, [queryClient, refetch]);
+  }, [queryClient, refetchCalendarBoard]);
 
   const statusMutation = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {

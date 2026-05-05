@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { NativeSchedulerV2Spike } from '@/components/admin/calendar-v2/native-scheduler-spike/NativeSchedulerV2Spike';
+import { CalendarV2RealDataAdapter } from '@/components/admin/calendar-v2/real-data/CalendarV2RealDataAdapter';
 
 export const metadata: Metadata = {
   title: 'Calendar V2 Spike',
@@ -15,5 +15,5 @@ export default function AdminCalendarV2SpikePage() {
     );
   }
 
-  return <NativeSchedulerV2Spike />;
+  return <CalendarV2RealDataAdapter />;
 }

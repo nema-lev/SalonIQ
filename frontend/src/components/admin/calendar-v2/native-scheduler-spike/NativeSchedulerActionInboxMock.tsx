@@ -12,12 +12,14 @@ type NativeSchedulerActionInboxMockProps = {
     event: ReactPointerEvent<HTMLButtonElement>,
     item: CalendarV2DemandItem,
   ) => void;
+  readOnly?: boolean;
 };
 
 export function NativeSchedulerActionInboxMock({
   demandItems,
   actionItems,
   onStartDemandDrag,
+  readOnly = false,
 }: NativeSchedulerActionInboxMockProps) {
   const demandById = new Map(demandItems.map((item) => [item.id, item]));
   const requiresAction = actionItems.filter((item) => item.bucket === 'requires_action');
@@ -44,21 +46,26 @@ export function NativeSchedulerActionInboxMock({
           if (!demand) return null;
 
           return (
-            <article key={action.id} className={styles.inboxItem}>
-              <button
-                type="button"
-                className={styles.inboxGrip}
-                aria-label={`Place ${demand.client.name}`}
-                onPointerDown={(event) => onStartDemandDrag(event, demand)}
-              >
-                <GripVertical size={16} strokeWidth={2.6} />
-              </button>
+            <article
+              key={action.id}
+              className={`${styles.inboxItem} ${readOnly ? styles.inboxItemReadOnly : ''}`}
+            >
+              {!readOnly && (
+                <button
+                  type="button"
+                  className={styles.inboxGrip}
+                  aria-label={`Place ${demand.client.name}`}
+                  onPointerDown={(event) => onStartDemandDrag(event, demand)}
+                >
+                  <GripVertical size={16} strokeWidth={2.6} />
+                </button>
+              )}
               <div className={styles.inboxText}>
                 <p className={styles.inboxTitle}>{demand.client.name}</p>
                 <p className={styles.inboxSubtitle}>
                   {demand.service.name} · {demand.preferredWindow.label}
                 </p>
-                <span className={styles.inboxTag}>Drag to place</span>
+                <span className={styles.inboxTag}>{readOnly ? 'Read-only' : 'Drag to place'}</span>
               </div>
             </article>
           );

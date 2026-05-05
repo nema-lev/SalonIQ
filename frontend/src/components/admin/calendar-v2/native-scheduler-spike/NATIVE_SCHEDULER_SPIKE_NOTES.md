@@ -5,8 +5,8 @@
 - Route: `/admin/calendar-v2`
 - Gate: `NEXT_PUBLIC_ENABLE_CALENDAR_V2_SPIKE === "true"`
 - Visibility: hidden and unlinked from admin navigation.
-- Backend/API usage: none.
-- Fixture data only.
+- Default route data: read-only real data through the current admin calendar board, waitlist, and services read endpoints.
+- Fixture data is preserved for the isolated native scheduler demo and for the route's safe debug fallback after a real-data read error.
 
 ## Package and Library Verdict
 
@@ -17,6 +17,8 @@
 
 ## What Works
 
+- Hidden route renders the native scheduler from real appointments, staff, services, waitlist entries, and staff exceptions when the feature flag is enabled and current admin auth/tenant context can read the existing calendar data.
+- Real-data route is read-only: appointment drag handles and waitlist drag-to-place controls are disabled.
 - Desktop/tablet-landscape resource day grid with staff columns, 15-minute slots, 08:00-20:00 hours, sticky toolbar, sticky staff header, sticky time gutter, mocked current-time line, fixture appointments, overlap lanes, and a blocked time region.
 - Action Inbox mock shows demand/request items, pending approval, cancellation recovery, and collapsed updates.
 - Demand items can be dragged from Action Inbox into the scheduler with native pointer events.
@@ -28,8 +30,8 @@
 
 ## What Does Not Work
 
-- No backend writes.
-- No appointment creation.
+- No backend writes from Calendar V2.
+- No appointment creation from Calendar V2.
 - No server validation.
 - No persistence after reset/reload.
 - No resize interaction.
@@ -47,9 +49,28 @@ The implementation is clean enough for a SalonIQ-specific scheduler because poin
 
 Feasible. Dragging demand from Action Inbox to a staff/time slot creates a typed local `placeRequest` command with target staff, start, end, and draft appointment details. The confirm action is intentionally disabled and no API is called.
 
+In the read-only real-data route, drag-to-place is disabled instead of emitting command previews.
+
 ## Appointment Move Verdict
 
 Feasible for the narrow SalonIQ day scheduler. Existing appointment cards emit a typed `moveAppointment` command and move locally. The code comment marks the production requirement: server validation plus rollback/reconciliation on failure.
+
+In the read-only real-data route, appointment move handles are disabled.
+
+## Read-only real-data adapter pass
+
+- Date of pass: 2026-05-05.
+- Added `frontend/src/components/admin/use-admin-calendar-board-data.ts` to share the existing current-calendar read path without changing query keys, endpoints, refetch intervals, or current calendar mutations.
+- Hidden route `/admin/calendar-v2` now renders `CalendarV2RealDataAdapter` when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_SPIKE === "true"`.
+- The adapter reads `GET /appointments/calendar-board`, `GET /appointments/waitlist`, and `GET /services/admin` through the existing `apiClient`.
+- Appointments for the selected day are projected to `CalendarV2Appointment` and `CalendarV2CalendarBlock` with `buildCalendarV2Projection(...)`.
+- Staff is mapped to native scheduler resources.
+- Waitlist entries are projected to `CalendarV2DemandItem` and Action Inbox items.
+- Timed appointment request states are projected into Action Inbox with `buildActionInboxItems(...)`.
+- Staff exceptions from the existing calendar board response are projected as read-only blocked-time blocks.
+- All Calendar V2 write actions remain disabled on the real-data route: no appointment move, no waitlist placement, no appointment creation, no status transition, no optimistic persistence, and no write API call.
+- The fixture scheduler path remains available as local-only debug fallback after a real-data read error.
+- Known limitations: scheduler hours are still fixed at 08:00-20:00, phone width still shows the separate agenda notice, and global notification/FYI items are not included because this pass only reuses the current shared calendar board/waitlist/services read path.
 
 ## Short-Card Readability Verdict
 

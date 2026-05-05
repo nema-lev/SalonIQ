@@ -40,6 +40,8 @@ type NativeSchedulerGridProps = {
     event: ReactPointerEvent<HTMLButtonElement>,
     block: CalendarV2CalendarBlock,
   ) => void;
+  readOnly?: boolean;
+  schedulerNotice?: string | null;
 };
 
 const HEADER_HEIGHT = 56;
@@ -55,9 +57,12 @@ export function NativeSchedulerGrid({
   gridRef,
   onSelectBlock,
   onStartAppointmentDrag,
+  readOnly = false,
+  schedulerNotice,
 }: NativeSchedulerGridProps) {
   const gridHeight = getGridHeight();
-  const columnsWidth = resources.length * NATIVE_SCHEDULER_GEOMETRY.resourceColumnWidth;
+  const visibleColumnCount = Math.max(resources.length, 1);
+  const columnsWidth = visibleColumnCount * NATIVE_SCHEDULER_GEOMETRY.resourceColumnWidth;
   const slots = useMemo(() => getTimeSlots(), []);
   const laneMap = useMemo(() => detectLocalOverlap(blocks), [blocks]);
   const appointmentBlocks = blocks.filter((block) => block.kind === 'appointment');
@@ -82,7 +87,7 @@ export function NativeSchedulerGrid({
           <div
             className={styles.staffHeaderRow}
             style={{
-              gridTemplateColumns: `repeat(${resources.length}, ${NATIVE_SCHEDULER_GEOMETRY.resourceColumnWidth}px)`,
+              gridTemplateColumns: `repeat(${visibleColumnCount}, ${NATIVE_SCHEDULER_GEOMETRY.resourceColumnWidth}px)`,
             }}
           >
             {resources.map((resource) => (
@@ -121,6 +126,12 @@ export function NativeSchedulerGrid({
               height: gridHeight,
             }}
           >
+            {schedulerNotice && (
+              <div className={styles.schedulerNotice}>
+                {schedulerNotice}
+              </div>
+            )}
+
             {resources.map((resource, index) => (
               <div
                 key={resource.id}
@@ -199,6 +210,7 @@ export function NativeSchedulerGrid({
                   isDragging={draggingBlockId === block.id}
                   onSelect={onSelectBlock}
                   onStartDrag={onStartAppointmentDrag}
+                  readOnly={readOnly}
                 />
               );
             })}

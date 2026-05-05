@@ -6,12 +6,14 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { format } from 'date-fns';
 import { bg } from 'date-fns/locale';
 import { CalendarDays, RotateCcw } from 'lucide-react';
 import type {
+  ActionInboxItem,
   CalendarV2CalendarBlock,
   CalendarV2Command,
   CalendarV2DemandItem,
@@ -71,11 +73,41 @@ type ActiveDragOperation =
       block: CalendarV2CalendarBlock;
     };
 
-export function NativeSchedulerV2Spike() {
+type NativeSchedulerV2SpikeProps = {
+  date?: Date;
+  resources?: NativeSchedulerResource[];
+  calendarBlocks?: CalendarV2CalendarBlock[];
+  demandItems?: CalendarV2DemandItem[];
+  actionItems?: ActionInboxItem[];
+  readOnly?: boolean;
+  readOnlyNotice?: string;
+  schedulerNotice?: string | null;
+  toolbarEyebrow?: string;
+  toolbarPills?: string[];
+  toolbarControls?: ReactNode;
+};
+
+export function NativeSchedulerV2Spike({
+  date,
+  resources: inputResources,
+  calendarBlocks,
+  demandItems: inputDemandItems,
+  actionItems: inputActionItems,
+  readOnly = false,
+  readOnlyNotice,
+  schedulerNotice,
+  toolbarEyebrow = 'Calendar V2 native spike',
+  toolbarPills,
+  toolbarControls,
+}: NativeSchedulerV2SpikeProps = {}) {
+  const sourceBlocks = calendarBlocks ?? nativeSchedulerCalendarBlocks;
+  const schedulerDate = date ?? nativeSchedulerDate;
+  const demandItems = inputDemandItems ?? nativeSchedulerDemandItems;
+  const actionItems = inputActionItems ?? nativeSchedulerActionInboxItems;
   const gridRef = useRef<HTMLDivElement | null>(null);
   const activeDragRef = useRef<ActiveDragOperation | null>(null);
-  const [blocks, setBlocks] = useState(nativeSchedulerCalendarBlocks);
-  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(nativeSchedulerCalendarBlocks[0]?.id ?? null);
+  const [blocks, setBlocks] = useState(sourceBlocks);
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(sourceBlocks[0]?.id ?? null);
   const [dragActive, setDragActive] = useState(false);
   const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null);
   const [dropPreview, setDropPreview] = useState<NativeSchedulerGridDropPreview | null>(null);
@@ -85,18 +117,36 @@ export function NativeSchedulerV2Spike() {
 
   const resources = useMemo<NativeSchedulerResource[]>(
     () =>
+      inputResources ??
       nativeSchedulerStaff.map((staff) => ({
         id: staff.id,
         name: staff.name,
         color: staff.color,
       })),
-    [],
+    [inputResources],
   );
   const selectedBlock = useMemo(
     () => blocks.find((block) => block.id === selectedBlockId) ?? null,
     [blocks, selectedBlockId],
   );
-  const dateLabel = format(nativeSchedulerDate, "EEEE, d MMMM yyyy 'г.'", { locale: bg });
+  const dateLabel = format(schedulerDate, "EEEE, d MMMM yyyy 'г.'", { locale: bg });
+  const visibleToolbarPills = toolbarPills ?? ['15 min slots', '08:00-20:00'];
+
+  useEffect(() => {
+    setBlocks(sourceBlocks);
+    setSelectedBlockId((current) =>
+      current && sourceBlocks.some((block) => block.id === current)
+        ? current
+        : sourceBlocks[0]?.id ?? null,
+    );
+    activeDragRef.current = null;
+    setDragActive(false);
+    setDraggingBlockId(null);
+    setDropPreview(null);
+    setDragOverlay(null);
+    setPlacementPreview(null);
+    setLastCommand(null);
+  }, [sourceBlocks]);
 
   const resolveDropTarget = useCallback(
     ({
@@ -120,7 +170,7 @@ export function NativeSchedulerV2Spike() {
         clientY,
         gridRect: grid.getBoundingClientRect(),
         resources,
-        date: nativeSchedulerDate,
+        date: schedulerDate,
         durationMinutes,
       });
 
@@ -138,11 +188,13 @@ export function NativeSchedulerV2Spike() {
 
       return target;
     },
-    [blocks, resources],
+    [blocks, resources, schedulerDate],
   );
 
   const commitDrop = useCallback(
     (drag: ActiveDragOperation, target: NativeSchedulerGridDropPreview) => {
+      if (readOnly) return;
+
       const timezone = getClientTimezone();
       const commandTarget = {
         startAt: target.startAt,
@@ -191,7 +243,7 @@ export function NativeSchedulerV2Spike() {
       setBlocks((current) => current.map((block) => moveBlockLocally(block, drag.block.id, target, resources)));
       setSelectedBlockId(drag.block.id);
     },
-    [resources],
+    [readOnly, resources],
   );
 
   useEffect(() => {
@@ -270,6 +322,8 @@ export function NativeSchedulerV2Spike() {
 
   const handleStartDemandDrag = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>, demandItem: CalendarV2DemandItem) => {
+      if (readOnly) return;
+
       startPointerDrag(event);
       const durationMinutes = Math.max(
         NATIVE_SCHEDULER_GEOMETRY.slotMinutes,
@@ -300,11 +354,12 @@ export function NativeSchedulerV2Spike() {
         hasConflict: false,
       });
     },
-    [],
+    [readOnly],
   );
 
   const handleStartAppointmentDrag = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>, block: CalendarV2CalendarBlock) => {
+      if (readOnly) return;
       if (!block.appointment) return;
 
       startPointerDrag(event);
@@ -333,13 +388,13 @@ export function NativeSchedulerV2Spike() {
         hasConflict: false,
       });
     },
-    [],
+    [readOnly],
   );
 
   const resetLocalState = () => {
     activeDragRef.current = null;
-    setBlocks(nativeSchedulerCalendarBlocks);
-    setSelectedBlockId(nativeSchedulerCalendarBlocks[0]?.id ?? null);
+    setBlocks(sourceBlocks);
+    setSelectedBlockId(sourceBlocks[0]?.id ?? null);
     setDragActive(false);
     setDraggingBlockId(null);
     setDropPreview(null);
@@ -362,18 +417,27 @@ export function NativeSchedulerV2Spike() {
                 <CalendarDays size={18} strokeWidth={2.5} />
               </span>
               <span className="min-w-0">
-                <p className={styles.toolbarEyebrow}>Calendar V2 native spike</p>
+                <p className={styles.toolbarEyebrow}>{toolbarEyebrow}</p>
                 <h2 className={styles.toolbarHeading}>{dateLabel}</h2>
               </span>
             </div>
 
             <div className={styles.toolbarMeta}>
-              <span className={styles.toolbarPill}>15 min slots</span>
-              <span className={styles.toolbarPill}>08:00-20:00</span>
-              <button type="button" className={styles.resetButton} onClick={resetLocalState}>
-                <RotateCcw size={14} strokeWidth={2.5} />
-                Reset local
-              </button>
+              {toolbarControls}
+              {readOnlyNotice && (
+                <span className={readOnly ? styles.readOnlyPill : styles.toolbarPill}>{readOnlyNotice}</span>
+              )}
+              {visibleToolbarPills.map((pill) => (
+                <span key={pill} className={styles.toolbarPill}>
+                  {pill}
+                </span>
+              ))}
+              {!readOnly && (
+                <button type="button" className={styles.resetButton} onClick={resetLocalState}>
+                  <RotateCcw size={14} strokeWidth={2.5} />
+                  Reset local
+                </button>
+              )}
             </div>
           </header>
 
@@ -388,6 +452,8 @@ export function NativeSchedulerV2Spike() {
                 gridRef={gridRef}
                 onSelectBlock={setSelectedBlockId}
                 onStartAppointmentDrag={handleStartAppointmentDrag}
+                readOnly={readOnly}
+                schedulerNotice={schedulerNotice}
               />
 
               {placementPreview && (
@@ -400,9 +466,10 @@ export function NativeSchedulerV2Spike() {
 
             <aside className={styles.rightRail}>
               <NativeSchedulerActionInboxMock
-                demandItems={nativeSchedulerDemandItems}
-                actionItems={nativeSchedulerActionInboxItems}
+                demandItems={demandItems}
+                actionItems={actionItems}
                 onStartDemandDrag={handleStartDemandDrag}
+                readOnly={readOnly}
               />
               <NativeSchedulerPreviewPanel selectedBlock={selectedBlock} lastCommand={lastCommand} />
             </aside>

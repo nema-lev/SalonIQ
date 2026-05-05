@@ -81,6 +81,8 @@
 .toolbarMeta {
   display: flex;
   flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 8px;
 }
@@ -96,6 +98,20 @@
   font-size: 12px;
   font-weight: 800;
   color: #475569;
+  white-space: nowrap;
+}
+
+.readOnlyPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  background: #fff7ed;
+  padding: 8px 11px;
+  font-size: 12px;
+  font-weight: 900;
+  color: #9a3412;
   white-space: nowrap;
 }
 
@@ -236,6 +252,23 @@
   background-size: 236px 100%, 100% 30px;
 }
 
+.schedulerNotice {
+  position: absolute;
+  left: 16px;
+  top: 16px;
+  z-index: 28;
+  max-width: min(360px, calc(100% - 32px));
+  border: 1px solid #dbe3ee;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.12);
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 900;
+  color: #475569;
+  pointer-events: none;
+}
+
 .resourceColumn {
   position: absolute;
   top: 0;
@@ -341,6 +374,10 @@
   opacity: 0.62;
 }
 
+.eventCardReadOnly {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .eventGrip {
   display: flex;
   height: 100%;
@@ -441,6 +478,10 @@
 
 .eventCardShort {
   grid-template-columns: 24px minmax(0, 1fr);
+}
+
+.eventCardShort.eventCardReadOnly {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .eventCardShort .eventGrip {
@@ -585,6 +626,10 @@
   border-radius: 8px;
   background: #ffffff;
   padding: 8px;
+}
+
+.inboxItemReadOnly {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .inboxGrip {

@@ -1,6 +1,15 @@
 # Calendar V2 Real-Data Adapter
 
-This folder connects the hidden `/admin/calendar-v2` preview to the existing admin calendar read path.
+This folder connects the direct `/admin/calendar-v2` preview route to the existing admin calendar read path.
+
+## Main Preview Route
+
+- Calendar V2 read-only preview is deployed on `main` for hands-on Oracle testing.
+- Route: `/admin/calendar-v2`.
+- The current `/admin` calendar remains the default and production calendar.
+- The preview route is available by default.
+- To disable the preview route in an environment, set `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW=true`.
+- The route is intentionally not added to admin navigation.
 
 ## Data Source
 

@@ -31,7 +31,7 @@ export function NativeSchedulerPlacementPreview({
           {preview.timeLabel} with {preview.staffName}
         </p>
         <p className={styles.previewMeta}>
-          Local command only. No appointment API is called by this spike.
+          Local command only. No appointment API is called by this preview.
         </p>
         <div className={styles.commandLine}>{preview.command.idempotencyKey}</div>
       </div>

@@ -96,7 +96,7 @@ export function NativeSchedulerV2Spike({
   readOnly = false,
   readOnlyNotice,
   schedulerNotice,
-  toolbarEyebrow = 'Calendar V2 native spike',
+  toolbarEyebrow = 'Calendar V2 native preview',
   toolbarPills,
   toolbarControls,
 }: NativeSchedulerV2SpikeProps = {}) {
@@ -217,7 +217,7 @@ export function NativeSchedulerV2Spike({
           timeLabel: formatTargetTime(target),
         });
         setLastCommand(command);
-        console.info('[Calendar V2 native scheduler spike command]', command);
+        console.info('[Calendar V2 native scheduler preview command]', command);
         return;
       }
 
@@ -237,7 +237,7 @@ export function NativeSchedulerV2Spike({
       });
 
       setLastCommand(command);
-      console.info('[Calendar V2 native scheduler spike command]', command);
+      console.info('[Calendar V2 native scheduler preview command]', command);
 
       // Production must validate this command server-side and rollback/reconcile on failure.
       setBlocks((current) => current.map((block) => moveBlockLocally(block, drag.block.id, target, resources)));

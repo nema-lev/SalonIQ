@@ -3,6 +3,10 @@
 This folder contains renderer-independent contracts for a future admin Calendar V2.
 
 - This is a foundation only. It does not change the current admin calendar route or UI.
+- The read-only Calendar V2 preview is available on `main` at `/admin/calendar-v2` for direct Oracle testing.
+- The preview route is enabled by default and can be disabled with `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW=true`.
+- The current `/admin` calendar remains the default production calendar.
+- Calendar V2 write actions are intentionally disabled in the deployed preview.
 - Domain types, command shapes, projections, and Action Inbox helpers must stay independent of calendar rendering libraries.
 - FullCalendar, Bryntum, DayPilot, Mobiscroll, Schedule-X, or another scheduler must be hidden behind an adapter when added later.
 - Desktop and tablet landscape should use a scheduler-engine adapter.

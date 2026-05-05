@@ -240,7 +240,7 @@ function buildService(
   return {
     id,
     name,
-    category: 'Spike fixtures',
+    category: 'Preview fixtures',
     duration_minutes: durationMinutes,
     price: null,
     is_public: true,

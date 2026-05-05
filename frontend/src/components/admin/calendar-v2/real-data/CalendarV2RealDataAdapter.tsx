@@ -96,7 +96,7 @@ export function CalendarV2RealDataAdapter() {
       <section className="rounded-lg border border-rose-200 bg-white p-5 text-sm text-slate-700">
         <div className="max-w-3xl">
           <p className="text-xs font-black uppercase tracking-[0.18em] text-rose-600">
-            Calendar V2 real-data adapter
+            Calendar V2 Preview
           </p>
           <h2 className="mt-2 text-lg font-black text-slate-900">Could not load current admin calendar data.</h2>
           <p className="mt-2 font-semibold text-slate-600">{getErrorMessage(error)}</p>
@@ -141,8 +141,9 @@ export function CalendarV2RealDataAdapter() {
       readOnly
       readOnlyNotice={CALENDAR_V2_READONLY_NOTICE}
       schedulerNotice={schedulerNotice}
-      toolbarEyebrow="Calendar V2 real-data adapter"
+      toolbarEyebrow="Calendar V2 Preview"
       toolbarPills={[
+        'Current calendar remains production',
         'Real data',
         getCalendarV2RealDataStatusLabel(projection),
         isFetching ? 'Refreshing' : 'Read-only',

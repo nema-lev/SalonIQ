@@ -84,7 +84,7 @@ export function createMoveAppointmentCommand({
       id: appointment.id,
       version: appointment.version,
     },
-    actorIntent: 'Move appointment inside Calendar V2 native scheduler spike.',
+    actorIntent: 'Move appointment inside Calendar V2 native scheduler preview.',
     sourceSurface: 'desktop_scheduler',
     requestedAt: new Date().toISOString(),
     idempotencyKey: buildLocalCommandKey('moveAppointment', appointment.id),

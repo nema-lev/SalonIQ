@@ -3,8 +3,8 @@
 ## Scope
 
 - Route: `/admin/calendar-v2`
-- Gate: `NEXT_PUBLIC_ENABLE_CALENDAR_V2_SPIKE === "true"`
-- Visibility: hidden and unlinked from admin navigation.
+- Gate: enabled by default unless `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW === "true"`.
+- Visibility: direct URL only and unlinked from admin navigation.
 - Default route data: read-only real data through the current admin calendar board, waitlist, and services read endpoints.
 - Fixture data is preserved for the isolated native scheduler demo and for the route's safe debug fallback after a real-data read error.
 
@@ -61,7 +61,7 @@ In the read-only real-data route, appointment move handles are disabled.
 
 - Date of pass: 2026-05-05.
 - Added `frontend/src/components/admin/use-admin-calendar-board-data.ts` to share the existing current-calendar read path without changing query keys, endpoints, refetch intervals, or current calendar mutations.
-- Hidden route `/admin/calendar-v2` now renders `CalendarV2RealDataAdapter` when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_SPIKE === "true"`.
+- Direct route `/admin/calendar-v2` now renders `CalendarV2RealDataAdapter` unless `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW === "true"`.
 - The adapter reads `GET /appointments/calendar-board`, `GET /appointments/waitlist`, and `GET /services/admin` through the existing `apiClient`.
 - Appointments for the selected day are projected to `CalendarV2Appointment` and `CalendarV2CalendarBlock` with `buildCalendarV2Projection(...)`.
 - Staff is mapped to native scheduler resources.
@@ -72,6 +72,19 @@ In the read-only real-data route, appointment move handles are disabled.
 - The fixture scheduler path remains available as local-only debug fallback after a real-data read error.
 - Known limitations: scheduler hours are still fixed at 08:00-20:00, phone width still shows the separate agenda notice, and global notification/FYI items are not included because this pass only reuses the current shared calendar board/waitlist/services read path.
 
+## Main read-only preview promotion
+
+- Date of promotion: 2026-05-05.
+- Merged source branch: `calendar-v2-native-scheduler-spike`.
+- Target branch: `main`.
+- Route: `/admin/calendar-v2`.
+- Calendar V2 read-only preview is enabled by default for Oracle testing.
+- Disable flag: set `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW=true` to show the disabled state.
+- The current `/admin` calendar remains the default production calendar.
+- Calendar V2 is not linked from admin navigation.
+- Calendar V2 write actions remain intentionally disabled: no appointment creation, no persisted appointment move, no waitlist placement, no status transition, no optimistic persistence, and no write API call from the preview route.
+- User-facing route language now says `Calendar V2 Preview` and `Read-only` instead of `spike`.
+
 ## Current Calendar Parity QA
 
 - Date of pass: 2026-05-05.
@@ -80,7 +93,7 @@ In the read-only real-data route, appointment move handles are disabled.
 - Query behavior checked: calendar board `staleTime` remains 10 seconds, `refetchInterval` remains 10 seconds, and `refetchOnWindowFocus` remains `always`; waitlist and service query timings remain in the shared hook with the same values used by the current calendar path.
 - Refetch behavior checked: `admin-calendar-workspace.tsx` still routes post-mutation refreshes through the same `invalidateCalendar` flow, including calendar board refetch plus invalidation of `appointments-calendar-board`, `appointments-waitlist`, and `appointment-context`.
 - Shape assumptions checked: the current calendar still reads `calendarBoard.appointments`, `calendarBoard.staff`, and `calendarBoard.exceptions` from the shared hook result.
-- Browser checks were done with a transient local mock backend and the frontend dev server running with `NEXT_PUBLIC_ENABLE_CALENDAR_V2_SPIKE=true`.
+- Browser checks were done with a transient local mock backend and the frontend dev server running with the preview route enabled.
 - Current calendar desktop screenshot captured: `screenshots/parity-current-admin-desktop.png`. It shows the visible admin calendar desktop layout with staff columns, scheduled appointments, and waitlist/request sections.
 - Current calendar interaction checks done: a visible appointment detail drawer opened in browser, and current calendar quick-action wiring remained active against the local mock backend.
 - Calendar V2 desktop screenshot captured: `screenshots/parity-calendar-v2-desktop-real-data.png`. It shows the read-only Calendar V2 preview with real-data appointments, staff resources, and Action Inbox items from the shared read path.
@@ -111,7 +124,7 @@ The spike keeps the calendar as the hero. The admin shell has its existing page 
 ## Visual QA Pass
 
 - Date of pass: 2026-05-05.
-- Local run: frontend dev server with `NEXT_PUBLIC_ENABLE_CALENDAR_V2_SPIKE=true`.
+- Local run: frontend dev server with the preview route enabled.
 - Tenant/auth shell: rendered through the normal admin shell using a transient local mock backend for `/tenants/config`, `/auth/login`, and `/auth/me`; the spike itself still uses fixture data only and makes no appointment API calls.
 - Viewports checked: 1440x900 desktop, 1366x768 laptop, 1024x768 tablet landscape, 768x1024 tablet portrait, 390x844 phone.
 - Screenshots saved under `frontend/src/components/admin/calendar-v2/native-scheduler-spike/screenshots/`.

@@ -1,0 +1,515 @@
+'use client';
+
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
+import { format } from 'date-fns';
+import { bg } from 'date-fns/locale';
+import { CalendarDays, RotateCcw } from 'lucide-react';
+import type {
+  CalendarV2CalendarBlock,
+  CalendarV2Command,
+  CalendarV2DemandItem,
+  CalendarV2TimeTarget,
+} from '..';
+import { NativeSchedulerActionInboxMock } from './NativeSchedulerActionInboxMock';
+import { NativeSchedulerGrid, type NativeSchedulerGridDropPreview } from './NativeSchedulerGrid';
+import {
+  NativeSchedulerPlacementPreview,
+  type NativeSchedulerPlacementPreviewState,
+} from './NativeSchedulerPlacementPreview';
+import { NativeSchedulerPreviewPanel } from './NativeSchedulerPreviewPanel';
+import {
+  nativeSchedulerActionInboxItems,
+  nativeSchedulerCalendarBlocks,
+  nativeSchedulerDate,
+  nativeSchedulerDemandItems,
+  nativeSchedulerStaff,
+} from './native-scheduler-fixtures';
+import {
+  NATIVE_SCHEDULER_GEOMETRY,
+  getDurationMinutes,
+  slotFromPointer,
+  type NativeSchedulerResource,
+} from './native-scheduler-geometry';
+import {
+  createMoveAppointmentCommand,
+  createPlaceRequestCommand,
+  hasPassedDragThreshold,
+  type NativeSchedulerDragOverlay,
+} from './native-scheduler-drag';
+import styles from './native-scheduler.module.css';
+
+type ActiveDragOperation =
+  | {
+      kind: 'demand_item';
+      pointerId: number;
+      startX: number;
+      startY: number;
+      clientX: number;
+      clientY: number;
+      moved: boolean;
+      durationMinutes: number;
+      target: NativeSchedulerGridDropPreview | null;
+      demandItem: CalendarV2DemandItem;
+    }
+  | {
+      kind: 'appointment';
+      pointerId: number;
+      startX: number;
+      startY: number;
+      clientX: number;
+      clientY: number;
+      moved: boolean;
+      durationMinutes: number;
+      target: NativeSchedulerGridDropPreview | null;
+      block: CalendarV2CalendarBlock;
+    };
+
+export function NativeSchedulerV2Spike() {
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const activeDragRef = useRef<ActiveDragOperation | null>(null);
+  const [blocks, setBlocks] = useState(nativeSchedulerCalendarBlocks);
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(nativeSchedulerCalendarBlocks[0]?.id ?? null);
+  const [dragActive, setDragActive] = useState(false);
+  const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null);
+  const [dropPreview, setDropPreview] = useState<NativeSchedulerGridDropPreview | null>(null);
+  const [dragOverlay, setDragOverlay] = useState<NativeSchedulerDragOverlay | null>(null);
+  const [placementPreview, setPlacementPreview] = useState<NativeSchedulerPlacementPreviewState | null>(null);
+  const [lastCommand, setLastCommand] = useState<CalendarV2Command | null>(null);
+
+  const resources = useMemo<NativeSchedulerResource[]>(
+    () =>
+      nativeSchedulerStaff.map((staff) => ({
+        id: staff.id,
+        name: staff.name,
+        color: staff.color,
+      })),
+    [],
+  );
+  const selectedBlock = useMemo(
+    () => blocks.find((block) => block.id === selectedBlockId) ?? null,
+    [blocks, selectedBlockId],
+  );
+  const dateLabel = format(nativeSchedulerDate, "EEEE, d MMMM yyyy 'г.'", { locale: bg });
+
+  const resolveDropTarget = useCallback(
+    ({
+      clientX,
+      clientY,
+      durationMinutes,
+      kind,
+      ignoredBlockId,
+    }: {
+      clientX: number;
+      clientY: number;
+      durationMinutes: number;
+      kind: NativeSchedulerGridDropPreview['kind'];
+      ignoredBlockId?: string;
+    }): NativeSchedulerGridDropPreview | null => {
+      const grid = gridRef.current;
+      if (!grid) return null;
+
+      const slot = slotFromPointer({
+        clientX,
+        clientY,
+        gridRect: grid.getBoundingClientRect(),
+        resources,
+        date: nativeSchedulerDate,
+        durationMinutes,
+      });
+
+      if (!slot) return null;
+
+      const target = {
+        kind,
+        staffId: slot.resource.id,
+        staffName: slot.resource.name,
+        startAt: slot.startAt,
+        endAt: slot.endAt,
+        durationMinutes,
+        hasConflict: detectDropConflict(blocks, slot.resource.id, slot.startAt, slot.endAt, ignoredBlockId),
+      };
+
+      return target;
+    },
+    [blocks, resources],
+  );
+
+  const commitDrop = useCallback(
+    (drag: ActiveDragOperation, target: NativeSchedulerGridDropPreview) => {
+      const timezone = getClientTimezone();
+      const commandTarget = {
+        startAt: target.startAt,
+        endAt: target.endAt,
+        staffId: target.staffId,
+        staffName: target.staffName,
+      };
+
+      if (drag.kind === 'demand_item') {
+        const command = createPlaceRequestCommand({
+          demandItem: drag.demandItem,
+          target: commandTarget,
+          timezone,
+        });
+
+        setPlacementPreview({
+          demandItem: drag.demandItem,
+          command,
+          staffName: target.staffName,
+          timeLabel: formatTargetTime(target),
+        });
+        setLastCommand(command);
+        console.info('[Calendar V2 native scheduler spike command]', command);
+        return;
+      }
+
+      if (!drag.block.appointment) return;
+
+      const previousTarget: CalendarV2TimeTarget = {
+        startAt: drag.block.startAt,
+        endAt: drag.block.endAt,
+        staffId: drag.block.staffId,
+        timezone,
+      };
+      const command = createMoveAppointmentCommand({
+        appointment: drag.block.appointment,
+        target: commandTarget,
+        previousTarget,
+        timezone,
+      });
+
+      setLastCommand(command);
+      console.info('[Calendar V2 native scheduler spike command]', command);
+
+      // Production must validate this command server-side and rollback/reconcile on failure.
+      setBlocks((current) => current.map((block) => moveBlockLocally(block, drag.block.id, target, resources)));
+      setSelectedBlockId(drag.block.id);
+    },
+    [resources],
+  );
+
+  useEffect(() => {
+    if (!dragActive) return;
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const drag = activeDragRef.current;
+      if (!drag || event.pointerId !== drag.pointerId) return;
+
+      const moved = hasPassedDragThreshold(
+        { x: drag.startX, y: drag.startY },
+        { x: event.clientX, y: event.clientY },
+      );
+      const target = resolveDropTarget({
+        clientX: event.clientX,
+        clientY: event.clientY,
+        durationMinutes: drag.durationMinutes,
+        kind: drag.kind,
+        ignoredBlockId: drag.kind === 'appointment' ? drag.block.id : undefined,
+      });
+      const nextDrag = {
+        ...drag,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        moved,
+        target,
+      } as ActiveDragOperation;
+
+      activeDragRef.current = nextDrag;
+      setDropPreview(moved ? target : null);
+      setDragOverlay({
+        kind: drag.kind,
+        title: drag.kind === 'appointment' ? drag.block.title : drag.demandItem.client.name,
+        subtitle: drag.kind === 'appointment' ? drag.block.subtitle ?? '' : drag.demandItem.service.name,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        moved,
+        targetLabel: target ? `${formatTargetTime(target)} · ${target.staffName}` : null,
+        hasConflict: Boolean(target?.hasConflict),
+      });
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      const drag = activeDragRef.current;
+      if (!drag || event.pointerId !== drag.pointerId) return;
+
+      if (drag.moved && drag.target) {
+        commitDrop(drag, drag.target);
+      }
+
+      activeDragRef.current = null;
+      setDragActive(false);
+      setDraggingBlockId(null);
+      setDropPreview(null);
+      setDragOverlay(null);
+    };
+
+    const handlePointerCancel = () => {
+      activeDragRef.current = null;
+      setDragActive(false);
+      setDraggingBlockId(null);
+      setDropPreview(null);
+      setDragOverlay(null);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerCancel);
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerCancel);
+    };
+  }, [commitDrop, dragActive, resolveDropTarget]);
+
+  const handleStartDemandDrag = useCallback(
+    (event: ReactPointerEvent<HTMLButtonElement>, demandItem: CalendarV2DemandItem) => {
+      startPointerDrag(event);
+      const durationMinutes = Math.max(
+        NATIVE_SCHEDULER_GEOMETRY.slotMinutes,
+        demandItem.service.durationMinutes ?? 45,
+      );
+
+      activeDragRef.current = {
+        kind: 'demand_item',
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        moved: false,
+        durationMinutes,
+        target: null,
+        demandItem,
+      };
+      setDragActive(true);
+      setDragOverlay({
+        kind: 'demand_item',
+        title: demandItem.client.name,
+        subtitle: demandItem.service.name,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        moved: false,
+        targetLabel: null,
+        hasConflict: false,
+      });
+    },
+    [],
+  );
+
+  const handleStartAppointmentDrag = useCallback(
+    (event: ReactPointerEvent<HTMLButtonElement>, block: CalendarV2CalendarBlock) => {
+      if (!block.appointment) return;
+
+      startPointerDrag(event);
+      activeDragRef.current = {
+        kind: 'appointment',
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        moved: false,
+        durationMinutes: getDurationMinutes(block.startAt, block.endAt),
+        target: null,
+        block,
+      };
+      setDraggingBlockId(block.id);
+      setDragActive(true);
+      setDragOverlay({
+        kind: 'appointment',
+        title: block.title,
+        subtitle: block.subtitle ?? '',
+        clientX: event.clientX,
+        clientY: event.clientY,
+        moved: false,
+        targetLabel: null,
+        hasConflict: false,
+      });
+    },
+    [],
+  );
+
+  const resetLocalState = () => {
+    activeDragRef.current = null;
+    setBlocks(nativeSchedulerCalendarBlocks);
+    setSelectedBlockId(nativeSchedulerCalendarBlocks[0]?.id ?? null);
+    setDragActive(false);
+    setDraggingBlockId(null);
+    setDropPreview(null);
+    setDragOverlay(null);
+    setPlacementPreview(null);
+    setLastCommand(null);
+  };
+
+  return (
+    <>
+      <div className={styles.phoneNotice}>
+        Phone Calendar V2 will use a separate agenda renderer.
+      </div>
+
+      <div className={styles.desktopSpike}>
+        <div className={styles.spikeShell}>
+          <header className={styles.toolbar}>
+            <div className={styles.toolbarTitle}>
+              <span className={styles.toolbarIcon}>
+                <CalendarDays size={18} strokeWidth={2.5} />
+              </span>
+              <span className="min-w-0">
+                <p className={styles.toolbarEyebrow}>Calendar V2 native spike</p>
+                <h2 className={styles.toolbarHeading}>{dateLabel}</h2>
+              </span>
+            </div>
+
+            <div className={styles.toolbarMeta}>
+              <span className={styles.toolbarPill}>15 min slots</span>
+              <span className={styles.toolbarPill}>08:00-20:00</span>
+              <button type="button" className={styles.resetButton} onClick={resetLocalState}>
+                <RotateCcw size={14} strokeWidth={2.5} />
+                Reset local
+              </button>
+            </div>
+          </header>
+
+          <div className={styles.spikeBody}>
+            <div style={{ position: 'relative', minHeight: 0, minWidth: 0, overflow: 'hidden' }}>
+              <NativeSchedulerGrid
+                resources={resources}
+                blocks={blocks}
+                selectedBlockId={selectedBlockId}
+                draggingBlockId={draggingBlockId}
+                dropPreview={dropPreview}
+                gridRef={gridRef}
+                onSelectBlock={setSelectedBlockId}
+                onStartAppointmentDrag={handleStartAppointmentDrag}
+              />
+
+              {placementPreview && (
+                <NativeSchedulerPlacementPreview
+                  preview={placementPreview}
+                  onClose={() => setPlacementPreview(null)}
+                />
+              )}
+            </div>
+
+            <aside className={styles.rightRail}>
+              <NativeSchedulerActionInboxMock
+                demandItems={nativeSchedulerDemandItems}
+                actionItems={nativeSchedulerActionInboxItems}
+                onStartDemandDrag={handleStartDemandDrag}
+              />
+              <NativeSchedulerPreviewPanel selectedBlock={selectedBlock} lastCommand={lastCommand} />
+            </aside>
+          </div>
+        </div>
+
+        {dragOverlay && (
+          <div
+            className={styles.dragOverlay}
+            style={{
+              left: dragOverlay.clientX,
+              top: dragOverlay.clientY,
+            }}
+          >
+            <div className={styles.dragOverlayInner}>
+              <p className={styles.dragTitle}>{dragOverlay.title}</p>
+              <p className={styles.dragSubtitle}>{dragOverlay.subtitle}</p>
+              {dragOverlay.targetLabel && (
+                <p className={`${styles.dragTarget} ${dragOverlay.hasConflict ? styles.dragConflict : ''}`}>
+                  {dragOverlay.hasConflict ? 'Conflict · ' : ''}
+                  {dragOverlay.targetLabel}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+function startPointerDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+  event.preventDefault();
+  event.stopPropagation();
+  event.currentTarget.setPointerCapture(event.pointerId);
+}
+
+function detectDropConflict(
+  blocks: CalendarV2CalendarBlock[],
+  staffId: string,
+  startAt: string,
+  endAt: string,
+  ignoredBlockId?: string,
+) {
+  const start = new Date(startAt).getTime();
+  const end = new Date(endAt).getTime();
+
+  return blocks.some((block) => {
+    if (block.id === ignoredBlockId || block.staffId !== staffId) return false;
+    if (block.kind !== 'appointment' && block.kind !== 'blocked_time') return false;
+
+    const blockStart = new Date(block.startAt).getTime();
+    const blockEnd = new Date(block.endAt).getTime();
+    return start < blockEnd && end > blockStart;
+  });
+}
+
+function moveBlockLocally(
+  block: CalendarV2CalendarBlock,
+  movingBlockId: string,
+  target: NativeSchedulerGridDropPreview,
+  resources: NativeSchedulerResource[],
+): CalendarV2CalendarBlock {
+  if (block.id !== movingBlockId) return block;
+
+  const staff = resources.find((resource) => resource.id === target.staffId);
+  const timeLabel = formatTargetTime(target);
+
+  return {
+    ...block,
+    startAt: target.startAt,
+    endAt: target.endAt,
+    staffId: target.staffId,
+    cardSummary: block.cardSummary
+      ? {
+          ...block.cardSummary,
+          timeLabel,
+          staffLabel: staff?.name ?? target.staffName,
+        }
+      : block.cardSummary,
+    appointment: block.appointment
+      ? {
+          ...block.appointment,
+          startAt: target.startAt,
+          endAt: target.endAt,
+          staff: {
+            ...block.appointment.staff,
+            id: target.staffId,
+            name: staff?.name ?? target.staffName,
+            color: staff?.color ?? block.appointment.staff.color,
+          },
+        }
+      : block.appointment,
+  };
+}
+
+function formatTargetTime(target: Pick<NativeSchedulerGridDropPreview, 'startAt' | 'endAt'>) {
+  const start = new Date(target.startAt);
+  const end = new Date(target.endAt);
+
+  return `${formatClock(start)}-${formatClock(end)}`;
+}
+
+function formatClock(date: Date) {
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function getClientTimezone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+}

@@ -629,8 +629,16 @@
   flex-direction: column;
 }
 
+.inboxPanelEmpty {
+  flex: 0 0 auto;
+}
+
 .previewPanel {
   flex: 0 0 auto;
+}
+
+.previewPanelEmpty .previewContent {
+  padding-block: 9px;
 }
 
 .panelHeader {
@@ -708,6 +716,13 @@
   padding: 10px;
 }
 
+.inboxPanelEmpty .inboxEmptyState,
+.previewPanelEmpty .previewEmptyState {
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px;
+}
+
 .emptyIcon {
   display: grid;
   height: 28px;
@@ -717,6 +732,13 @@
   border-radius: 8px;
   background: #ffffff;
   color: #0f766e;
+}
+
+.inboxPanelEmpty .emptyIcon,
+.previewPanelEmpty .emptyIcon {
+  height: 24px;
+  width: 24px;
+  border-radius: 7px;
 }
 
 .emptyText {
@@ -736,6 +758,10 @@
   font-weight: 800;
   line-height: 1.45;
   color: #64748b;
+}
+
+.previewPanelEmpty .emptyCopy {
+  margin-top: 2px;
 }
 
 .inboxItem {

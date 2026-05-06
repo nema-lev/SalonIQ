@@ -110,11 +110,21 @@ In the read-only real-data route, appointment move handles are disabled.
 - Visual cleanup: simplified the toolbar to date navigation, date picker, Today, and one subtle `Calendar V2 Preview · Read-only` indicator; removed the noisy `Real data`/status pill set from the production preview.
 - Calendar hierarchy: the scheduler remains left and Action Inbox remains right, but read-only staff columns now expand to fill the desktop calendar canvas instead of leaving unused horizontal space.
 - Right rail: Action Inbox and Booking Detail use lighter headers, compact counts, and designed empty states.
-- Honest data states: the real-data route no longer offers fixture data after read errors, and demo-labeled staff/resource values are replaced by an explicit fallback state.
+- Honest data states: the real-data route no longer offers fixture data after read errors. Demo-labeled staff/resource values now render with a quiet toolbar note instead of being treated as blocking.
 - Empty states covered: loading, no staff resources, no scheduled appointments, empty Action Inbox, no selected booking, and real-data read error.
 - Read-only contract preserved: drag grips and waitlist placement controls stay hidden on the real-data route, and no Calendar V2 write API calls are made.
 - Screenshots captured under `screenshots/`: `calendar-v2-ui-cleanup-1440x900.png`, `calendar-v2-ui-cleanup-1366x768.png`, `calendar-v2-ui-cleanup-390x844.png`, and `calendar-v2-ui-cleanup-empty-1440x900.png`.
 - Visual QA result from `/private/tmp/saloniq-calendar-v2-ui-qa-results.json`: requested viewports rendered, phone fallback remained visible, demo labels were absent, the old fixture fallback button was absent, appointment drag grip count was `0`, waitlist placement button count was `0`, and `writesAfterV2` was empty.
+
+## Sample Staff Label Pass
+
+- Date of pass: 2026-05-06.
+- Demo/sample staff names from the current read path are rendered in the scheduler because they are still useful calendar data for preview evaluation.
+- When staff/resource names look sample-like, the route adds a quiet `Sample staff names` toolbar note and keeps the grid, appointments, Action Inbox, and Booking Detail visible.
+- Empty appointment days remain non-blocking: staff columns stay visible and the grid shows `No bookings scheduled for this date`.
+- Right rail empty states remain compact so an empty Action Inbox or no selected booking does not consume the full side panel.
+- Calendar V2 remains read-only: no appointment creation, move persistence, waitlist placement persistence, status changes, or write API calls from the real-data route.
+- Screenshots captured under `screenshots/`: `calendar-v2-sample-labels-1440x900.png`, `calendar-v2-sample-labels-1366x768.png`, `calendar-v2-sample-labels-390x844.png`, and `calendar-v2-sample-labels-empty-1440x900.png`.
 
 ## Short-Card Readability Verdict
 

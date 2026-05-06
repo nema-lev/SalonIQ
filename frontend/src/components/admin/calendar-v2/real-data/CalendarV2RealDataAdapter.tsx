@@ -112,37 +112,31 @@ export function CalendarV2RealDataAdapter() {
     );
   }
 
-  const fixtureLabelIssue = !isInitialLoading && hasFixtureLikeDataLabel(projection);
-  const visibleProjection = fixtureLabelIssue
-    ? {
-        resources: [],
-        calendarBlocks: [],
-        demandItems: [],
-        actionItems: [],
-      }
-    : projection;
-  const visibleAppointmentCount = visibleProjection.calendarBlocks.filter(
+  const hasSampleStaffNames = !isInitialLoading && hasSampleLikeStaffLabels(projection);
+  const visibleAppointmentCount = projection.calendarBlocks.filter(
     (block) => block.kind === 'appointment',
   ).length;
   const schedulerNotice = getSchedulerNotice({
     isInitialLoading,
-    hasFixtureLabelIssue: fixtureLabelIssue,
-    resourceCount: visibleProjection.resources.length,
+    resourceCount: projection.resources.length,
     appointmentCount: visibleAppointmentCount,
   });
-  const toolbarNote = isInitialLoading
+  const toolbarStatusNote = isInitialLoading
     ? 'Reading from the current admin calendar.'
     : isFetching
       ? 'Refreshing current calendar reads.'
       : 'The current /admin calendar remains default.';
+  const toolbarNote = hasSampleStaffNames
+    ? `Sample staff names · ${toolbarStatusNote}`
+    : toolbarStatusNote;
 
   return (
     <NativeSchedulerV2Spike
       date={currentDate}
-      resources={visibleProjection.resources}
-      calendarBlocks={visibleProjection.calendarBlocks}
-      demandItems={visibleProjection.demandItems}
-      actionItems={visibleProjection.actionItems}
+      resources={projection.resources}
+      calendarBlocks={projection.calendarBlocks}
+      demandItems={projection.demandItems}
+      actionItems={projection.actionItems}
       readOnly
       readOnlyNotice={CALENDAR_V2_READONLY_NOTICE}
       schedulerNotice={schedulerNotice}
@@ -163,12 +157,10 @@ function getErrorMessage(error: unknown) {
 
 function getSchedulerNotice({
   isInitialLoading,
-  hasFixtureLabelIssue,
   resourceCount,
   appointmentCount,
 }: {
   isInitialLoading: boolean;
-  hasFixtureLabelIssue: boolean;
   resourceCount: number;
   appointmentCount: number;
 }): NativeSchedulerNotice | null {
@@ -177,15 +169,6 @@ function getSchedulerNotice({
       tone: 'loading',
       title: 'Loading calendar data',
       message: 'Reading the current admin calendar.',
-    };
-  }
-
-  if (hasFixtureLabelIssue) {
-    return {
-      tone: 'warning',
-      title: 'Calendar data needs production staff labels',
-      message:
-        'The current read returned demo-labeled staff or resources, so this preview is not rendering them as real data.',
     };
   }
 
@@ -200,15 +183,15 @@ function getSchedulerNotice({
   if (appointmentCount === 0) {
     return {
       tone: 'empty',
-      title: 'No appointments scheduled',
-      message: 'This date has no scheduled appointments in the current calendar data.',
+      title: 'No bookings scheduled for this date',
+      message: 'The staff day grid stays visible for layout review.',
     };
   }
 
   return null;
 }
 
-function hasFixtureLikeDataLabel(projection: {
+function hasSampleLikeStaffLabels(projection: {
   resources: Array<{ name: string }>;
   calendarBlocks: Array<{
     kind: string;
@@ -235,10 +218,10 @@ function hasFixtureLikeDataLabel(projection: {
     ...projection.demandItems.map((item) => item.preferredStaff?.name),
   ];
 
-  return labels.some((label) => isFixtureLikeLabel(label));
+  return labels.some((label) => isSampleLikeLabel(label));
 }
 
-function isFixtureLikeLabel(label: string | null | undefined) {
+function isSampleLikeLabel(label: string | null | undefined) {
   if (!label) return false;
-  return /\b(demo|fixture)\b/i.test(label);
+  return /\b(demo|fixture|sample)\b/i.test(label);
 }

@@ -31,9 +31,10 @@ export function NativeSchedulerActionInboxMock({
     (item) => item.source !== 'waitlist' || !demandById.has(item.sourceId),
   );
   const hasRequiredItems = draggableDemandActions.length > 0 || secondaryActions.length > 0;
+  const hasInboxItems = hasRequiredItems || updates.length > 0;
 
   return (
-    <section className={styles.inboxPanel}>
+    <section className={`${styles.inboxPanel} ${hasInboxItems ? '' : styles.inboxPanelEmpty}`}>
       <div className={styles.panelHeader}>
         <div className={styles.panelHeaderText}>
           <p className={styles.panelTitle}>Action Inbox</p>

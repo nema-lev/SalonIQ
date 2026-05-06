@@ -29,12 +29,12 @@ This folder connects the direct `/admin/calendar-v2` preview route to the existi
 - Waitlist entries are projected into `CalendarV2DemandItem`.
 - Waitlist entries and timed appointment request states are projected into Action Inbox items with `buildActionInboxItems(...)`.
 - Staff exceptions from the calendar board are mapped to read-only blocked-time blocks.
-- Demo-labeled staff/resource values are not rendered as production preview data. The UI shows a compact fallback state that says the current read returned demo-labeled staff/resources.
+- Demo/sample-labeled staff/resource values are still rendered when they come from the current read path. The UI adds a quiet toolbar note instead of blocking the scheduler.
 
 ## Preview UX States
 
 - Header: date navigation, date picker, Today, and one subtle `Calendar V2 Preview · Read-only` indicator.
-- Scheduler: fills the desktop calendar canvas and shows compact notices for loading, no staff resources, demo-labeled resources, and no scheduled appointments.
+- Scheduler: fills the desktop calendar canvas and shows compact, non-blocking notices for loading, no staff resources, and no scheduled appointments.
 - Action Inbox: shows request/recovery items when present and a compact empty state when there is nothing to act on.
 - Booking Detail: shows selected booking facts or a compact no-selection state.
 - Read error: shows a retry action and states that fixture data is not shown on the production preview route.

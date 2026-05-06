@@ -19,7 +19,7 @@ export function NativeSchedulerPreviewPanel({
   const appointment = selectedBlock?.appointment;
 
   return (
-    <section className={styles.previewPanel}>
+    <section className={`${styles.previewPanel} ${selectedBlock ? '' : styles.previewPanelEmpty}`}>
       <div className={styles.panelHeader}>
         <div className={styles.panelHeaderText}>
           <p className={styles.panelTitle}>Booking Detail</p>

@@ -31,8 +31,13 @@ export function NativeSchedulerEventCard({
   const appointment = block.appointment;
   const summary = block.cardSummary;
   const isShort = rect.height <= 38;
+  const isRoomy = rect.height >= 72;
   const accent = block.color ?? appointment?.service.color ?? appointment?.staff.color ?? '#64748b';
   const cues = getCardCues(block);
+  const title = summary?.title ?? block.title;
+  const subtitle = summary?.subtitle ?? block.subtitle;
+  const timeLabel = summary?.timeLabel ?? formatRange(block);
+  const durationLabel = formatDurationLabel(block);
 
   return (
     <div
@@ -50,6 +55,8 @@ export function NativeSchedulerEventCard({
         height: rect.height,
         ['--event-accent' as string]: accent,
         ['--event-border' as string]: colorWithAlpha(accent, '55'),
+        ['--event-soft' as string]: colorWithAlpha(accent, '0f'),
+        ['--event-ring' as string]: colorWithAlpha(accent, '24'),
       }}
       data-native-scheduler-card={isShort ? 'short' : 'normal'}
     >
@@ -74,18 +81,18 @@ export function NativeSchedulerEventCard({
       >
         {isShort ? (
           <>
-            <span className={styles.shortInitials}>{getInitials(summary?.title ?? block.title)}</span>
-            <span className={styles.shortCue}>{summary?.timeLabel ?? block.subtitle ?? block.title}</span>
-            {cues[0] ? cues[0].icon : <span className={styles.cueDot} style={{ color: accent }} />}
+            <span className={styles.shortInitials}>{getInitials(title)}</span>
+            <span className={styles.shortCue}>{timeLabel}</span>
+            {cues[0] ? <span className={styles.shortCueIcon}>{cues[0].icon}</span> : <span className={styles.cueDot} style={{ color: accent }} />}
           </>
         ) : (
           <>
-            <span className={styles.eventTopline}>
-              <span className={styles.eventTitle}>{summary?.title ?? block.title}</span>
-              {summary?.timeLabel && <span className={styles.eventTime}>{summary.timeLabel}</span>}
-            </span>
-            <span className={styles.eventSubline}>
-              <span className={styles.eventSubtitle}>{summary?.subtitle ?? block.subtitle}</span>
+            <span className={styles.eventHeader}>
+              <span className={styles.eventTitleGroup}>
+                <span className={styles.eventTitle}>{title}</span>
+                {subtitle && <span className={styles.eventSubtitle}>{subtitle}</span>}
+              </span>
+              <span className={styles.eventTime}>{timeLabel}</span>
             </span>
             {cues.length > 0 && (
               <span className={styles.cueRow}>
@@ -95,6 +102,14 @@ export function NativeSchedulerEventCard({
                     {cue.label}
                   </span>
                 ))}
+              </span>
+            )}
+            {isRoomy && (
+              <span className={styles.eventMetaRow}>
+                <span>{durationLabel}</span>
+                {appointment?.visitProgress && appointment.visitProgress !== 'scheduled' && (
+                  <span>{formatState(appointment.visitProgress)}</span>
+                )}
               </span>
             )}
           </>
@@ -143,6 +158,36 @@ function getInitials(value: string) {
     .map((part) => part[0])
     .join('')
     .toUpperCase();
+}
+
+function formatRange(block: CalendarV2CalendarBlock) {
+  const start = new Date(block.startAt);
+  const end = new Date(block.endAt);
+
+  return `${formatTime(start)}-${formatTime(end)}`;
+}
+
+function formatDurationLabel(block: CalendarV2CalendarBlock) {
+  const minutes = Math.max(
+    0,
+    Math.round((new Date(block.endAt).getTime() - new Date(block.startAt).getTime()) / 60000),
+  );
+
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    const remainder = minutes % 60;
+    return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+  }
+
+  return `${minutes}m`;
+}
+
+function formatState(value: string) {
+  return value.replaceAll('_', ' ');
+}
+
+function formatTime(date: Date) {
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
 function colorWithAlpha(color: string, alpha: string) {

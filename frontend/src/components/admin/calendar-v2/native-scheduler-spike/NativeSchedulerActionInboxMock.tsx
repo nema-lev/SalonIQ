@@ -88,7 +88,10 @@ export function NativeSchedulerActionInboxMock({
               <div className={styles.inboxText}>
                 <p className={styles.inboxTitle}>{title}</p>
                 <p className={styles.inboxSubtitle}>{subtitle}</p>
-                <span className={styles.inboxTag}>{readOnly ? 'Read-only' : 'Drag to place'}</span>
+                <span className={styles.inboxMetaRow}>
+                  <span className={styles.inboxTag}>{formatGroup(action.group)}</span>
+                  <span className={styles.inboxTagMuted}>{readOnly ? 'Read-only' : 'Drag to place'}</span>
+                </span>
               </div>
             </article>
           );
@@ -101,8 +104,9 @@ export function NativeSchedulerActionInboxMock({
                 <AlertCircle size={13} strokeWidth={2.4} /> {action.title}
               </p>
               <p className={styles.inboxSubtitle}>{action.subtitle}</p>
-              <span className={styles.inboxTag}>
-                {readOnly ? `Read-only · ${formatGroup(action.group)}` : formatGroup(action.group)}
+              <span className={styles.inboxMetaRow}>
+                <span className={styles.inboxTag}>{formatGroup(action.group)}</span>
+                {readOnly && <span className={styles.inboxTagMuted}>Read-only</span>}
               </span>
             </div>
           </article>

@@ -141,6 +141,21 @@ In the read-only real-data route, appointment move handles are disabled.
 - Screenshots captured under `screenshots/`: `calendar-v2-sample-day-real-1440x900.png`, `calendar-v2-sample-day-1440x900.png`, `calendar-v2-sample-day-1366x768.png`, and `calendar-v2-sample-day-390x844.png`.
 - Visual QA result from `/private/tmp/saloniq-calendar-v2-sample-day-qa-results.json`: real empty state kept the grid and `Show sample day` action visible, sample mode rendered staff/appointments/Action Inbox/Booking Detail, phone fallback remained visible, appointment drag grip count was `0`, waitlist placement button count was `0`, and `writesAfterV2` was empty.
 
+## Sample Day Visual Refinement Pass
+
+- Date of pass: 2026-05-06.
+- Appointment cards now use calmer tinted surfaces, clearer left status stripes, compact time/duration/cue metadata, and a softer selected treatment instead of the previous heavy outline.
+- The 15-minute short-card variant is intentional: it keeps an initials cue, the time range, and one compact status/message cue where available.
+- Normal and long sample appointments keep client name first, service secondary, and operational cues readable without turning the grid into a colorful debug view.
+- The grid uses clearer hour lines, quieter minor slot lines, and a taller desktop shell so the calendar remains the hero on 1440x900 and 1366x768.
+- Action Inbox cards now have stronger hierarchy, quieter read-only tags, and compact scrolling that avoids cutting visible cards at the checked desktop sizes.
+- Booking Detail now starts with a selected-booking summary card for client, service, time, and staff, followed by status/message/note cues in a less table-like layout.
+- Calendar V2 remains read-only: no appointment creation, persisted moves, waitlist placement, status changes, drag grips, placement controls, or write API calls are enabled in real or sample mode.
+- Current `/admin` remains the default production calendar and is not replaced by Calendar V2.
+- Screenshots captured under `screenshots/`: `calendar-v2-visual-refine-sample-1440x900.png`, `calendar-v2-visual-refine-sample-1366x768.png`, `calendar-v2-visual-refine-real-1440x900.png`, and `calendar-v2-visual-refine-sample-390x844.png`.
+- Visual QA result from `/private/tmp/saloniq-calendar-v2-visual-refine-qa-results.json`: sample badge, selected Booking Detail, non-blocking real empty state, and phone fallback were visible; appointment drag grip count was `0`, waitlist placement button count was `0`, and `writesAfterV2` was empty.
+- Remaining UX limitations: phone still intentionally shows the separate agenda-renderer notice, tablet portrait remains out of scope, and Booking Detail can still scroll when selected notes are longer than the available rail height.
+
 ## Short-Card Readability Verdict
 
 Feasible. The 15-minute fixture uses a short-card variant that keeps initials, a useful time cue, and the drag grip visible. Text is intentionally compact instead of disappearing.

@@ -12,6 +12,7 @@ This folder contains renderer-independent contracts for a future admin Calendar 
 - The production preview renders available staff/resources even when names look like sample/demo labels, with a quiet toolbar note when that happens.
 - Real data mode remains the default. Empty real-data days keep staff columns visible and offer a compact `Show sample day` action instead of injecting fake production data.
 - Sample mode uses clearly labeled Bulgarian salon sample data, shows `Sample day · Read-only`, and provides `Back to real data`.
+- The sample-day visual pass refines appointment cards, selected state, 15-minute short cards, the Action Inbox queue, and the selected Booking Detail summary without enabling writes.
 - Empty states are intentional and non-blocking for missing staff resources, empty appointment days, empty Action Inbox content, no selected booking, and read errors.
 - Domain types, command shapes, projections, and Action Inbox helpers must stay independent of calendar rendering libraries.
 - FullCalendar, Bryntum, DayPilot, Mobiscroll, Schedule-X, or another scheduler must be hidden behind an adapter when added later.

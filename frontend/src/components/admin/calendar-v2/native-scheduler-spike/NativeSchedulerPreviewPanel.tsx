@@ -1,6 +1,6 @@
 'use client';
 
-import { CalendarCheck2, Clock3, Scissors, UserRound } from 'lucide-react';
+import { CalendarCheck2, Clock3, MessageCircle, Scissors, UserRound } from 'lucide-react';
 import type { CalendarV2CalendarBlock, CalendarV2Command } from '..';
 import { commandPreviewLabel } from './native-scheduler-drag';
 import styles from './native-scheduler.module.css';
@@ -17,6 +17,9 @@ export function NativeSchedulerPreviewPanel({
   readOnly = false,
 }: NativeSchedulerPreviewPanelProps) {
   const appointment = selectedBlock?.appointment;
+  const clientName = appointment?.client.name ?? selectedBlock?.title ?? '';
+  const serviceName = appointment?.service.name ?? selectedBlock?.subtitle ?? 'Service unavailable';
+  const staffName = appointment?.staff.name ?? selectedBlock?.cardSummary?.staffLabel ?? selectedBlock?.staffId ?? '';
 
   return (
     <section className={`${styles.previewPanel} ${selectedBlock ? '' : styles.previewPanelEmpty}`}>
@@ -30,33 +33,38 @@ export function NativeSchedulerPreviewPanel({
       <div className={styles.previewContent}>
         {selectedBlock ? (
           <>
-            <p className={styles.previewTitle}>
-              {appointment?.client.name ?? selectedBlock.title}
-            </p>
-            <div className={styles.previewFacts}>
-              <PreviewFact
-                icon={<Clock3 size={13} strokeWidth={2.5} />}
-                label="Time"
-                value={formatRange(selectedBlock)}
-              />
-              <PreviewFact
-                icon={<Scissors size={13} strokeWidth={2.5} />}
-                label="Service"
-                value={appointment?.service.name ?? selectedBlock.subtitle ?? 'Service unavailable'}
-              />
-              <PreviewFact
-                icon={<UserRound size={13} strokeWidth={2.5} />}
-                label="Staff"
-                value={appointment?.staff.name ?? selectedBlock.cardSummary?.staffLabel ?? selectedBlock.staffId}
-              />
-              <PreviewFact
-                icon={<CalendarCheck2 size={13} strokeWidth={2.5} />}
-                label="Status"
-                value={appointment ? formatBookingStatus(appointment) : selectedBlock.kind}
-              />
+            <div className={styles.previewSummaryCard}>
+              <span className={styles.previewAvatar}>{getInitials(clientName)}</span>
+              <span className={styles.previewSummaryText}>
+                <span className={styles.previewClientName}>{clientName}</span>
+                <span className={styles.previewServiceLine}>
+                  <Scissors size={12} strokeWidth={2.5} />
+                  {serviceName}
+                </span>
+              </span>
             </div>
+            <div className={styles.previewQuickFacts}>
+              <span>
+                <Clock3 size={13} strokeWidth={2.5} />
+                {formatRange(selectedBlock)}
+              </span>
+              <span>
+                <UserRound size={13} strokeWidth={2.5} />
+                {staffName}
+              </span>
+            </div>
+            {appointment && (
+              <div className={styles.previewStatusRow}>
+                <PreviewFact
+                  icon={<CalendarCheck2 size={13} strokeWidth={2.5} />}
+                  label="Status"
+                  value={formatBookingStatus(appointment)}
+                />
+              </div>
+            )}
             {appointment?.communicationState && appointment.communicationState !== 'none' && (
-              <p className={styles.previewMeta}>
+              <p className={styles.previewMessage}>
+                <MessageCircle size={13} strokeWidth={2.5} />
                 Message: {formatState(appointment.communicationState)}
               </p>
             )}
@@ -111,6 +119,17 @@ function formatRange(block: CalendarV2CalendarBlock) {
 
 function formatState(value: string) {
   return value.replaceAll('_', ' ');
+}
+
+function getInitials(value: string) {
+  const parts = value.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase();
 }
 
 function formatBookingStatus(appointment: NonNullable<CalendarV2CalendarBlock['appointment']>) {

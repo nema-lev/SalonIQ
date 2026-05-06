@@ -156,6 +156,19 @@ In the read-only real-data route, appointment move handles are disabled.
 - Visual QA result from `/private/tmp/saloniq-calendar-v2-visual-refine-qa-results.json`: sample badge, selected Booking Detail, non-blocking real empty state, and phone fallback were visible; appointment drag grip count was `0`, waitlist placement button count was `0`, and `writesAfterV2` was empty.
 - Remaining UX limitations: phone still intentionally shows the separate agenda-renderer notice, tablet portrait remains out of scope, and Booking Detail can still scroll when selected notes are longer than the available rail height.
 
+## Viewport and Scroll Hardening Pass
+
+- Date of pass: 2026-05-06.
+- The desktop preview now reclaims the route-local admin bottom buffer and fits inside the checked 1440x900 and 1366x768 admin viewport without creating a second outer page scroll.
+- The scheduler grid remains the primary scroll region, with sticky staff headers and readable time gutter preserved.
+- Read-only resource columns now shrink within a safe minimum so common four-staff sample layouts avoid a horizontal scheduler scrollbar at 1366x768.
+- The right rail now uses explicit stacked grid rows: Action Inbox gets more room for visible queue cards, Booking Detail stays usable below it, and each panel scrolls internally only when its own content exceeds the available height.
+- Calendar V2 remains read-only: no appointment creation, persisted moves, waitlist placement, status changes, drag grips, placement controls, or write API calls are enabled in real or sample mode.
+- Current `/admin` remains the default production calendar and is not replaced by Calendar V2.
+- Screenshots captured under `screenshots/`: `calendar-v2-layout-hardening-sample-1440x900.png`, `calendar-v2-layout-hardening-sample-1366x768.png`, `calendar-v2-layout-hardening-real-1440x900.png`, and `calendar-v2-layout-hardening-sample-390x844.png`.
+- Visual QA result from `/private/tmp/saloniq-calendar-v2-layout-hardening-qa-results.json`: outer admin/page scroll overflow was `0` at the checked desktop sizes, the scheduler grid retained vertical scroll, the phone fallback remained visible, appointment drag grip count was `0`, waitlist placement button count was `0`, and `writesAfterV2` was empty.
+- Remaining UX limitations: phone still intentionally shows the separate agenda-renderer notice, tablet portrait remains out of scope, and long selected-booking notes can still scroll inside Booking Detail.
+
 ## Short-Card Readability Verdict
 
 Feasible. The 15-minute fixture uses a short-card variant that keeps initials, a useful time cue, and the drag grip visible. Text is intentionally compact instead of disappearing.

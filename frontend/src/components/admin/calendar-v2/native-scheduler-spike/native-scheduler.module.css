@@ -4,9 +4,12 @@
 
 .desktopSpike {
   display: flex;
-  height: clamp(620px, calc(100dvh - 150px), 880px);
-  min-height: 600px;
+  height: clamp(560px, calc(100dvh - 124px), 820px);
+  min-height: 0;
   min-width: 0;
+  max-height: calc(100dvh - 124px);
+  /* Reclaim most of the admin shell's mobile bottom buffer on the desktop-only preview. */
+  margin-bottom: calc(-1 * (env(safe-area-inset-bottom, 0px) + 84px));
   overflow: hidden;
   color: #0f172a;
 }
@@ -30,6 +33,7 @@
   z-index: 40;
   display: flex;
   min-height: 70px;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -153,8 +157,18 @@
   padding: 12px;
 }
 
+.schedulerStage {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
 .schedulerPanel {
   display: flex;
+  height: 100%;
+  flex: 1 1 auto;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
@@ -165,6 +179,7 @@
 }
 
 .schedulerScroll {
+  height: 100%;
   min-height: 0;
   min-width: 0;
   flex: 1;
@@ -679,12 +694,25 @@
 }
 
 .rightRail {
-  display: flex;
+  display: grid;
   min-height: 0;
   min-width: 0;
-  flex-direction: column;
-  gap: 12px;
+  grid-template-rows: minmax(300px, 1.1fr) minmax(228px, 0.9fr);
+  gap: 10px;
   overflow: hidden;
+}
+
+.rightRail:has(.previewPanelEmpty) {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.rightRail:has(.inboxPanelEmpty) {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.rightRail:has(.inboxPanelEmpty):has(.previewPanelEmpty) {
+  align-content: start;
+  grid-template-rows: auto auto;
 }
 
 .inboxPanel,
@@ -698,27 +726,27 @@
 }
 
 .inboxPanel {
-  min-height: 0;
-  flex: 1 1 260px;
-  min-height: 238px;
   display: flex;
+  height: 100%;
+  min-height: 0;
   flex-direction: column;
 }
 
 .inboxPanelEmpty {
+  height: auto;
   min-height: 0;
-  flex: 0 0 auto;
 }
 
 .previewPanel {
   display: flex;
+  height: 100%;
   min-height: 0;
-  max-height: 280px;
-  flex: 0 0 50%;
+  max-height: none;
   flex-direction: column;
 }
 
 .previewPanelEmpty {
+  height: auto;
   max-height: none;
 }
 
@@ -775,10 +803,12 @@
   max-height: 100%;
   flex: 1;
   flex-direction: column;
-  gap: 7px;
+  gap: 6px;
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 9px;
+  overscroll-behavior: contain;
+  padding: 8px;
+  scrollbar-gutter: stable;
 }
 
 .inboxSectionLabel {
@@ -858,7 +888,7 @@
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   background: linear-gradient(180deg, #ffffff, #fbfdff);
-  padding: 7px 8px;
+  padding: 6px 7px;
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.035);
 }
 
@@ -899,15 +929,15 @@
 }
 
 .inboxSubtitle {
-  margin: 3px 0 0;
+  margin: 2px 0 0;
   overflow: hidden;
   text-overflow: ellipsis;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 1;
-  font-size: 10.5px;
+  font-size: 10.25px;
   font-weight: 800;
-  line-height: 1.3;
+  line-height: 1.25;
   color: #64748b;
 }
 
@@ -915,16 +945,17 @@
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
-  margin-top: 6px;
+  margin-top: 4px;
 }
 
 .inboxTag {
   display: inline-flex;
   border-radius: 999px;
   background: #eef6f6;
-  padding: 1px 6px;
-  font-size: 9.5px;
+  padding: 1px 5px;
+  font-size: 9px;
   font-weight: 900;
+  line-height: 1.3;
   color: #0f766e;
 }
 
@@ -933,9 +964,10 @@
   border-radius: 999px;
   border: 1px solid #e2e8f0;
   background: #ffffff;
-  padding: 1px 6px;
-  font-size: 9.5px;
+  padding: 1px 5px;
+  font-size: 9px;
   font-weight: 900;
+  line-height: 1.3;
   color: #64748b;
 }
 
@@ -965,7 +997,9 @@
 .placementContent {
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 10px;
+  scrollbar-gutter: stable;
 }
 
 .previewTitle {

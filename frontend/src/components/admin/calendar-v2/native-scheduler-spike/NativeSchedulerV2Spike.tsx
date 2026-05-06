@@ -451,7 +451,7 @@ export function NativeSchedulerV2Spike({
           </header>
 
           <div className={styles.spikeBody}>
-            <div style={{ position: 'relative', minHeight: 0, minWidth: 0, overflow: 'hidden' }}>
+            <div className={styles.schedulerStage}>
               <NativeSchedulerGrid
                 resources={resources}
                 blocks={blocks}

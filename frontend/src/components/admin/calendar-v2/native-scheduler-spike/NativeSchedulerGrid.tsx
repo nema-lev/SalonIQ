@@ -57,6 +57,8 @@ type NativeSchedulerGridProps = {
 const HEADER_HEIGHT = 56;
 const GUTTER_WIDTH = 74;
 const MOCK_CURRENT_TIME_MINUTES = 14 * 60 + 10;
+const MIN_READ_ONLY_RESOURCE_COLUMN_WIDTH = 208;
+const SCROLLBAR_GUTTER_WIDTH = 16;
 
 export function NativeSchedulerGrid({
   resources,
@@ -76,8 +78,8 @@ export function NativeSchedulerGrid({
     () =>
       readOnly && resources.length > 0 && availableWidth > GUTTER_WIDTH
         ? Math.max(
-            NATIVE_SCHEDULER_GEOMETRY.resourceColumnWidth,
-            Math.floor((availableWidth - GUTTER_WIDTH) / resources.length),
+            MIN_READ_ONLY_RESOURCE_COLUMN_WIDTH,
+            Math.floor((availableWidth - GUTTER_WIDTH - SCROLLBAR_GUTTER_WIDTH) / resources.length),
           )
         : NATIVE_SCHEDULER_GEOMETRY.resourceColumnWidth,
     [availableWidth, readOnly, resources.length],

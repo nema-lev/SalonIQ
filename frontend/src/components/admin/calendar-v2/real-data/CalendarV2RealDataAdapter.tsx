@@ -3,14 +3,22 @@
 import { useMemo, useState } from 'react';
 import { addDays, endOfDay, format, startOfDay } from 'date-fns';
 import { ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useAdminCalendarBoardData } from '../../use-admin-calendar-board-data';
 import { NativeSchedulerV2Spike } from '../native-scheduler-spike/NativeSchedulerV2Spike';
 import type { NativeSchedulerNotice } from '../native-scheduler-spike/NativeSchedulerGrid';
 import { buildCalendarV2RealDataProjection } from './calendar-v2-real-data-mappers';
 import { CALENDAR_V2_READONLY_NOTICE } from './calendar-v2-readonly-actions';
+import { buildCalendarV2SampleDayProjection } from './calendar-v2-sample-day';
 
 export function CalendarV2RealDataAdapter() {
   const [currentDate, setCurrentDate] = useState(() => startOfDay(new Date()));
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const isSampleMode = searchParams.get('sample') === '1';
+  const showSampleDay = () => router.push(`${pathname}?sample=1`);
+  const backToRealData = () => router.push(pathname);
 
   const rangeStart = useMemo(() => startOfDay(currentDate), [currentDate]);
   const rangeEndExclusive = useMemo(() => addDays(endOfDay(currentDate), 1), [currentDate]);
@@ -39,6 +47,11 @@ export function CalendarV2RealDataAdapter() {
       }),
     [calendarBoard, currentDate, services, waitlistEntries],
   );
+  const sampleProjection = useMemo(
+    () => buildCalendarV2SampleDayProjection(currentDate),
+    [currentDate],
+  );
+  const activeProjection = isSampleMode ? sampleProjection : projection;
 
   const headerControls = (
     <div className="inline-flex min-w-0 items-center gap-2">
@@ -78,7 +91,7 @@ export function CalendarV2RealDataAdapter() {
     </div>
   );
 
-  if (error) {
+  if (error && !isSampleMode) {
     return (
       <section className="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-700 shadow-sm">
         <div className="max-w-3xl">
@@ -103,6 +116,13 @@ export function CalendarV2RealDataAdapter() {
             >
               Retry read
             </button>
+            <button
+              type="button"
+              onClick={showSampleDay}
+              className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-xs font-black text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-950"
+            >
+              Show sample day
+            </button>
             <span className="text-xs font-bold text-slate-500">
               The current /admin calendar remains the default calendar.
             </span>
@@ -112,31 +132,45 @@ export function CalendarV2RealDataAdapter() {
     );
   }
 
-  const hasSampleStaffNames = !isInitialLoading && hasSampleLikeStaffLabels(projection);
-  const visibleAppointmentCount = projection.calendarBlocks.filter(
+  const hasSampleStaffNames = !isSampleMode && !isInitialLoading && hasSampleLikeStaffLabels(projection);
+  const visibleAppointmentCount = activeProjection.calendarBlocks.filter(
     (block) => block.kind === 'appointment',
   ).length;
   const schedulerNotice = getSchedulerNotice({
-    isInitialLoading,
-    resourceCount: projection.resources.length,
+    isInitialLoading: !isSampleMode && isInitialLoading,
+    resourceCount: activeProjection.resources.length,
     appointmentCount: visibleAppointmentCount,
+    showSampleDay: isSampleMode ? undefined : showSampleDay,
   });
   const toolbarStatusNote = isInitialLoading
     ? 'Reading from the current admin calendar.'
     : isFetching
       ? 'Refreshing current calendar reads.'
       : 'The current /admin calendar remains default.';
-  const toolbarNote = hasSampleStaffNames
-    ? `Sample staff names · ${toolbarStatusNote}`
-    : toolbarStatusNote;
+  const toolbarNote = isSampleMode ? (
+    <>
+      <span>Sample day · Read-only</span>
+      <button
+        type="button"
+        onClick={backToRealData}
+        className="ml-2 border-b border-slate-400 pb-0.5 text-[11px] font-black text-slate-700 transition hover:border-slate-900 hover:text-slate-950"
+      >
+        Back to real data
+      </button>
+    </>
+  ) : hasSampleStaffNames ? (
+    `Sample staff names · ${toolbarStatusNote}`
+  ) : (
+    toolbarStatusNote
+  );
 
   return (
     <NativeSchedulerV2Spike
       date={currentDate}
-      resources={projection.resources}
-      calendarBlocks={projection.calendarBlocks}
-      demandItems={projection.demandItems}
-      actionItems={projection.actionItems}
+      resources={activeProjection.resources}
+      calendarBlocks={activeProjection.calendarBlocks}
+      demandItems={activeProjection.demandItems}
+      actionItems={activeProjection.actionItems}
       readOnly
       readOnlyNotice={CALENDAR_V2_READONLY_NOTICE}
       schedulerNotice={schedulerNotice}
@@ -159,10 +193,12 @@ function getSchedulerNotice({
   isInitialLoading,
   resourceCount,
   appointmentCount,
+  showSampleDay,
 }: {
   isInitialLoading: boolean;
   resourceCount: number;
   appointmentCount: number;
+  showSampleDay?: () => void;
 }): NativeSchedulerNotice | null {
   if (isInitialLoading) {
     return {
@@ -177,6 +213,7 @@ function getSchedulerNotice({
       tone: 'warning',
       title: 'No staff available for this date',
       message: 'Calendar V2 needs staff resources from the current calendar read before it can draw the day grid.',
+      ...(showSampleDay ? { action: { label: 'Show sample day', onClick: showSampleDay } } : {}),
     };
   }
 
@@ -185,6 +222,7 @@ function getSchedulerNotice({
       tone: 'empty',
       title: 'No bookings scheduled for this date',
       message: 'The staff day grid stays visible for layout review.',
+      ...(showSampleDay ? { action: { label: 'Show sample day', onClick: showSampleDay } } : {}),
     };
   }
 

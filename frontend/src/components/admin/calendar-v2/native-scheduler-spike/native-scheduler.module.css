@@ -278,7 +278,7 @@
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 16px 38px rgba(15, 23, 42, 0.1);
   padding: 12px 13px;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .schedulerNoticeEmpty {
@@ -308,6 +308,24 @@
   font-weight: 800;
   line-height: 1.45;
   color: #64748b;
+}
+
+.schedulerNoticeAction {
+  margin-top: 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 6px 9px;
+  font-size: 11px;
+  font-weight: 900;
+  color: #0f172a;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+}
+
+.schedulerNoticeAction:hover {
+  border-color: #94a3b8;
+  color: #020617;
 }
 
 .schedulerEmptyCanvas {
@@ -624,17 +642,27 @@
 
 .inboxPanel {
   min-height: 0;
-  flex: 1;
+  flex: 1 1 260px;
+  min-height: 205px;
   display: flex;
   flex-direction: column;
 }
 
 .inboxPanelEmpty {
+  min-height: 0;
   flex: 0 0 auto;
 }
 
 .previewPanel {
-  flex: 0 0 auto;
+  display: flex;
+  min-height: 0;
+  max-height: 55%;
+  flex: 0 1 auto;
+  flex-direction: column;
+}
+
+.previewPanelEmpty {
+  max-height: none;
 }
 
 .previewPanelEmpty .previewContent {
@@ -851,6 +879,8 @@
 
 .previewContent,
 .placementContent {
+  min-height: 0;
+  overflow-y: auto;
   padding: 11px 12px 12px;
 }
 
@@ -863,22 +893,22 @@
 
 .previewFacts {
   display: grid;
-  gap: 6px;
-  margin-top: 10px;
+  gap: 5px;
+  margin-top: 8px;
 }
 
 .previewFact {
   display: grid;
   min-width: 0;
-  grid-template-columns: 22px minmax(0, 1fr);
-  gap: 8px;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 7px;
   align-items: center;
 }
 
 .previewFactIcon {
   display: grid;
-  height: 22px;
-  width: 22px;
+  height: 20px;
+  width: 20px;
   place-items: center;
   border-radius: 7px;
   background: #f1f5f9;
@@ -902,16 +932,28 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 900;
   color: #334155;
 }
 
 .previewMeta {
-  margin: 9px 0 0;
-  font-size: 12px;
+  margin: 7px 0 0;
+  font-size: 11px;
   font-weight: 700;
   color: #64748b;
+}
+
+.previewNote {
+  margin: 6px 0 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fbfdff;
+  padding: 7px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.45;
+  color: #475569;
 }
 
 .commandLine {

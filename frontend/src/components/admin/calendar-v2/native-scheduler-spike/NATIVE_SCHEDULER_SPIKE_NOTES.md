@@ -126,6 +126,21 @@ In the read-only real-data route, appointment move handles are disabled.
 - Calendar V2 remains read-only: no appointment creation, move persistence, waitlist placement persistence, status changes, or write API calls from the real-data route.
 - Screenshots captured under `screenshots/`: `calendar-v2-sample-labels-1440x900.png`, `calendar-v2-sample-labels-1366x768.png`, `calendar-v2-sample-labels-390x844.png`, and `calendar-v2-sample-labels-empty-1440x900.png`.
 
+## Sample Day Preview Pass
+
+- Date of pass: 2026-05-06.
+- Explicit sample mode is available at `/admin/calendar-v2?sample=1`; real data remains the default at `/admin/calendar-v2`.
+- Empty real-data states stay non-blocking and can show a compact `Show sample day` action. Sample data is never implied to be production data.
+- Sample mode is labeled `Sample day · Read-only` with `Back to real data` in the toolbar note.
+- Sample staff/resources are Bulgarian salon names: `Елена`, `Мария`, `Никол`, and `Ани`, with the existing 08:00-20:00 scheduler hours.
+- Sample appointments cover 15-minute, 30-minute, 60-minute, 90-minute, and 120-minute cards, adjacent spacing, a message cue, a visit-progress cue, and a blocked break.
+- Sample Action Inbox includes read-only examples for an untimed request, pending approval, cancellation recovery, and a client message needing response.
+- Booking Detail shows selected sample appointment time, service, staff, status/progress, message cue, and notes without enabling edits.
+- Calendar V2 remains read-only: no appointment creation, move persistence, waitlist placement persistence, status changes, or write API calls from sample mode.
+- Current `/admin` remains the default production calendar and is not replaced by Calendar V2.
+- Screenshots captured under `screenshots/`: `calendar-v2-sample-day-real-1440x900.png`, `calendar-v2-sample-day-1440x900.png`, `calendar-v2-sample-day-1366x768.png`, and `calendar-v2-sample-day-390x844.png`.
+- Visual QA result from `/private/tmp/saloniq-calendar-v2-sample-day-qa-results.json`: real empty state kept the grid and `Show sample day` action visible, sample mode rendered staff/appointments/Action Inbox/Booking Detail, phone fallback remained visible, appointment drag grip count was `0`, waitlist placement button count was `0`, and `writesAfterV2` was empty.
+
 ## Short-Card Readability Verdict
 
 Feasible. The 15-minute fixture uses a short-card variant that keeps initials, a useful time cue, and the drag grip visible. Text is intentionally compact instead of disappearing.

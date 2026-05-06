@@ -38,7 +38,9 @@ export function NativeSchedulerActionInboxMock({
       <div className={styles.panelHeader}>
         <div className={styles.panelHeaderText}>
           <p className={styles.panelTitle}>Action Inbox</p>
-          <p className={styles.panelSubtitle}>Requests and booking updates</p>
+          <p className={styles.panelSubtitle}>
+            {readOnly ? 'Read-only requests and booking updates' : 'Requests and booking updates'}
+          </p>
         </div>
         <span className={styles.panelCount}>{requiresAction.length}</span>
       </div>
@@ -63,6 +65,10 @@ export function NativeSchedulerActionInboxMock({
         {draggableDemandActions.map((action) => {
           const demand = demandById.get(action.sourceId);
           if (!demand) return null;
+          const title = action.title || demand.client.name;
+          const subtitle = title === demand.client.name
+            ? `${demand.service.name} · ${demand.preferredWindow.label}`
+            : `${demand.client.name} · ${demand.service.name} · ${demand.preferredWindow.label}`;
 
           return (
             <article
@@ -80,11 +86,9 @@ export function NativeSchedulerActionInboxMock({
                 </button>
               )}
               <div className={styles.inboxText}>
-                <p className={styles.inboxTitle}>{demand.client.name}</p>
-                <p className={styles.inboxSubtitle}>
-                  {demand.service.name} · {demand.preferredWindow.label}
-                </p>
-                <span className={styles.inboxTag}>{readOnly ? 'Waitlist' : 'Drag to place'}</span>
+                <p className={styles.inboxTitle}>{title}</p>
+                <p className={styles.inboxSubtitle}>{subtitle}</p>
+                <span className={styles.inboxTag}>{readOnly ? 'Read-only' : 'Drag to place'}</span>
               </div>
             </article>
           );
@@ -97,7 +101,9 @@ export function NativeSchedulerActionInboxMock({
                 <AlertCircle size={13} strokeWidth={2.4} /> {action.title}
               </p>
               <p className={styles.inboxSubtitle}>{action.subtitle}</p>
-              <span className={styles.inboxTag}>{formatGroup(action.group)}</span>
+              <span className={styles.inboxTag}>
+                {readOnly ? `Read-only · ${formatGroup(action.group)}` : formatGroup(action.group)}
+              </span>
             </div>
           </article>
         ))}

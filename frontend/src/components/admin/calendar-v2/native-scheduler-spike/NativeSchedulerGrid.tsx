@@ -22,6 +22,10 @@ export type NativeSchedulerNotice = {
   title: string;
   message?: string;
   tone?: 'empty' | 'loading' | 'warning';
+  action?: {
+    label: string;
+    onClick: () => void;
+  };
 };
 
 export type NativeSchedulerGridDropPreview = {
@@ -275,6 +279,11 @@ function SchedulerNotice({ notice }: { notice?: NativeSchedulerNotice | null }) 
     <div className={`${styles.schedulerNotice} ${getNoticeToneClass(notice.tone)}`}>
       <p className={styles.schedulerNoticeTitle}>{notice.title}</p>
       {notice.message && <p className={styles.schedulerNoticeText}>{notice.message}</p>}
+      {notice.action && (
+        <button type="button" className={styles.schedulerNoticeAction} onClick={notice.action.onClick}>
+          {notice.action.label}
+        </button>
+      )}
     </div>
   );
 }

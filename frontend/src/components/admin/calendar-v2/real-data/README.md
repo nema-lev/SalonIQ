@@ -6,6 +6,7 @@ This folder connects the direct `/admin/calendar-v2` preview route to the existi
 
 - Calendar V2 read-only preview is deployed on `main` for hands-on Oracle testing.
 - Route: `/admin/calendar-v2`.
+- Explicit sample route: `/admin/calendar-v2?sample=1`.
 - The current `/admin` calendar remains the default and production calendar.
 - The preview route is available by default.
 - To disable the preview route in an environment, set `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW=true`.
@@ -21,6 +22,7 @@ This folder connects the direct `/admin/calendar-v2` preview route to the existi
   - `GET /services/admin`
 - Uses the existing `apiClient`, so current admin auth and tenant headers stay unchanged.
 - Does not add backend endpoints.
+- Sample mode is built in the frontend adapter only; it does not read or write sample records through backend APIs.
 
 ## Projection
 
@@ -30,6 +32,7 @@ This folder connects the direct `/admin/calendar-v2` preview route to the existi
 - Waitlist entries and timed appointment request states are projected into Action Inbox items with `buildActionInboxItems(...)`.
 - Staff exceptions from the calendar board are mapped to read-only blocked-time blocks.
 - Demo/sample-labeled staff/resource values are still rendered when they come from the current read path. The UI adds a quiet toolbar note instead of blocking the scheduler.
+- When `sample=1` is present, the adapter swaps in a clearly labeled read-only Bulgarian salon sample day with staff, appointments, blocked time, and Action Inbox examples.
 
 ## Preview UX States
 
@@ -37,7 +40,9 @@ This folder connects the direct `/admin/calendar-v2` preview route to the existi
 - Scheduler: fills the desktop calendar canvas and shows compact, non-blocking notices for loading, no staff resources, and no scheduled appointments.
 - Action Inbox: shows request/recovery items when present and a compact empty state when there is nothing to act on.
 - Booking Detail: shows selected booking facts or a compact no-selection state.
-- Read error: shows a retry action and states that fixture data is not shown on the production preview route.
+- Real empty day: keeps staff columns visible and offers a compact `Show sample day` action.
+- Sample mode: shows `Sample day · Read-only` plus `Back to real data`.
+- Read error: shows retry and `Show sample day` actions while stating that fixture data is not shown on the production preview route.
 
 ## Read-Only Contract
 

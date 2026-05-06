@@ -49,10 +49,18 @@ export function NativeSchedulerPreviewPanel({
                 label="Staff"
                 value={appointment?.staff.name ?? selectedBlock.cardSummary?.staffLabel ?? selectedBlock.staffId}
               />
+              <PreviewFact
+                icon={<CalendarCheck2 size={13} strokeWidth={2.5} />}
+                label="Status"
+                value={appointment ? formatBookingStatus(appointment) : selectedBlock.kind}
+              />
             </div>
-            <p className={styles.previewMeta}>
-              {appointment?.visitProgress ? `Visit: ${formatState(appointment.visitProgress)}` : selectedBlock.kind}
-            </p>
+            {appointment?.communicationState && appointment.communicationState !== 'none' && (
+              <p className={styles.previewMeta}>
+                Message: {formatState(appointment.communicationState)}
+              </p>
+            )}
+            {appointment?.notes && <p className={styles.previewNote}>{appointment.notes}</p>}
           </>
         ) : (
           <div className={styles.previewEmptyState}>
@@ -103,6 +111,10 @@ function formatRange(block: CalendarV2CalendarBlock) {
 
 function formatState(value: string) {
   return value.replaceAll('_', ' ');
+}
+
+function formatBookingStatus(appointment: NonNullable<CalendarV2CalendarBlock['appointment']>) {
+  return `${formatState(appointment.schedulingState)} · ${formatState(appointment.visitProgress)}`;
 }
 
 function formatTime(date: Date) {

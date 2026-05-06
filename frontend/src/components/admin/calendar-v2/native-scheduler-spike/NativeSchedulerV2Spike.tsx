@@ -88,7 +88,7 @@ type NativeSchedulerV2SpikeProps = {
   schedulerNotice?: NativeSchedulerNotice | null;
   toolbarEyebrow?: string;
   toolbarPills?: string[];
-  toolbarNote?: string;
+  toolbarNote?: ReactNode;
   toolbarControls?: ReactNode;
 };
 

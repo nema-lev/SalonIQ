@@ -1,0 +1,883 @@
+# Calendar V2 Request Workflow Implementation Plan
+
+This document is an implementation blueprint only. It records the current repo behavior and proposes the next Calendar V2 workflow without changing runtime behavior, frontend UI, backend endpoints, database schema, packages, deployment config, tenant resolution, secrets, or environment files.
+
+## 1. Executive Decision
+
+The next truly valuable Calendar V2 workflow should be:
+
+1. Show actionable demand in the Calendar V2 Action Inbox.
+2. Let the owner review an untimed request, including service, client, preferred date or window, staff preference, and notes.
+3. Let the owner choose a slot from suggested slots or a calendar slot.
+4. Confirm placement through a lightweight confirmation step.
+5. Persist the placement through a dedicated backend path that validates conflicts, staff working hours, blocked time, tenant scope, and request state in one server-side transaction.
+6. Refresh the calendar and waitlist only after the server accepts the write.
+7. Notify the client only when the notification behavior is explicitly selected and designed.
+
+This workflow matches the high-value salon planning habit: evening or morning review of tomorrow's bookings, waiting demand, requests without exact time, pending confirmations, and cancellation gaps that can be filled.
+
+Calendar V2 should explicitly deprioritize these workflows for the first write feature:
+
+- Day-of visit progress: arrived, in-service, completed, no-show.
+- Mobile drag/drop.
+- Full appointment editing.
+- Recurring appointments.
+- Drag-to-move existing appointments as the first persisted write feature.
+
+The correct first write surface is request-to-slot placement, not visit tracking and not generic appointment movement.
+
+## 2. Current Code Inventory
+
+### Calendar V2 route and read-only contract
+
+- `frontend/src/app/(tenant)/admin/calendar-v2/page.tsx:9` renders `AdminCalendarV2PreviewPage`.
+- `frontend/src/app/(tenant)/admin/calendar-v2/page.tsx:10` disables the preview route when `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW === 'true'`.
+- `frontend/src/components/admin/calendar-v2/real-data/CalendarV2RealDataAdapter.tsx:15` defines `CalendarV2RealDataAdapter`.
+- `CalendarV2RealDataAdapter` reads current admin calendar data through `useAdminCalendarBoardData(...)` at `frontend/src/components/admin/calendar-v2/real-data/CalendarV2RealDataAdapter.tsx:26`.
+- `CalendarV2RealDataAdapter` passes `readOnly` to `NativeSchedulerV2Spike` at `frontend/src/components/admin/calendar-v2/real-data/CalendarV2RealDataAdapter.tsx:170`.
+- `frontend/src/components/admin/calendar-v2/real-data/calendar-v2-readonly-actions.ts:3` defines the read-only notice.
+- `frontend/src/components/admin/calendar-v2/real-data/calendar-v2-readonly-actions.ts:6` lists disabled Calendar V2 write actions: `moveAppointment`, `placeRequest`, `confirmRequest`, `declineRequest`, `cancelAppointment`, `createAppointment`, and `waitlistPlacement`.
+- `frontend/src/components/admin/calendar-v2/real-data/README.md:48` documents the read-only contract: no appointment creation, no move persistence, no waitlist placement, no status transitions, no optimistic persistence, and no backend writes from Calendar V2.
+- `frontend/src/components/admin/calendar-v2/real-data/README.md:59` records that the `Пристигнал` UI action was intentionally removed from Calendar V2 and that the salon planning surface should focus on planning, pending approvals, untimed request placement, confirmations, and rescheduling.
+
+### Calendar V2 domain, commands, projections, and Action Inbox
+
+- `frontend/src/components/admin/calendar-v2/domain.ts:6` defines `SchedulingState`, including `unscheduled`, `proposed`, `scheduled`, `rescheduled`, `cancelled`, `completed`, and `no_show`.
+- `frontend/src/components/admin/calendar-v2/domain.ts:15` defines `RequestState`, including waitlist states and request/proposal states such as `waiting`, `notified`, `pending`, `requested`, `proposal_pending`, `proposal_sent`, `approved`, `booked`, `declined`, `rejected`, `cancelled`, and `archived`.
+- `frontend/src/components/admin/calendar-v2/domain.ts:35` defines `VisitProgress`, but this should remain outside the first Calendar V2 write workflow.
+- `frontend/src/components/admin/calendar-v2/domain.ts:94` defines `CalendarV2ProposedTime`.
+- `frontend/src/components/admin/calendar-v2/domain.ts:104` defines `CalendarV2ActivityEvent`.
+- `frontend/src/components/admin/calendar-v2/domain.ts:129` defines `CalendarV2Appointment`.
+- `frontend/src/components/admin/calendar-v2/domain.ts:150` defines `CalendarV2DemandItem`; this is the existing Calendar V2 object that maps correctly to untimed waitlist/request demand.
+- `frontend/src/components/admin/calendar-v2/domain.ts:181` defines `CalendarV2CalendarBlock`; blocks represent scheduled appointments or blocked/availability time, not untimed demand.
+- `frontend/src/components/admin/calendar-v2/domain.ts:198` defines `CalendarV2ActionItem`.
+- `frontend/src/components/admin/calendar-v2/commands.ts:7` defines command types, including `placeRequest`, `confirmRequest`, and `declineRequest`.
+- `frontend/src/components/admin/calendar-v2/commands.ts:71` defines `PlaceRequestCommand` with a `target` time/staff and an optional `createAppointmentDraft`.
+- `frontend/src/components/admin/calendar-v2/commands.ts:83` defines `ConfirmRequestCommand`.
+- `frontend/src/components/admin/calendar-v2/commands.ts:91` defines `DeclineRequestCommand`.
+- `frontend/src/components/admin/calendar-v2/projections.ts:102` maps a `WaitlistEntry` to `CalendarV2DemandItem`.
+- `frontend/src/components/admin/calendar-v2/projections.ts:123` maps desired date/time to `preferredWindow`.
+- `frontend/src/components/admin/calendar-v2/projections.ts:136` maps `last_notified_slot_start_at` to `proposedTime`.
+- `frontend/src/components/admin/calendar-v2/projections.ts:160` builds `CalendarV2Projection`.
+- `frontend/src/components/admin/calendar-v2/projections.ts:294` keeps waitlist entries unscheduled unless status is `booked` or `cancelled`.
+- `frontend/src/components/admin/calendar-v2/projections.ts:307` maps waitlist `waiting` and `notified` to `requires_action`.
+- `frontend/src/components/admin/calendar-v2/action-inbox.ts:72` builds Action Inbox items from waitlist, appointments, and optional notifications.
+- `frontend/src/components/admin/calendar-v2/action-inbox.ts:115` maps a waitlist entry to a `needs_scheduling` Action Inbox item.
+- `frontend/src/components/admin/calendar-v2/action-inbox.ts:128` gives open waitlist entries a primary `placeRequest` action.
+- `frontend/src/components/admin/calendar-v2/action-inbox.ts:155` maps timed appointment request states to `needs_approval`.
+- `frontend/src/components/admin/calendar-v2/action-inbox.ts:192` maps conservative client-cancellation recovery to `needs_recovery`.
+- `frontend/src/components/admin/calendar-v2/action-inbox.ts:245` can map notification failures into `needs_reply` when notification entries are supplied.
+
+### Calendar V2 native scheduler spike
+
+- `frontend/src/components/admin/calendar-v2/native-scheduler-spike/NativeSchedulerV2Spike.tsx:80` accepts `demandItems`, `actionItems`, and `readOnly`.
+- `NativeSchedulerV2Spike` blocks drops when `readOnly` is true at `frontend/src/components/admin/calendar-v2/native-scheduler-spike/NativeSchedulerV2Spike.tsx:200`.
+- `NativeSchedulerV2Spike` can create a local `placeRequest` command on demand-item drop at `frontend/src/components/admin/calendar-v2/native-scheduler-spike/NativeSchedulerV2Spike.tsx:212`.
+- It opens `NativeSchedulerPlacementPreview` instead of writing data at `frontend/src/components/admin/calendar-v2/native-scheduler-spike/NativeSchedulerV2Spike.tsx:219`.
+- `frontend/src/components/admin/calendar-v2/native-scheduler-spike/native-scheduler-drag.ts:33` creates the local `PlaceRequestCommand`.
+- The local command contains demand item id, target staff/start/end, timezone, idempotency key, and draft appointment data at `frontend/src/components/admin/calendar-v2/native-scheduler-spike/native-scheduler-drag.ts:42`.
+- `frontend/src/components/admin/calendar-v2/native-scheduler-spike/NativeSchedulerPlacementPreview.tsx:33` explicitly states that no appointment API is called by the preview.
+- `frontend/src/components/admin/calendar-v2/native-scheduler-spike/NativeSchedulerActionInboxMock.tsx:18` renders the Action Inbox panel.
+- `NativeSchedulerActionInboxMock` hides demand drag controls in read-only mode at `frontend/src/components/admin/calendar-v2/native-scheduler-spike/NativeSchedulerActionInboxMock.tsx:78`.
+- `frontend/src/components/admin/calendar-v2/native-scheduler-spike/NATIVE_SCHEDULER_SPIKE_NOTES.md:219` records command-shape coverage for `placeRequest`.
+
+### Shared current-calendar read path
+
+- `frontend/src/components/admin/use-admin-calendar-board-data.ts:20` defines `useAdminCalendarBoardData`.
+- It reads `GET /appointments/calendar-board` with query key `['appointments-calendar-board', rangeStartIso, rangeEndExclusiveIso]` at `frontend/src/components/admin/use-admin-calendar-board-data.ts:28`.
+- It reads `GET /appointments/waitlist` with query key `['appointments-waitlist']` at `frontend/src/components/admin/use-admin-calendar-board-data.ts:41`.
+- It reads `GET /services/admin` with query key `['admin-calendar-services']` at `frontend/src/components/admin/use-admin-calendar-board-data.ts:50`.
+- Calendar board and waitlist refetch on window focus and interval: 10 seconds for board, 15 seconds for waitlist.
+
+### Current admin calendar request and waitlist flows
+
+- `frontend/src/components/admin/calendar-model.ts:76` defines `WaitlistEntry` with status `'waiting' | 'notified' | 'booked' | 'cancelled'`, desired date/window, notification fields, notes, booked appointment id, client, service, and optional staff.
+- `frontend/src/components/admin/calendar-model.ts:153` defines request owner states: `pending`, `requested`, `proposal_pending`, and `proposal_sent`.
+- `frontend/src/components/admin/calendar-model.ts:495` defines `getRequestWindowLabel`.
+- `frontend/src/components/admin/calendar-model.ts:511` defines waitlist status labels.
+- `frontend/src/components/admin/admin-calendar-workspace.tsx:191` filters active waitlist entries to `waiting` and `notified`.
+- `frontend/src/components/admin/admin-calendar-workspace.tsx:195` filters pending timed appointments with `isRequestOwnerState`.
+- `frontend/src/components/admin/admin-calendar-workspace.tsx:321` defines `invalidateCalendar`, which refetches the board and invalidates `appointments-calendar-board`, `appointments-waitlist`, and `appointment-context`.
+- `frontend/src/components/admin/admin-calendar-workspace.tsx:328` patches `/appointments/:id/status`.
+- `frontend/src/components/admin/admin-calendar-workspace.tsx:341` patches `/appointments/:id/reschedule`.
+- `frontend/src/components/admin/admin-calendar-workspace.tsx:353` patches `/appointments/waitlist/:id/status`.
+- `frontend/src/components/admin/admin-calendar-workspace.tsx:365` creates an appointment from a waitlist request by calling `POST /appointments/admin`, then `PATCH /appointments/waitlist/:id/status`.
+- That current request placement flow is not atomic because appointment creation and waitlist status update are two separate API calls.
+- `frontend/src/components/admin/admin-calendar-workspace.tsx:401` performs client-side placement checks for staff working hours, blocked time, and appointment overlap.
+- `frontend/src/components/admin/admin-calendar-workspace.tsx:637` writes a request drop by calling `createAppointmentFromRequestMutation`.
+- `frontend/src/components/admin/admin-calendar-workspace.tsx:752` finds first available slot by looping over `GET /appointments/slots`, then creates the appointment from the request.
+- `frontend/src/components/admin/calendar-request-sections.tsx:27` renders current-calendar waitlist and pending appointment sections.
+- `frontend/src/components/admin/calendar-request-sections.tsx:52` labels untimed requests as `Без избран час`.
+- `frontend/src/components/admin/calendar-request-sections.tsx:129` labels pending timed appointments as `Чакат потвърждение`.
+- `frontend/src/components/admin/calendar-detail-drawer.tsx:150` renders request details, including phone, preferred staff/window, and notes.
+- `frontend/src/components/admin/calendar-detail-drawer.tsx:223` offers `Първи свободен` and archive actions for requests.
+- `frontend/src/components/admin/admin-booking-modal.tsx:103` posts `/appointments/admin` for direct admin appointment creation.
+- `frontend/src/components/admin/admin-booking-modal.tsx:121` invalidates clients, calendar board, and waitlist after successful admin creation.
+- `frontend/src/components/admin/appointment-move-modal.tsx:88` patches `/appointments/:id/reschedule`.
+- `frontend/src/components/admin/appointment-move-modal.tsx:100` invalidates appointment context, calendar board, and waitlist after move.
+- `frontend/src/components/admin/admin-calendar-desktop.tsx:189` adds the requests panel as a right column when actionable requests exist.
+- `frontend/src/components/admin/admin-calendar-mobile.tsx:451` renders the current mobile requests bottom sheet.
+
+### Current backend appointments, requests, slots, waitlist, and status endpoints
+
+Current controller endpoints in `backend/src/modules/appointments/appointments.controller.ts`:
+
+- `GET /appointments/slots` at line 43 calls `getAvailableSlots`.
+- `POST /appointments` at line 62 calls public `create`.
+- `POST /appointments/request` at line 74 calls `createBookingRequest` and creates an untimed request.
+- `POST /appointments/admin` at line 88 calls `createByAdmin`.
+- `POST /appointments/:id/proposal` at line 100 exists, but the public proposal response page says the feature is removed at lines 377-412.
+- `GET /appointments/calendar-board` at line 133 calls `getCalendarBoard`.
+- `GET /appointments/:id/context` at line 224 calls `getAppointmentContext`.
+- `PATCH /appointments/:id/status` at line 238 calls `updateStatus`.
+- `PATCH /appointments/:id/visit-progress` at line 256 calls `updateVisitProgress`.
+- `POST /appointments/:id/notifications/retry` at line 268 retries one notification type.
+- `POST /appointments/:id/notifications/retry-failed` at line 284 retries failed notification types.
+- `PATCH /appointments/:id/reschedule` at line 295 calls `rescheduleAppointment`.
+- `GET /appointments/waitlist` at line 311 calls `listWaitlist`.
+- `POST /appointments/waitlist` at line 323 calls `createWaitlistEntry`.
+- `PATCH /appointments/waitlist/:id/status` at line 349 calls `updateWaitlistStatus`.
+- `POST /appointments/waitlist/:id/notify` at line 365 calls `notifyWaitlistEntry`.
+
+Current DTO facts:
+
+- `backend/src/modules/appointments/dto/create-appointment.dto.ts:16` defines `CreateAppointmentDto`.
+- `CreateAppointmentDto` requires `serviceId`, `staffId`, `startAt`, `clientName`, and `clientPhone`.
+- `CreateAppointmentDto` supports optional `clientEmail`, `notes`, `intakeData`, `consentGiven`, `askClient`, `publicBaseUrl`, and `deviceToken`.
+- `backend/src/modules/appointments/dto/create-booking-request.dto.ts:15` defines `CreateBookingRequestDto`.
+- `CreateBookingRequestDto` requires `serviceId`, `clientName`, and `clientPhone`.
+- `CreateBookingRequestDto` supports `preferredStaffId`, `desiredDate`, `desiredTimePeriod`, `clientEmail`, `notes`, `consentGiven`, `publicBaseUrl`, and `deviceToken`.
+- `backend/src/modules/appointments/dto/get-slots.dto.ts:4` requires `serviceId`, `staffId`, and `date`.
+- `backend/src/modules/appointments/dto/update-status.dto.ts:5` accepts `AppointmentStatus`, optional `reason`, and optional `cancelledBy`.
+- `backend/src/modules/appointments/dto/update-visit-progress.dto.ts:5` accepts `VisitProgress`.
+
+Current backend service behavior:
+
+- `backend/src/modules/appointments/appointments.service.ts:29` defines waitlist statuses as `waiting`, `notified`, `booked`, and `cancelled`.
+- `backend/src/modules/appointments/appointments.service.ts:64` defines the `WaitlistRow` shape used by the service.
+- `backend/src/modules/appointments/appointments.service.ts:119` defines `createByAdmin`, which calls generic `create` with `forceConfirmed: true`, `askClient: false`, and `bookedBy: 'owner'`.
+- `backend/src/modules/appointments/appointments.service.ts:159` defines `getCalendarBoard`.
+- `getCalendarBoard` calls `ensureWaitlistTable` at line 163, reads active staff, appointment rows, staff exceptions, and active waitlist entries.
+- `getCalendarBoard` only includes waitlist status `waiting` and `notified` at line 258.
+- `backend/src/modules/appointments/appointments.service.ts:638` defines `getAvailableSlots`.
+- `getAvailableSlots` validates service existence, staff existence, working hours, existing appointments, staff exceptions, min/max advance booking, and group-service capacity.
+- `backend/src/modules/appointments/appointments.service.ts:831` defines generic `create`.
+- `create` validates service existence at line 847, calculates `endAt` from service duration at line 868, finds or creates the client at line 872, checks appointment conflicts at lines 875-936, checks minimum advance booking at lines 938-944, inserts into `appointments` at lines 964-989, and schedules notifications at line 994.
+- The generic `create` path does not check staff working hours or staff exceptions. Those checks exist in `getAvailableSlots` and `rescheduleAppointment`, not in `create`.
+- `backend/src/modules/appointments/appointments.service.ts:1063` defines `updateStatus`.
+- `updateStatus` validates appointment status transitions and sends an immediate status/cancellation notification at lines 1129-1151.
+- `backend/src/modules/appointments/appointments.service.ts:1262` defines `listWaitlist`.
+- `backend/src/modules/appointments/appointments.service.ts:1314` defines `createBookingRequest`.
+- `createBookingRequest` maps `desiredTimePeriod` to `desiredFrom` and `desiredTo`, calls `createWaitlistEntry`, and returns `{ id, status: 'pending' }` even though the stored waitlist status is `waiting`.
+- `backend/src/modules/appointments/appointments.service.ts:1342` defines `createWaitlistEntry`, which inserts a waitlist row with status `waiting`.
+- `backend/src/modules/appointments/appointments.service.ts:1410` defines `updateWaitlistStatus`, which updates waitlist status and `booked_appointment_id`.
+- `backend/src/modules/appointments/appointments.service.ts:1453` defines `notifyWaitlistEntry`, which sends `WAITLIST_AVAILABLE`, then marks the waitlist row `notified` with `last_notified_slot_start_at`.
+- `backend/src/modules/appointments/appointments.service.ts:1534` throws `ConflictException` when waitlist notification sending fails.
+- `backend/src/modules/appointments/appointments.service.ts:1623` defines `rescheduleAppointment`, which validates appointment state, blocks group-service drag/drop moves, validates staff, staff working hours, staff exceptions, and conflicts, then updates the appointment.
+- `rescheduleAppointment` does not send a notification in the inspected code.
+- `backend/src/modules/appointments/appointments.service.ts:1949` defines `scheduleNotifications`, which sends immediate booking confirmation and queues reminders.
+- `backend/src/modules/appointments/appointments.service.ts:2060` defines `processNotificationNow`, which returns `false` on processor failure instead of throwing to callers.
+- `backend/src/modules/appointments/appointments.service.ts:2252` defines `assertNoConflict`, but the inspected `create` and `rescheduleAppointment` paths use inline conflict queries instead of this helper.
+- `backend/src/modules/appointments/appointments.service.ts:2278` defines status transitions: `pending -> confirmed/cancelled`, `proposal_pending -> confirmed/cancelled`, `confirmed -> completed/cancelled/no_show`; terminal statuses cannot transition.
+
+### Database fields in the inspected schema and compatibility helper
+
+- `backend/prisma/migrations/001_init.sql:191` creates tenant `appointments`.
+- `appointments.start_at` and `appointments.end_at` are required timestamp columns at lines 198-199.
+- `appointments.status` defaults to `pending` at line 202. The migration comment lists `pending | confirmed | completed | cancelled | no_show`.
+- `appointments.cancelled_by`, `cancellation_reason`, `client_notes`, `internal_notes`, and `intake_data` exist at lines 221-231.
+- `backend/prisma/migrations/001_init.sql:253` creates `staff_exceptions`.
+- `backend/prisma/migrations/001_init.sql:266` creates `notifications_log`.
+- `notifications_log` includes `appointment_id`, `client_id`, `channel`, `type`, `status`, `external_id`, `error_message`, `sent_at`, and `delivered_at` at lines 267-280.
+- `backend/prisma/migrations/001_init.sql:286` creates tenant `waitlist`.
+- The migration waitlist fields are `id`, `client_id`, `service_id`, `staff_id`, `desired_date`, `desired_from`, `desired_to`, `status`, `notified_at`, `expires_at`, and `created_at`.
+- `backend/src/common/prisma/tenant-prisma.service.ts:133` defines `ensureWaitlistTable`.
+- `ensureWaitlistTable` creates waitlist if missing and adds compatibility columns `notes`, `last_notified_slot_start_at`, `booked_appointment_id`, and `updated_at` at lines 153-163.
+- `TenantPrismaService.queryInSchema` wraps each raw SQL query in its own transaction at `backend/src/common/prisma/tenant-prisma.service.ts:59`.
+- A future placement endpoint must use a single multi-step transaction, not separate `queryInSchema` calls for create and waitlist update.
+
+### Appointment statuses and notification enums
+
+- `backend/src/common/types/enums.ts:1` defines `AppointmentStatus`: `pending`, `proposal_pending`, `confirmed`, `completed`, `cancelled`, `no_show`.
+- `backend/src/common/types/enums.ts:10` defines `VisitProgress`: `scheduled`, `checked_in`, `in_service`, `completed`, `no_show`.
+- `backend/src/common/types/enums.ts:18` defines notification job types, including `BOOKING_CONFIRMED`, `BOOKING_PENDING`, `BOOKING_PROPOSAL`, `BOOKING_APPROVED`, cancellation jobs, reminders, `WAITLIST_AVAILABLE`, and `STATUS_CHANGED`.
+- `backend/src/common/types/enums.ts:34` defines notification channels: `telegram`, `sms`, `email`, `viber`.
+- The inspected notification processor uses Telegram and SMS paths. I did not find a Viber send path in the inspected notification processor.
+
+### Notification hooks and gaps
+
+- `backend/src/modules/notifications/notification.processor.ts:75` documents the notification processor as the BullMQ worker that sends notifications and logs them to `notifications_log`.
+- `backend/src/modules/notifications/notification.processor.ts:137` handles `WAITLIST_AVAILABLE`.
+- `WAITLIST_AVAILABLE` loads waitlist, client, service, and optional staff data at lines 144-166.
+- It sends Telegram if the client has consent, tenant Telegram is enabled, and the client has `telegram_chat_id` at lines 199-207.
+- It sends SMS if consent exists and SMS is configured at lines 208-227.
+- It logs `WAITLIST_AVAILABLE` to `notifications_log` at lines 236-251.
+- It throws when an attempted waitlist notification fails at lines 253-254.
+- Appointment notifications use `BOOKING_CONFIRMED`, reminders, status changed, and cancellation cases from `backend/src/modules/notifications/notification.processor.ts:372`.
+- Appointment notification results are logged to `notifications_log` at lines 603-619.
+- `frontend/src/components/admin/calendar-detail-drawer.tsx:130` displays appointment notification summary/history, but there is no equivalent waitlist notification history panel in the inspected current-calendar request drawer.
+- I did not find a durable notification outbox table in the inspected migration or Prisma helper. Existing behavior is immediate processor calls for some events plus BullMQ reminder jobs.
+- Notification failure currently can block `notifyWaitlistEntry`. It does not block generic appointment creation because `scheduleNotifications` does not check the boolean returned by `processNotificationNow`.
+
+## 3. Product Workflow Model
+
+### Desktop
+
+The desktop Calendar V2 planning workflow should be:
+
+1. Owner opens Calendar V2 and keeps the calendar visible.
+2. Owner sees Action Inbox on the right.
+3. Action Inbox shows an item labelled `Заявка без точен час` or equivalent wording for an untimed request.
+4. Owner opens the item and reviews client, phone, service, service duration, preferred date/window, preferred staff, notes, and current status.
+5. Owner chooses a suggested slot or uses the calendar grid to choose a staff/time slot.
+6. Calendar shows a lightweight placement preview in context. It should not open the full appointment editor.
+7. Owner explicitly confirms placement.
+8. Frontend sends one placement command to the backend.
+9. Backend validates the request and slot in one transaction.
+10. Calendar board and waitlist refresh after success.
+11. Client receives a message only when the selected notification policy says to notify.
+
+### Phone
+
+Phone should not use drag/drop. The phone flow should be:
+
+1. Tap request in Action Inbox or bottom sheet.
+2. Review request details.
+3. See suggested slots, grouped by day and staff.
+4. Tap one slot.
+5. Confirm in a bottom sheet.
+6. Send the same placement command as desktop.
+
+### Tablet
+
+- Landscape can follow a desktop-light layout with Action Inbox beside or near the scheduler.
+- Portrait should follow the phone-like flow: tap request, choose suggested slot, confirm.
+- Tablet should not be the first reason to implement drag/drop persistence.
+
+## 4. Domain Model Recommendation
+
+Recommended domain objects:
+
+- `DemandItem` / `Request` / `WaitlistEntry`: unscheduled demand from a client or owner that expresses intent but does not occupy staff time yet.
+- `Appointment`: scheduled time block with `start_at`, `end_at`, `staff_id`, `service_id`, client, and appointment status.
+- `ProposedTime`: a future optional object for owner-offered slots that the client can accept or reject. Calendar V2 already has `CalendarV2ProposedTime`.
+- `ActionItem`: inbox item derived from demand, appointment request state, cancellation recovery, or notification failure.
+- `CalendarBlock`: visual block for scheduled appointments, staff exceptions, and availability/closed time.
+- `ActivityEvent`: audit event for request created, placed, confirmed, declined, notification sent, notification failed, or stale conflict.
+
+An untimed request is not an appointment. It has service/client/preference data, but it does not reserve staff time and must not render as a scheduled calendar block.
+
+Required rule:
+
+> Untimed demand must not be forced into appointments.start_time until a slot is chosen.
+
+In this repository the concrete appointment timestamp column is `appointments.start_at`, not `appointments.start_time`; the same rule applies to `appointments.start_at`.
+
+Calendar V2 already has the correct separation:
+
+- `CalendarV2DemandItem` represents unscheduled waitlist/request demand.
+- `CalendarV2CalendarBlock` represents appointment and blocked-time blocks.
+- `projectWaitlistEntryToDemandItem(...)` keeps waitlist demand unscheduled unless the waitlist status is booked.
+
+## 5. State Model Recommendation
+
+### Request/waitlist states
+
+Recommended request/waitlist states:
+
+- `open` / `waiting`: request is actionable and unscheduled.
+- `pending approval`: a distinct state only if the request already has a time and needs owner confirmation.
+- `placed` / `booked`: request has produced a scheduled appointment.
+- `declined`: owner rejected the request.
+- `expired`: request is no longer valid because the preferred window expired.
+- `cancelled`: client or owner cancelled/archived the request.
+
+The current database waitlist states are only `waiting`, `notified`, `booked`, and `cancelled`. Do not invent new persisted states until a backend migration is intentionally designed. For the first implementation, map UI language onto existing states or add a dedicated endpoint that still uses existing persisted states.
+
+### Appointment states
+
+Current appointment states are:
+
+- `pending`
+- `proposal_pending`
+- `confirmed`
+- `cancelled`
+- `completed`
+- `no_show`
+
+For the first Calendar V2 request workflow, only `pending`, `confirmed`, and `cancelled` should be product-facing. `completed` and `no_show` can remain in the system but should not drive the first Calendar V2 workflow.
+
+### Allowed transitions
+
+Recommended transitions:
+
+- request `waiting` -> appointment `confirmed` plus waitlist `booked`.
+- request `waiting` -> request `declined` when a declined state exists; until then, current code can only represent archive/cancel as waitlist `cancelled`.
+- timed appointment request `pending` -> appointment `confirmed`.
+- timed appointment request `pending` -> appointment `cancelled`.
+- request `waiting` -> offered/proposed only if a future proposal flow is intentionally reintroduced.
+
+Current backend status transitions already allow:
+
+- appointment `pending` -> `confirmed` or `cancelled`.
+- appointment `proposal_pending` -> `confirmed` or `cancelled`.
+- appointment `confirmed` -> `completed`, `cancelled`, or `no_show`.
+
+### What must not happen
+
+- No fake scheduled appointment for untimed demand.
+- No write from Calendar V2 while the feature flag is off.
+- No write from Calendar V2 sample mode.
+- No placement without server conflict validation.
+- No silent notification unless the owner explicitly chooses a silent placement mode.
+- No automatic client notification if product policy has not been designed.
+- No split API sequence where appointment creation succeeds but waitlist update fails.
+- No mixing FYI updates into `Requires Action`.
+
+## 6. Backend Implementation Strategy
+
+### Are existing endpoints enough?
+
+Existing endpoints are enough for the current admin calendar, but they are not the right backend contract for Calendar V2 request placement.
+
+The current admin flow creates an appointment through `POST /appointments/admin` and then marks the waitlist row booked through `PATCH /appointments/waitlist/:id/status`. That creates two independent writes from the frontend. It can leave inconsistent state if the appointment is created but the waitlist update fails, if two tabs place the same request, or if notification behavior is added between the two calls.
+
+The generic appointment create endpoint also does not perform all placement validations visible in other backend paths. In the inspected code, generic `create` checks appointment conflicts and minimum advance time, but staff working hours and staff exceptions are enforced by `getAvailableSlots` and `rescheduleAppointment`, not by generic `create`.
+
+Recommendation: add a dedicated placement endpoint later.
+
+Preferred endpoint:
+
+```http
+POST /appointments/waitlist/:id/place
+```
+
+Acceptable alternative if the module is split later:
+
+```http
+POST /waitlist/:id/place
+```
+
+Because current waitlist endpoints live under `/appointments/waitlist`, the preferred endpoint keeps routing consistent with the existing controller.
+
+### Recommended payload
+
+```json
+{
+  "staffId": "uuid",
+  "startAt": "2026-05-09T10:00:00.000Z",
+  "durationMinutes": 60,
+  "timezone": "Europe/Sofia",
+  "notificationMode": "silent",
+  "idempotencyKey": "calendar-v2-place:<waitlistId>:<stable-client-key>"
+}
+```
+
+Recommended `notificationMode` values:
+
+- `silent`: create appointment and update waitlist without client notification.
+- `notify_client`: create appointment, update waitlist, then send the designed client message.
+- `owner_review`: create no appointment; reserve for future proposal/review workflows only if intentionally added.
+
+For the first backend implementation, support only `silent` or hard-code notification behavior behind a disabled flag. Do not silently send a client message by default.
+
+### Required backend validations
+
+The dedicated endpoint must validate:
+
+- Tenant scope from `TenantGuard` and `CurrentTenant`.
+- Waitlist table exists through `ensureWaitlistTable`.
+- Waitlist/request exists in the current tenant schema.
+- Waitlist/request status is still `waiting` or `notified`.
+- Waitlist/request has no `booked_appointment_id`.
+- Service exists and is still usable for placement.
+- Staff exists, is active, and can perform or accept the service if the repo has/uses a service-staff compatibility rule.
+- Target `startAt` parses to a valid date.
+- Target `endAt` is derived from service duration unless an explicit duration override is allowed.
+- Explicit duration override, if allowed, is bounded and audited.
+- Appointment conflict check excludes `cancelled` and `no_show` appointments, matching current conflict behavior.
+- Staff working hours include the full target interval.
+- Staff exception/blocked time does not overlap the target interval.
+- Min advance booking rule is applied or explicitly bypassed for owner placement with a recorded reason.
+- Idempotency key is present and scoped to tenant plus waitlist id.
+- Notification mode is valid and explicit.
+
+### Transaction requirements
+
+The endpoint must perform these steps inside one transaction:
+
+1. Lock the waitlist row with `SELECT ... FOR UPDATE`.
+2. Validate status and `booked_appointment_id` after lock.
+3. Validate service, staff, working hours, blocked time, and appointment conflicts.
+4. Check idempotency record or equivalent dedupe mechanism.
+5. Insert appointment.
+6. Update waitlist to `booked` and set `booked_appointment_id`.
+7. Insert audit/activity event if such storage exists by then.
+8. Commit.
+9. Run notification work after commit.
+
+Current `TenantPrismaService.queryInSchema` wraps one raw query at a time. A future placement endpoint will need either a new helper for multi-query tenant transactions or a service method using `withTenantSchema(...)` and Prisma transaction APIs carefully.
+
+### Conflict responses
+
+Recommended response classes:
+
+- `404`: waitlist request, service, or staff not found.
+- `409`: waitlist already handled, slot already taken, staff unavailable, blocked time overlap, or idempotency conflict with different payload.
+- `400`: invalid payload, invalid date, invalid duration, unsupported notification mode.
+
+Response body should include a stable machine code, for example:
+
+```json
+{
+  "code": "SLOT_CONFLICT",
+  "message": "Selected slot is no longer available.",
+  "currentWaitlistStatus": "waiting",
+  "refresh": true
+}
+```
+
+### Audit/event logging
+
+The repo currently stores appointment presentation state in `appointments.intake_data.stateMeta` and notification events in `notifications_log`. I did not find a generic activity-events table in the inspected schema.
+
+For the future dedicated endpoint, add audit/event logging only when there is a designed storage location. Do not overload `notifications_log` for non-notification events. Until a schema exists, return enough response data and keep the Action Inbox derived from existing entities.
+
+### Notification/outbox behavior
+
+Do not put notification sending inside the database transaction.
+
+Recommended order:
+
+1. Commit appointment placement.
+2. If `notificationMode === 'notify_client'`, enqueue or process notification.
+3. Record notification success/failure in `notifications_log`.
+4. If notification fails, keep appointment and waitlist state intact.
+5. Surface notification failure as an Action Inbox item or appointment context update.
+
+Current notification paths are immediate processor calls for booking/status/waitlist availability plus queued reminders. A durable outbox would be better for race safety, but adding it requires a schema change and is not part of the first implementation.
+
+## 7. Frontend Implementation Strategy
+
+### Phase A: read-only Action Inbox refinement
+
+Files to change:
+
+- `frontend/src/components/admin/calendar-v2/action-inbox.ts`
+- `frontend/src/components/admin/calendar-v2/projections.ts`
+- `frontend/src/components/admin/calendar-v2/native-scheduler-spike/NativeSchedulerActionInboxMock.tsx`
+- `frontend/src/components/admin/calendar-v2/native-scheduler-spike/NativeSchedulerPreviewPanel.tsx`
+- `frontend/src/components/admin/calendar-v2/real-data/CalendarV2RealDataAdapter.tsx`
+
+Behavior added:
+
+- Rename/render waitlist demand as planning language, for example `Заявка без точен час`.
+- Keep waitlist entries in `Requires action`.
+- Keep cancellation recovery separate from FYI `Updates`.
+- Show request facts without enabling writes.
+
+What remains disabled:
+
+- Drag controls in real-data mode.
+- Confirm placement.
+- Backend writes.
+- Status changes.
+
+Validation required:
+
+- Real-data Calendar V2 still fires only current read endpoints.
+- Sample mode still performs no backend writes.
+- Action Inbox counts match projected data.
+
+Rollback strategy:
+
+- Revert UI labels/projection display changes only. The read-only contract remains unchanged.
+
+### Phase B: local placement preview only
+
+Files to change:
+
+- `frontend/src/components/admin/calendar-v2/native-scheduler-spike/NativeSchedulerV2Spike.tsx`
+- `frontend/src/components/admin/calendar-v2/native-scheduler-spike/native-scheduler-drag.ts`
+- `frontend/src/components/admin/calendar-v2/native-scheduler-spike/NativeSchedulerPlacementPreview.tsx`
+- `frontend/src/components/admin/calendar-v2/native-scheduler-spike/native-scheduler-regression-checks.ts`
+- `frontend/src/components/admin/calendar-v2/real-data/CalendarV2RealDataAdapter.tsx`
+
+Behavior added:
+
+- Enable a Calendar V2 local-only placement preview for real waitlist demand behind an explicit local preview feature flag.
+- Generate `PlaceRequestCommand` from Action Inbox plus target slot.
+- Show placement preview with client, service, staff, date/time, duration, and notification mode shown as disabled/read-only.
+- Confirm button remains disabled.
+- No write endpoint is called.
+
+What remains disabled:
+
+- Persist placement.
+- Confirm/decline pending timed requests.
+- Appointment movement persistence.
+- Mobile drag/drop.
+
+Validation required:
+
+- Browser/network check that no write endpoint fires after local placement preview.
+- Regression check that command shape includes request id, target, source surface, idempotency key, and draft appointment details.
+- Feature flag off means no placement controls.
+- Sample mode means no writes.
+
+Rollback strategy:
+
+- Disable the feature flag. Since no writes exist, rollback is UI-only.
+
+### Phase C: backend placement endpoint integration behind feature flag
+
+Files to change:
+
+- `backend/src/modules/appointments/appointments.controller.ts`
+- `backend/src/modules/appointments/appointments.service.ts`
+- `backend/src/modules/appointments/dto/` with a new placement DTO.
+- `backend/test/` with placement endpoint/service tests.
+- `frontend/src/components/admin/calendar-v2/real-data/` for a small API integration layer.
+- `frontend/src/components/admin/calendar-v2/native-scheduler-spike/NativeSchedulerPlacementPreview.tsx`
+- `frontend/src/components/admin/use-admin-calendar-board-data.ts` only if a new refetch helper is needed.
+
+Behavior added:
+
+- Add `POST /appointments/waitlist/:id/place`.
+- Frontend confirm sends one command to the endpoint only when feature flag is enabled and not sample mode.
+- On success, invalidate/refetch `appointments-calendar-board`, `appointments-waitlist`, and `appointment-context`.
+- Show server conflict errors without optimistic committed UI.
+
+What remains disabled:
+
+- Appointment move persistence in Calendar V2.
+- Mobile drag/drop.
+- Full appointment editor.
+- Notification modes other than the explicitly supported one.
+
+Validation required:
+
+- Backend tests for placement success and conflicts.
+- Frontend network check that exactly one placement endpoint fires on confirm.
+- Feature flag off and sample mode produce no writes.
+
+Rollback strategy:
+
+- Disable frontend feature flag.
+- Backend endpoint can remain unused if deployed safely.
+
+### Phase D: confirm/decline pending request
+
+Files to change:
+
+- `frontend/src/components/admin/calendar-v2/action-inbox.ts`
+- `frontend/src/components/admin/calendar-v2/native-scheduler-spike/NativeSchedulerActionInboxMock.tsx`
+- `frontend/src/components/admin/calendar-v2/native-scheduler-spike/NativeSchedulerPreviewPanel.tsx`
+- Existing `PATCH /appointments/:id/status` integration can be used behind a Calendar V2 feature flag.
+
+Behavior added:
+
+- Action Inbox pending timed appointments get explicit confirm and decline actions.
+- Confirm maps to `PATCH /appointments/:id/status` with `confirmed`.
+- Decline maps to `PATCH /appointments/:id/status` with `cancelled` and owner cancellation reason if UI collects it.
+
+What remains disabled:
+
+- Full appointment editing.
+- Visit progress actions.
+- Drag-to-move as a Calendar V2 write.
+
+Validation required:
+
+- State transition errors are surfaced.
+- Calendar and Action Inbox refresh after success.
+- Notification behavior is explicit.
+
+Rollback strategy:
+
+- Disable Calendar V2 request status feature flag.
+
+### Phase E: notifications and audit UI
+
+Files to change:
+
+- `backend/src/modules/appointments/appointments.service.ts`
+- `backend/src/modules/notifications/notification.processor.ts`
+- `frontend/src/components/admin/calendar-v2/action-inbox.ts`
+- `frontend/src/components/admin/calendar-v2/native-scheduler-spike/NativeSchedulerActionInboxMock.tsx`
+- `frontend/src/components/admin/calendar-v2/native-scheduler-spike/NativeSchedulerPreviewPanel.tsx`
+
+Behavior added:
+
+- Placement confirmation exposes explicit notification choice.
+- Notification failure does not undo placement.
+- Notification failure appears as an Action Inbox item or detail-panel warning when notification data is available.
+
+What remains disabled:
+
+- Automatic Viber/SMS behavior without configured and tested channel policy.
+- Generic activity timeline unless storage exists.
+
+Validation required:
+
+- Simulated notification failure keeps appointment and booked waitlist state.
+- Action Inbox shows notification failure separately from request placement.
+
+Rollback strategy:
+
+- Default to silent placement and hide notification controls.
+
+### Phase F: mobile tap-to-assign flow
+
+Files to change:
+
+- A new phone-specific Calendar V2 request sheet/component under `frontend/src/components/admin/calendar-v2/`.
+- `frontend/src/components/admin/calendar-v2/real-data/CalendarV2RealDataAdapter.tsx`.
+- Shared slot suggestion helpers if introduced.
+
+Behavior added:
+
+- Phone renders request detail and suggested slots.
+- Owner taps slot and confirms.
+- Uses same backend placement endpoint as desktop.
+
+What remains disabled:
+
+- Mobile drag/drop.
+- Full appointment editor.
+- Appointment movement.
+
+Validation required:
+
+- Phone viewport has no drag handles.
+- Bottom sheet does not create nested-scroll regressions.
+- Network calls match one placement endpoint only after confirm.
+
+Rollback strategy:
+
+- Disable phone assignment flag and return phone to read-only request review.
+
+## 8. Notification Policy
+
+Request placement should not automatically message the client until the product policy is explicit.
+
+Recommended policy:
+
+- Default first implementation: place silently.
+- Add an explicit owner choice later:
+  - `Place silently`
+  - `Place and notify client`
+- Telegram/SMS should not be automatic just because appointment creation currently schedules `BOOKING_CONFIRMED`.
+- Viber should not be presented as available until a working Viber send path is implemented and tested. The enum includes Viber, but the inspected processor uses Telegram and SMS.
+- If notification fails after placement, appointment creation must not be undone.
+- Notification failure should create or surface an Action Inbox item/update. Calendar V2 already has notification action item modeling in `action-inbox.ts`, but the real-data adapter currently does not fetch a global notification feed for Calendar V2.
+- Failed notification retry should use existing retry patterns only for appointment notification types currently supported by `retryNotification`. Waitlist notification retry needs separate design if it is required.
+
+Important current behavior to avoid carrying blindly into Calendar V2:
+
+- `POST /appointments/admin` calls generic `createByAdmin`, which calls `scheduleNotifications`; this can send booking confirmation behavior immediately.
+- `POST /appointments/waitlist/:id/notify` is specifically a waitlist availability notification and throws a conflict when the notification attempt fails.
+- A dedicated placement endpoint should decouple placement from client notification policy.
+
+## 9. Conflict And Race Safety
+
+Exact race conditions to handle:
+
+- Two tabs place the same waitlist request.
+- Two owners place the same request from different devices.
+- Request was already booked, cancelled, or otherwise handled after the Action Inbox loaded.
+- Slot was free when displayed but taken before confirm.
+- Staff became inactive or unavailable before confirm.
+- Staff working hours changed before confirm.
+- Staff exception/block was added before confirm.
+- Service duration changed after the suggestion was shown.
+- Service became inactive or unavailable for the selected staff.
+- Notification fails after appointment placement.
+- Calendar board is stale after placement or conflict.
+- Network retry repeats the same placement request.
+
+Recommended backend rules:
+
+- Lock waitlist row in a transaction.
+- Use idempotency key scoped by tenant and waitlist id.
+- Recompute end time server-side from current service duration unless accepting a validated explicit override.
+- Re-run conflict, working-hours, and blocked-time checks at confirm.
+- Return `409` with a stable conflict code and `refresh: true` for stale states.
+
+Recommended frontend rules:
+
+- Do not optimistically convert demand into an appointment block before success.
+- Preview can be local, but committed UI changes only after server success.
+- On `409`, keep request visible, clear local placement preview, refetch board and waitlist, and show a concise conflict message.
+- On idempotent retry success, treat the existing created appointment as success.
+- On notification failure, keep the appointment in the calendar and show notification failure separately.
+
+## 10. UI/UX Acceptance Criteria
+
+### Desktop
+
+Good desktop behavior means:
+
+- Action Inbox request card is visible on the right when actionable demand exists.
+- The primary action is clear: place the request.
+- Details are visible but not noisy: client, service, duration, preferred window, staff preference, notes.
+- Placement preview is lightweight and keeps the calendar visible.
+- Confirm is explicit.
+- No heavy appointment editor appears after choosing a slot.
+- The calendar stays visible during review and preview.
+- There is no nested scroll regression in the scheduler plus right rail.
+- FYI updates do not inflate `Requires action`.
+
+### Phone
+
+Good phone behavior means:
+
+- No drag/drop.
+- Request opens through tap.
+- Suggested slots are easy to scan.
+- Slot selection and confirm happen in a bottom sheet.
+- Calendar or agenda remains understandable after confirm or conflict.
+- The bottom sheet does not trap scrolling or hide the confirm action.
+
+### Tablet
+
+Good tablet behavior means:
+
+- Landscape can use the right-rail planning model.
+- Portrait uses the phone-like tap-to-assign model.
+- No special tablet-only drag behavior is required for the first release.
+
+## 11. Test Plan
+
+### Backend tests
+
+Add backend tests for the future dedicated placement service/endpoint:
+
+- Successful placement creates one appointment, marks waitlist `booked`, sets `booked_appointment_id`, and returns appointment data.
+- Slot conflict returns `409` and does not update waitlist.
+- Already handled request returns `409` and does not create a second appointment.
+- Invalid staff returns `404` or `400` according to the chosen DTO semantics.
+- Invalid service returns `404` or `400`.
+- Staff not working that day returns `409`.
+- Target outside staff working hours returns `409`.
+- Staff blocked time overlap returns `409`.
+- Service duration change is handled by server recomputation.
+- Idempotent retry with same key and same payload returns the original placement result.
+- Idempotent retry with same key and different target returns conflict.
+- Notification failure does not corrupt booking or waitlist state.
+
+Use the existing backend Jest pattern in `backend/test/appointments.service.visit-progress.spec.ts` for mocked service-level tests unless the endpoint needs an integration test harness.
+
+### Frontend tests/checks
+
+Add focused checks for:
+
+- Projection of waitlist item to `CalendarV2DemandItem`.
+- Action Inbox grouping of waitlist demand into `needs_scheduling`.
+- Timed pending appointment grouping into `needs_approval`.
+- Cancellation recovery remains separate from FYI updates.
+- Placement preview command shape includes demand id, staff id, start/end, source surface, idempotency key, and appointment draft.
+- Feature flag off means no placement controls and no writes.
+- Sample mode means no writes.
+- Browser/network check that only expected read endpoints fire in read-only mode.
+- Browser/network check that exactly one placement endpoint fires after confirm once writes are enabled.
+
+### Manual QA
+
+Manual QA matrix:
+
+- Desktop 1440px wide.
+- Desktop 1366px wide.
+- Phone 390px wide or equivalent.
+- Tablet landscape and portrait if the phase touches tablet behavior.
+- Real tenant with empty data.
+- Sample mode.
+- One real waitlist request with no exact time.
+- One pending timed appointment request.
+- One request with preferred staff.
+- One request with preferred date/window.
+- One slot conflict created from a second tab before confirm.
+
+## 12. Recommended First Implementation Prompt
+
+Recommended next implementation: Calendar V2 local-only request placement preview from Action Inbox.
+
+Justification:
+
+- It exercises the exact product workflow without risking bookings, notifications, tenant data, or schema.
+- Calendar V2 already has local `placeRequest` command types and preview UI in the native scheduler spike.
+- It lets us validate owner ergonomics, Action Inbox wording, command shape, and no-write guardrails before adding a backend endpoint.
+- It avoids repeating the mistake of implementing a technically safe but low-value day-of action.
+
+Use this exact prompt later:
+
+```text
+You are working on the SalonIQ repository.
+Read and follow the root AGENTS.md before doing anything else.
+Work directly on main.
+
+Implement Calendar V2 local-only request placement preview from Action Inbox.
+
+Constraints:
+- Do not add backend endpoints.
+- Do not change database schema.
+- Do not add packages.
+- Do not send any write API calls.
+- Do not change current /admin calendar behavior.
+- Keep sample mode no-write.
+- Keep feature flag off by default unless an existing Calendar V2 preview flag pattern already supports safe preview behavior.
+
+Goal:
+- In Calendar V2 real-data preview, refine the Action Inbox request card language for untimed waitlist demand.
+- Allow a local-only placement preview command for waitlist demand when an explicit Calendar V2 local preview flag is enabled.
+- The preview must show client, service, duration, preferred window, target staff/time, and notification mode as disabled/silent.
+- Confirm placement must remain disabled.
+- No appointment API, waitlist API, status API, notification API, or reschedule API may fire.
+
+Inspect first:
+- frontend/src/components/admin/calendar-v2/
+- frontend/src/components/admin/calendar-v2/real-data/
+- frontend/src/components/admin/calendar-v2/native-scheduler-spike/
+- frontend/src/components/admin/use-admin-calendar-board-data.ts
+
+Validation:
+- Run the native scheduler regression checks if they are already runnable without installing packages.
+- Use a browser/network check or equivalent lightweight verification to confirm read-only mode and sample mode perform no writes.
+- Do not run next lint.
+
+Expected final response:
+- Commit SHA
+- Files changed
+- Validation performed
+- Confirmation no backend/schema/package/deploy/runtime write behavior changed
+```
+
+## 13. Risks And Non-Goals
+
+Risks:
+
+- Reusing `POST /appointments/admin` plus `PATCH /appointments/waitlist/:id/status` would preserve the current non-atomic split write.
+- Generic appointment creation currently lacks the full working-hours and blocked-time validations needed for safe placement.
+- Existing appointment creation can trigger notifications, which is not safe for an undecided placement policy.
+- Calendar V2 sample mode can accidentally hide real-data edge cases if QA relies only on fixtures.
+- Treating cancelled/recovery updates as `Requires action` too broadly can create owner noise.
+
+Non-goals:
+
+- Do not start with drag-to-move existing appointments.
+- Do not build mobile drag/drop.
+- Do not add visit-progress UI.
+- Do not mix FYI updates into `Requires Action`.
+- Do not use paid calendar libraries.
+- Do not do a full rewrite of the current calendar.
+- Do not add recurring appointments.
+- Do not build a full appointment editor in Calendar V2 as part of request placement.
+- Do not wire notification sends until the policy and failure handling are explicitly designed.
+
+## 14. Final Recommendation
+
+Build Phase B first: Calendar V2 local-only request placement preview from Action Inbox.
+
+Keep it behind an explicit preview guard, keep confirm disabled, and verify that no write endpoints fire. This gives the product team the real planning workflow to evaluate: request in Action Inbox, choose a slot, review the placement, and understand notification policy before any data can change.
+
+After that, build the dedicated backend placement endpoint with tests. Do not use the existing two-call `POST /appointments/admin` plus waitlist status patch as the Calendar V2 write path. Keep visit progress, mobile drag/drop, full appointment editing, recurring appointments, and drag-to-move existing appointments disabled until request placement is validated end to end.

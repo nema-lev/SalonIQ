@@ -429,6 +429,56 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
         );
       },
     },
+    {
+      name: 'right rail follows placement context before and after slot selection',
+      run: () => {
+        const schedulerSource = readSource(sourceDir, 'NativeSchedulerV2Spike.tsx');
+        const previewPanelSource = readSource(sourceDir, 'NativeSchedulerPreviewPanel.tsx');
+
+        assert(
+          schedulerSource.includes('placementDemandItem ?? placementPreview?.demandItem ?? null'),
+          'right rail placement context should exist before a target slot is selected',
+        );
+        assert(
+          schedulerSource.includes('selectedBlock={placementPanelContext ? null : selectedBlock}'),
+          'selected booking detail should be hidden while placement context is active',
+        );
+        assert(
+          schedulerSource.includes('setSelectedBlockId(null);'),
+          'starting placement mode should clear the unrelated selected booking',
+        );
+        assert(
+          previewPanelSource.includes('Поставяне на заявка'),
+          'placement context panel should use the placement title',
+        );
+        assert(
+          previewPanelSource.includes('Избираме слот'),
+          'placement context panel should show a before-slot status',
+        );
+        assert(
+          previewPanelSource.includes('Изберете свободен час в календара. Часът още не е записан.'),
+          'placement context panel should show before-slot instruction and no-save note',
+        );
+      },
+    },
+    {
+      name: 'cancelling placement restores normal booking detail path',
+      run: () => {
+        const schedulerSource = readSource(sourceDir, 'NativeSchedulerV2Spike.tsx');
+        const previewPanelSource = readSource(sourceDir, 'NativeSchedulerPreviewPanel.tsx');
+
+        assert(
+          schedulerSource.includes('setPlacementDemandItem(null);') &&
+            schedulerSource.includes('setPlacementTarget(null);') &&
+            schedulerSource.includes('setPlacementPreview(null);'),
+          'clearPlacementMode should remove placement context',
+        );
+        assert(
+          previewPanelSource.includes("isPlacementContext ? 'Поставяне на заявка' : 'Детайли за час'"),
+          'preview panel should return to normal booking detail title without placement context',
+        );
+      },
+    },
   ];
 }
 

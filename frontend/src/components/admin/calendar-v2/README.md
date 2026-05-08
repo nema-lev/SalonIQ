@@ -10,7 +10,7 @@ This folder contains renderer-independent contracts for a future admin Calendar 
 - Calendar V2 write actions are intentionally disabled in the deployed preview.
 - Calendar V2 now supports a local-only Action Inbox request placement preview: choose an untimed demand item, click a staff/time slot, and review the proposed placement without saving.
 - Placement preview UI is customer-facing Bulgarian copy only: command ids, local idempotency keys, ISO timestamps, and internal command names are not rendered.
-- During placement mode, the lower right rail follows the active request/selected slot context instead of showing unrelated selected booking details.
+- During placement mode, the lower right rail follows the active request context before and after slot selection instead of showing unrelated selected booking details.
 - The previously explored `Пристигнал` action was intentionally removed from Calendar V2 UI after product review.
 - Calendar V2 should prioritize planning, pending approvals, untimed request placement, confirmations, and rescheduling.
 - Day-of visit progress can remain backend-capable for future clinic/front-desk use cases, but it is not part of the main salon Calendar V2 UX.

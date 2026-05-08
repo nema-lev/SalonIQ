@@ -152,7 +152,9 @@ function PlacementContextView({ context }: { context: NativeSchedulerPlacementPa
           </span>
           <div className={styles.emptyText}>
             <p className={styles.emptyTitle}>Избирате слот за заявка</p>
-            <p className={styles.emptyCopy}>Изберете свободен час в календара.</p>
+            <p className={styles.emptyCopy}>
+              Изберете свободен час в календара. Часът още не е записан.
+            </p>
           </div>
         </div>
       )}
@@ -210,7 +212,7 @@ function getPanelCountLabel({
 }) {
   if (placementContext?.hasConflict) return 'Конфликт';
   if (placementContext?.target) return 'Избран слот';
-  if (placementContext) return 'Активно';
+  if (placementContext) return 'Избираме слот';
   return selectedBlock ? 'Избран' : 'Няма';
 }
 

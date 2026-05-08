@@ -22,7 +22,7 @@
 - Real-data and sample routes now allow a local-only click-to-place preview for Action Inbox waitlist/demand items. The owner selects `Постави в графика`, clicks a staff/time slot, and sees a lightweight placement preview without saving.
 - The local preview emits a typed `placeRequest` command-shaped object with the request id, target staff/start/end, source surface, idempotency key, appointment draft details, and `localOnly: true`.
 - The placement preview shows client, service, duration, staff, date/time, local conflict state when detected, and Bulgarian no-save copy. It does not render command ids, idempotency keys, ISO timestamps, or internal command names. The save/confirm action remains disabled.
-- During placement mode, the lower right rail shows the active request and selected slot context instead of unrelated Booking Detail content.
+- During placement mode, the lower right rail shows the active request context before slot selection and selected slot context after selection instead of unrelated Booking Detail content.
 - Desktop/tablet-landscape resource day grid with staff columns, 15-minute slots, 08:00-20:00 hours, sticky toolbar, sticky staff header, sticky time gutter, mocked current-time line, fixture appointments, overlap lanes, and a blocked time region.
 - Action Inbox mock shows demand/request items, pending approval, cancellation recovery, and collapsed updates.
 - Demand items can still be dragged from Action Inbox into the isolated non-read-only component fixture with native pointer events.
@@ -184,7 +184,7 @@ In the read-only real-data route, appointment move handles are disabled.
 - Clicking a scheduler staff/time slot creates a local typed `placeRequest` preview command with request id, target staff/start/end, source surface, idempotency key, appointment draft details, and `localOnly: true`.
 - `NativeSchedulerPlacementPreview` shows client, service, duration, staff, date/time, no-save copy, local conflict copy when applicable, disabled save copy, and `Отказ`.
 - The visible preview copy no longer exposes `calendar-v2-spike:*`, `placeRequest -> ...`, idempotency keys, or raw target timestamps.
-- The lower right rail now follows placement context while a request is active or previewed, so an unrelated selected booking cannot compete with placement.
+- The lower right rail now follows placement context before and after slot selection, so an unrelated selected booking cannot compete with placement.
 - Missing service/request duration uses a visible 60-minute fallback.
 - Existing appointment movement remains disabled on the read-only real-data/sample route because appointment drag handles are still hidden.
 - Confirm/save, appointment creation, waitlist placement persistence, waitlist status changes, appointment status changes, cancellation, notifications, and reschedule APIs remain disabled.
@@ -200,7 +200,7 @@ In the read-only real-data route, appointment move handles are disabled.
 - Date of pass: 2026-05-08.
 - Placement preview was changed from a row/table-like debug layout to a lightweight confirmation preview with client/service hierarchy, staff/time/date, duration, conflict copy when needed, no-save warning, disabled future save action, and `Отказ`.
 - Visible debug/internal strings were removed from customer-facing UI: no `calendar-v2-spike:*`, no `placeRequest -> ...`, no local idempotency keys, no command names, and no ISO timestamps are rendered.
-- The right rail now switches to placement context while selecting or previewing a slot, and no longer shows unrelated selected booking details during the active placement flow.
+- The right rail now switches to placement context as soon as placement mode starts, keeps that context after slot selection, and no longer shows unrelated selected booking details during the active placement flow.
 - Sample/status copy no longer surfaces checked-in wording in the main Calendar V2 card/detail UI; salon-facing labels use calmer Bulgarian status copy such as `потвърден`, `насрочен`, and `очакван` where applicable.
 - Save/confirm placement remains disabled. Calendar V2 still calls no appointment creation, waitlist placement, waitlist status, appointment status, notification, cancel, or reschedule write API from this flow.
 - Sample mode and real-data mode remain non-writing; current `/admin` remains the default production calendar.

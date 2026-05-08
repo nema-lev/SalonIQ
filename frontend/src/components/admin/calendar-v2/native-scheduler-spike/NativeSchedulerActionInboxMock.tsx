@@ -60,9 +60,9 @@ export function NativeSchedulerActionInboxMock({
               <CheckCircle2 size={17} strokeWidth={2.5} />
             </span>
             <div className={styles.emptyText}>
-              <p className={styles.emptyTitle}>No action items</p>
+              <p className={styles.emptyTitle}>Няма заявки за действие</p>
               <p className={styles.emptyCopy}>
-                New requests and recovery items from the current calendar will appear here.
+                Новите заявки и свободни места за запълване ще се покажат тук.
               </p>
             </div>
           </div>
@@ -138,7 +138,7 @@ export function NativeSchedulerActionInboxMock({
 
         {updates.length > 0 && (
           <details className={styles.updatesDetails}>
-            <summary className={styles.updatesSummary}>Updates · {updates.length}</summary>
+            <summary className={styles.updatesSummary}>Обновления · {updates.length}</summary>
             {updates.map((action) => (
               <article key={action.id} className={`${styles.inboxItem} ${styles.secondaryItem}`}>
                 <div className={styles.inboxText}>

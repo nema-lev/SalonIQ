@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import type {
   CalendarV2Appointment,
   CalendarV2CalendarBlock,
@@ -217,7 +219,13 @@ const checks: RegressionCheck[] = [
       );
       assertEqual(placeCommand.createAppointmentDraft?.serviceId, 'service-1', 'place draft should carry service id');
       assertEqual(placeCommand.createAppointmentDraft?.clientId, 'client-1', 'place draft should carry client id');
-      assertEqual(commandPreviewLabel(placeCommand), `placeRequest -> ${target.startAt}`, 'place label should be stable');
+      assertEqual(
+        commandPreviewLabel(placeCommand),
+        'Преглед на поставяне · не е записано',
+        'place label should be product copy',
+      );
+      assertNoInternalLabel(commandPreviewLabel(placeCommand), 'place label should hide command internals');
+      assertNoWriteTransportMarkers(placeCommand, 'place preview should not carry write transport details');
 
       const appointment = appointmentFixture();
       const moveCommand = createMoveAppointmentCommand({
@@ -248,9 +256,10 @@ const checks: RegressionCheck[] = [
       );
       assertEqual(
         commandPreviewLabel(moveCommand),
-        `moveAppointment -> ${target.startAt}`,
-        'move label should be stable',
+        'Локална промяна · не е записано',
+        'move label should be product copy',
       );
+      assertNoInternalLabel(commandPreviewLabel(moveCommand), 'move label should hide command internals');
     },
   },
   {
@@ -376,11 +385,51 @@ const checks: RegressionCheck[] = [
   },
 ];
 
-export function runNativeSchedulerRegressionChecks(): NativeSchedulerRegressionCheckResult[] {
-  return checks.map((check) => {
+export function runNativeSchedulerRegressionChecks(sourceDir?: string): NativeSchedulerRegressionCheckResult[] {
+  const activeChecks = sourceDir ? [...checks, ...getSourceChecks(sourceDir)] : checks;
+
+  return activeChecks.map((check) => {
     check.run();
     return { name: check.name, passed: true };
   });
+}
+
+function getSourceChecks(sourceDir: string): RegressionCheck[] {
+  return [
+    {
+      name: 'visible placement UI hides internal command identifiers',
+      run: () => {
+        const placementPreviewSource = readSource(sourceDir, 'NativeSchedulerPlacementPreview.tsx');
+        const previewPanelSource = readSource(sourceDir, 'NativeSchedulerPreviewPanel.tsx');
+
+        assert(
+          !placementPreviewSource.includes('idempotencyKey'),
+          'placement preview should not render local idempotency keys',
+        );
+        assert(
+          !placementPreviewSource.includes('commandLine'),
+          'placement preview should not render debug command lines',
+        );
+        assertNoInternalLabel(placementPreviewSource, 'placement preview source should not expose debug labels');
+        assertNoInternalLabel(previewPanelSource, 'preview panel source should not expose debug labels');
+      },
+    },
+    {
+      name: 'placement preview cancel action remains wired',
+      run: () => {
+        const placementPreviewSource = readSource(sourceDir, 'NativeSchedulerPlacementPreview.tsx');
+
+        assert(
+          placementPreviewSource.includes('onClick={onClose}'),
+          'placement preview cancel button should call onClose',
+        );
+        assert(
+          placementPreviewSource.includes('Отказ'),
+          'placement preview should expose a Bulgarian cancel action',
+        );
+      },
+    },
+  ];
 }
 
 function calendarBlock(
@@ -501,6 +550,37 @@ function demandFixture(
 
 function formatMinutes(minutes: number) {
   return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+}
+
+function readSource(sourceDir: string, fileName: string) {
+  return readFileSync(path.join(sourceDir, fileName), 'utf8');
+}
+
+function assertNoInternalLabel(value: string, message: string) {
+  const forbiddenFragments = [
+    'calendar-v2-spike:',
+    'placeRequest ->',
+    'moveAppointment ->',
+  ];
+  const leakedFragment = forbiddenFragments.find((fragment) => value.includes(fragment));
+
+  assert(!leakedFragment, `${message}. Found ${String(leakedFragment)}.`);
+}
+
+function assertNoWriteTransportMarkers(value: unknown, message: string) {
+  const serialized = JSON.stringify(value);
+  const forbiddenFragments = [
+    '"method":"POST"',
+    '"method":"PATCH"',
+    '"method":"DELETE"',
+    '"apiPath"',
+    '"endpoint"',
+    '/appointments/admin',
+    '/appointments/waitlist',
+  ];
+  const leakedFragment = forbiddenFragments.find((fragment) => serialized.includes(fragment));
+
+  assert(!leakedFragment, `${message}. Found ${String(leakedFragment)}.`);
 }
 
 function assert(value: unknown, message: string): asserts value {

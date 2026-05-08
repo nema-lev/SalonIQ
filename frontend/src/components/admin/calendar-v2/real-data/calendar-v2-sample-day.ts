@@ -88,7 +88,6 @@ export function buildCalendarV2SampleDayProjection(selectedDate: Date): Calendar
       clientPhone: '+359887222000',
       serviceId: 'sample-service-color',
       status: 'confirmed',
-      visitProgress: 'checked_in',
     }),
     buildAppointment({
       id: 'sample-appt-iva-pedicure-progress',
@@ -100,8 +99,7 @@ export function buildCalendarV2SampleDayProjection(selectedDate: Date): Calendar
       clientPhone: '+359887333000',
       serviceId: 'sample-service-pedicure',
       status: 'confirmed',
-      visitProgress: 'in_service',
-      notes: 'Клиентът е в салона. Следващата стъпка е лак.',
+      notes: 'Предпочита мек розов цвят и по-дълга пауза между процедурите.',
     }),
     buildAppointment({
       id: 'sample-appt-victoria-haircut',
@@ -194,7 +192,7 @@ function buildSampleActionInboxItems(at: (time: string) => string): ActionInboxI
       subtitle: 'Виктория · Мигли · заявка за 16:30',
       sortAt: at('08:10'),
       primaryType: 'confirmRequest',
-      primaryLabel: 'Confirm request',
+      primaryLabel: 'Потвърди заявката',
       commandType: 'confirmRequest',
     }),
     buildActionInboxItem({
@@ -206,7 +204,7 @@ function buildSampleActionInboxItems(at: (time: string) => string): ActionInboxI
       subtitle: 'Анна · Подстригване · освободен 15:30-16:30',
       sortAt: at('08:20'),
       primaryType: 'replyToClient',
-      primaryLabel: 'Reply to client',
+      primaryLabel: 'Отговори на клиента',
     }),
     buildActionInboxItem({
       id: 'sample-action-client-message',
@@ -217,7 +215,7 @@ function buildSampleActionInboxItems(at: (time: string) => string): ActionInboxI
       subtitle: 'Мария Иванова пита за промяна на часа.',
       sortAt: at('08:35'),
       primaryType: 'replyToClient',
-      primaryLabel: 'Reply to client',
+      primaryLabel: 'Отговори на клиента',
     }),
   ];
 }
@@ -263,7 +261,7 @@ function buildActionInboxItem({
     secondaryActions: [
       {
         type: 'openDetails',
-        label: 'Open details',
+        label: 'Виж детайли',
       },
     ],
   };

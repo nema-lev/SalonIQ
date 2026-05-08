@@ -174,14 +174,14 @@ export function createMoveAppointmentCommand({
 
 export function commandPreviewLabel(command: CalendarV2Command) {
   if (command.type === 'placeRequest') {
-    return `placeRequest -> ${command.target.startAt}`;
+    return 'Преглед на поставяне · не е записано';
   }
 
   if (command.type === 'moveAppointment') {
-    return `moveAppointment -> ${command.target.startAt}`;
+    return 'Локална промяна · не е записано';
   }
 
-  return command.type;
+  return 'Локална команда · не е записано';
 }
 
 function buildLocalCommandKey(type: string, entityId: string) {

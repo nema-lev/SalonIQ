@@ -9,6 +9,8 @@ This folder contains renderer-independent contracts for a future admin Calendar 
 - The current `/admin` calendar remains the default production calendar.
 - Calendar V2 write actions are intentionally disabled in the deployed preview.
 - Calendar V2 now supports a local-only Action Inbox request placement preview: choose an untimed demand item, click a staff/time slot, and review the proposed placement without saving.
+- Placement preview UI is customer-facing Bulgarian copy only: command ids, local idempotency keys, ISO timestamps, and internal command names are not rendered.
+- During placement mode, the lower right rail follows the active request/selected slot context instead of showing unrelated selected booking details.
 - The previously explored `Пристигнал` action was intentionally removed from Calendar V2 UI after product review.
 - Calendar V2 should prioritize planning, pending approvals, untimed request placement, confirmations, and rescheduling.
 - Day-of visit progress can remain backend-capable for future clinic/front-desk use cases, but it is not part of the main salon Calendar V2 UX.
@@ -21,7 +23,8 @@ This folder contains renderer-independent contracts for a future admin Calendar 
 - Sample mode uses clearly labeled Bulgarian salon sample data, shows `Sample day · Read-only`, and provides `Back to real data`.
 - Sample mode supports the same local-only request placement preview and remains non-writing.
 - Real-data mode supports the same local-only request placement preview when current read endpoints return waitlist/demand items; refresh/reload does not persist the preview.
-- The sample-day visual pass refines appointment cards, selected state, 15-minute short cards, the Action Inbox queue, and the selected Booking Detail summary without enabling writes.
+- A future dedicated backend placement endpoint is still required before the disabled save/confirm action can be enabled.
+- The sample-day visual pass refines appointment cards, selected state, 15-minute short cards, the Action Inbox queue, and the selected booking detail summary without enabling writes.
 - The desktop viewport pass keeps the preview inside the admin viewport, makes the scheduler grid the primary scroll region, and uses deliberate right-rail panel scrolling only when content exceeds the available height.
 - Empty states are intentional and non-blocking for missing staff resources, empty appointment days, empty Action Inbox content, no selected booking, and read errors.
 - Domain types, command shapes, projections, and Action Inbox helpers must stay independent of calendar rendering libraries.

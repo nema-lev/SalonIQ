@@ -1,7 +1,7 @@
 'use client';
 
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { AlertCircle, CircleDot, GripVertical, MessageCircle } from 'lucide-react';
+import { AlertCircle, GripVertical, MessageCircle } from 'lucide-react';
 import type { CalendarV2CalendarBlock } from '..';
 import type { NativeSchedulerRect } from './native-scheduler-geometry';
 import styles from './native-scheduler.module.css';
@@ -110,9 +110,6 @@ export function NativeSchedulerEventCard({
             {isRoomy && (
               <span className={styles.eventMetaRow}>
                 <span>{durationLabel}</span>
-                {appointment?.visitProgress && appointment.visitProgress !== 'scheduled' && (
-                  <span>{formatState(appointment.visitProgress)}</span>
-                )}
               </span>
             )}
           </>
@@ -132,13 +129,6 @@ function getCardCues(block: CalendarV2CalendarBlock) {
     cues.push({
       label: 'Ново',
       icon: <MessageCircle size={12} strokeWidth={2.4} />,
-    });
-  }
-
-  if (appointment.visitProgress === 'in_service') {
-    cues.push({
-      label: 'В услуга',
-      icon: <CircleDot size={12} strokeWidth={2.4} />,
     });
   }
 
@@ -179,14 +169,10 @@ function formatDurationLabel(block: CalendarV2CalendarBlock) {
   if (minutes >= 60) {
     const hours = Math.floor(minutes / 60);
     const remainder = minutes % 60;
-    return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+    return remainder ? `${hours} ч ${remainder} мин` : `${hours} ч`;
   }
 
-  return `${minutes}m`;
-}
-
-function formatState(value: string) {
-  return value.replaceAll('_', ' ');
+  return `${minutes} мин`;
 }
 
 function formatTime(date: Date) {

@@ -123,7 +123,7 @@ function projectWaitlistToActionInboxItem(entry: WaitlistEntry): ActionInboxItem
     source: 'waitlist',
     sourceId: entry.id,
     title: 'Заявка без точен час',
-    subtitle: `${entry.service_name} | ${getRequestWindowLabel(entry)}`,
+    subtitle: `${entry.service_name} · ${getRequestWindowLabel(entry)}`,
     sortAt: entry.updated_at ?? entry.created_at,
     primaryAction: isOpen
       ? {
@@ -133,7 +133,7 @@ function projectWaitlistToActionInboxItem(entry: WaitlistEntry): ActionInboxItem
         }
       : {
           type: 'markUpdateRead',
-          label: 'Mark read',
+          label: 'Маркирай като прочетено',
           commandType: 'markUpdateRead',
         },
     secondaryActions: isOpen
@@ -144,7 +144,7 @@ function projectWaitlistToActionInboxItem(entry: WaitlistEntry): ActionInboxItem
           },
           {
             type: 'archiveActionItem',
-            label: 'Archive',
+            label: 'Архивирай',
             commandType: 'archiveActionItem',
           },
         ]
@@ -164,22 +164,22 @@ function projectAppointmentToActionInboxItem(appointment: Appointment): ActionIn
       source: 'appointment',
       sourceId: appointment.id,
       title: appointment.client_name,
-      subtitle: `${appointment.service_name} | ${formatAppointmentDay(appointment.start_at)}`,
+      subtitle: `${appointment.service_name} · ${formatAppointmentDay(appointment.start_at)}`,
       sortAt: appointment.start_at,
       primaryAction: {
         type: 'confirmRequest',
-        label: 'Confirm request',
+        label: 'Потвърди заявката',
         commandType: 'confirmRequest',
       },
       secondaryActions: [
         {
           type: 'declineRequest',
-          label: 'Decline',
+          label: 'Откажи',
           commandType: 'declineRequest',
         },
         {
           type: 'openDetails',
-          label: 'Open details',
+          label: 'Виж детайли',
         },
       ],
     };
@@ -198,21 +198,21 @@ function projectAppointmentToActionInboxItem(appointment: Appointment): ActionIn
       source: 'appointment',
       sourceId: appointment.id,
       title: appointment.client_name,
-      subtitle: `${appointment.service_name} | Client cancellation`,
+      subtitle: `${appointment.service_name} · клиентът освободи час`,
       sortAt: appointment.start_at,
       primaryAction: {
         type: 'replyToClient',
-        label: 'Reply to client',
+        label: 'Отговори на клиента',
       },
       secondaryActions: [
         {
           type: 'archiveActionItem',
-          label: 'Archive',
+          label: 'Архивирай',
           commandType: 'archiveActionItem',
         },
         {
           type: 'openDetails',
-          label: 'Open details',
+          label: 'Виж детайли',
         },
       ],
     };
@@ -226,17 +226,17 @@ function projectAppointmentToActionInboxItem(appointment: Appointment): ActionIn
     source: 'appointment',
     sourceId: appointment.id,
     title: appointment.client_name,
-    subtitle: `${appointment.service_name} | Cancelled`,
+    subtitle: `${appointment.service_name} · отменен час`,
     sortAt: appointment.start_at,
     primaryAction: {
       type: 'markUpdateRead',
-      label: 'Mark read',
+      label: 'Маркирай като прочетено',
       commandType: 'markUpdateRead',
     },
     secondaryActions: [
       {
         type: 'openDetails',
-        label: 'Open details',
+        label: 'Виж детайли',
       },
     ],
   };
@@ -256,12 +256,12 @@ function projectNotificationToActionInboxItem(notification: NotificationLogEntry
       sortAt: notification.sent_at ?? notification.created_at,
       primaryAction: {
         type: 'retryNotification',
-        label: 'Retry notification',
+        label: 'Опитай отново',
       },
       secondaryActions: [
         {
           type: 'archiveActionItem',
-          label: 'Archive',
+          label: 'Архивирай',
           commandType: 'archiveActionItem',
         },
       ],
@@ -281,7 +281,7 @@ function projectNotificationToActionInboxItem(notification: NotificationLogEntry
       sortAt: notification.delivered_at ?? notification.sent_at ?? notification.created_at,
       primaryAction: {
         type: 'markUpdateRead',
-        label: 'Mark read',
+        label: 'Маркирай като прочетено',
         commandType: 'markUpdateRead',
       },
       secondaryActions: [],

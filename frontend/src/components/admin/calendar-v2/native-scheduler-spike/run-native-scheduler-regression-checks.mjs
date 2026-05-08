@@ -23,7 +23,7 @@ try {
   }
 
   const checksModule = require(path.join(tempDir, 'native-scheduler-regression-checks.js'));
-  const results = checksModule.runNativeSchedulerRegressionChecks();
+  const results = checksModule.runNativeSchedulerRegressionChecks(sourceDir);
 
   console.log(`Native scheduler regression checks passed (${results.length})`);
   for (const result of results) {

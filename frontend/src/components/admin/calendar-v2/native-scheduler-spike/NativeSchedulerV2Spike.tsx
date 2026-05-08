@@ -30,7 +30,10 @@ import {
   NativeSchedulerPlacementPreview,
   type NativeSchedulerPlacementPreviewState,
 } from './NativeSchedulerPlacementPreview';
-import { NativeSchedulerPreviewPanel } from './NativeSchedulerPreviewPanel';
+import {
+  NativeSchedulerPreviewPanel,
+  type NativeSchedulerPlacementPanelContext,
+} from './NativeSchedulerPreviewPanel';
 import {
   nativeSchedulerActionInboxItems,
   nativeSchedulerCalendarBlocks,
@@ -147,7 +150,6 @@ export function NativeSchedulerV2Spike({
   );
   const dateLabel = format(schedulerDate, "EEEE, d MMMM yyyy 'г.'", { locale: bg });
   const visibleToolbarPills = toolbarPills ?? [];
-  const placementModeActive = enableLocalPlacementPreview && Boolean(placementDemandItem);
 
   const clearPlacementMode = useCallback(() => {
     setPlacementDemandItem(null);
@@ -157,6 +159,37 @@ export function NativeSchedulerV2Spike({
     setDropPreview(null);
     setLastCommand(null);
   }, []);
+  const placementModeActive = enableLocalPlacementPreview && Boolean(placementDemandItem);
+  const placementContextDemandItem = placementDemandItem ?? placementPreview?.demandItem ?? null;
+  const placementPanelContext = useMemo<NativeSchedulerPlacementPanelContext | null>(() => {
+    if (!placementContextDemandItem) return null;
+
+    const target = placementPreview
+      ? {
+          staffName: placementPreview.staffName,
+          timeLabel: placementPreview.timeLabel,
+          startAt: placementPreview.command.target.startAt,
+        }
+      : placementTarget
+        ? {
+            staffName: placementTarget.staffName,
+            timeLabel: formatTargetTime(placementTarget),
+            startAt: placementTarget.startAt,
+          }
+        : null;
+
+    return {
+      demandItem: placementContextDemandItem,
+      target,
+      durationMinutes:
+        placementPreview?.durationMinutes ??
+        placementTarget?.durationMinutes ??
+        getPlacementDurationMinutes(placementContextDemandItem),
+      usesFallbackDuration: usesFallbackPlacementDuration(placementContextDemandItem),
+      hasConflict: Boolean(placementPreview?.hasConflict ?? placementTarget?.hasConflict),
+      onCancel: clearPlacementMode,
+    };
+  }, [clearPlacementMode, placementContextDemandItem, placementPreview, placementTarget]);
 
   useEffect(() => {
     setBlocks(sourceBlocks);
@@ -269,6 +302,7 @@ export function NativeSchedulerV2Spike({
           usesFallbackDuration: usesFallbackPlacementDuration(drag.demandItem),
           hasConflict: target.hasConflict,
         });
+        setSelectedBlockId(null);
         setLastCommand(command);
         console.info('[Calendar V2 native scheduler preview command]', command);
         return;
@@ -559,7 +593,7 @@ export function NativeSchedulerV2Spike({
       setPlacementMessage(
         target.hasConflict
           ? 'Избраният слот има локален конфликт. Прегледът не записва час.'
-          : 'Прегледът е готов. Няма записване.',
+          : 'Прегледът е готов. Часът още не е записан.',
       );
       console.info('[Calendar V2 local placement preview command]', command);
     },
@@ -569,7 +603,7 @@ export function NativeSchedulerV2Spike({
   return (
     <>
       <div className={styles.phoneNotice}>
-        Phone Calendar V2 will use a separate agenda renderer.
+        Телефонният Calendar V2 ще използва отделен дневен изглед.
       </div>
 
       <div className={styles.desktopSpike}>
@@ -599,7 +633,7 @@ export function NativeSchedulerV2Spike({
                 {!readOnly && (
                   <button type="button" className={styles.resetButton} onClick={resetLocalState}>
                     <RotateCcw size={14} strokeWidth={2.5} />
-                    Reset local
+                    Нулирай локално
                   </button>
                 )}
               </div>
@@ -662,8 +696,9 @@ export function NativeSchedulerV2Spike({
                 readOnly={readOnly}
               />
               <NativeSchedulerPreviewPanel
-                selectedBlock={selectedBlock}
-                lastCommand={lastCommand}
+                selectedBlock={placementPanelContext ? null : selectedBlock}
+                lastCommand={placementPanelContext ? null : lastCommand}
+                placementContext={placementPanelContext}
                 readOnly={readOnly}
               />
             </aside>
@@ -683,7 +718,7 @@ export function NativeSchedulerV2Spike({
               <p className={styles.dragSubtitle}>{dragOverlay.subtitle}</p>
               {dragOverlay.targetLabel && (
                 <p className={`${styles.dragTarget} ${dragOverlay.hasConflict ? styles.dragConflict : ''}`}>
-                  {dragOverlay.hasConflict ? 'Conflict · ' : ''}
+                  {dragOverlay.hasConflict ? 'Конфликт · ' : ''}
                   {dragOverlay.targetLabel}
                 </p>
               )}

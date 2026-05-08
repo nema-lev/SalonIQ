@@ -321,5 +321,5 @@ function formatDropPreview(preview: NativeSchedulerGridDropPreview) {
     end.getHours() * 60 + end.getMinutes(),
   )}`;
 
-  return preview.hasConflict ? `${label} conflict` : `${label} ${preview.staffName}`;
+  return preview.hasConflict ? `${label} · зает слот` : `${label} · ${preview.staffName}`;
 }

@@ -26,6 +26,8 @@ Calendar V2 should explicitly deprioritize these workflows for the first write f
 
 The correct first write surface is request-to-slot placement, not visit tracking and not generic appointment movement.
 
+May 8 local-only UX note: the current Calendar V2 preview now supports the intended request-to-slot placement review without persistence. The UI keeps the active Action Inbox request selected, shows a local placement block and a human Bulgarian preview, hides internal command ids/timestamps from visible UI, and switches the lower right rail to placement context instead of unrelated booking details. Saving still requires the future dedicated backend placement endpoint described below.
+
 ## 2. Current Code Inventory
 
 ### Calendar V2 route and read-only contract
@@ -507,7 +509,8 @@ Behavior added:
 
 - Enable a Calendar V2 local-only placement preview for real waitlist demand behind an explicit local preview feature flag.
 - Generate `PlaceRequestCommand` from Action Inbox plus target slot.
-- Show placement preview with client, service, staff, date/time, duration, and notification mode shown as disabled/read-only.
+- Show placement preview with client, service, staff, date/time, duration, calm Bulgarian no-save copy, and no internal command ids, idempotency keys, or ISO timestamps in visible UI.
+- Keep the right rail on active request/selected-slot context while placement mode or placement preview is active.
 - Confirm button remains disabled.
 - No write endpoint is called.
 

@@ -1,6 +1,6 @@
 # Calendar V2 Request Workflow Implementation Plan
 
-This document is an implementation blueprint only. It records the current repo behavior and proposes the next Calendar V2 workflow without changing runtime behavior, frontend UI, backend endpoints, database schema, packages, deployment config, tenant resolution, secrets, or environment files.
+This document is a living implementation blueprint. It records the current repo behavior and the staged Calendar V2 request workflow. As of the backend foundation step, the server has a dedicated waitlist placement endpoint, but Calendar V2 frontend save remains disabled and no Calendar V2 write is wired.
 
 ## 1. Executive Decision
 
@@ -26,7 +26,9 @@ Calendar V2 should explicitly deprioritize these workflows for the first write f
 
 The correct first write surface is request-to-slot placement, not visit tracking and not generic appointment movement.
 
-May 8 local-only UX note: the current Calendar V2 preview now supports the intended request-to-slot placement review without persistence. The UI keeps the active Action Inbox request selected, shows a local placement block and a human Bulgarian preview, hides internal command ids/timestamps from visible UI, and switches the lower right rail to placement context instead of unrelated booking details. Saving still requires the future dedicated backend placement endpoint described below.
+May 8 local-only UX note: the current Calendar V2 preview now supports the intended request-to-slot placement review without persistence. The UI keeps the active Action Inbox request selected, shows a local placement block and a human Bulgarian preview, hides internal command ids/timestamps from visible UI, and switches the lower right rail to placement context instead of unrelated booking details. Saving remains disabled in the frontend.
+
+May 8 backend foundation note: `POST /api/v1/appointments/waitlist/:waitlistId/place` now exists for authenticated admin use. It validates and places an open waitlist/request item in one tenant transaction, but Calendar V2 does not call it yet and client notifications are intentionally not sent by this endpoint.
 
 ## 2. Current Code Inventory
 
@@ -139,6 +141,7 @@ Current controller endpoints in `backend/src/modules/appointments/appointments.c
 - `GET /appointments/waitlist` at line 311 calls `listWaitlist`.
 - `POST /appointments/waitlist` at line 323 calls `createWaitlistEntry`.
 - `PATCH /appointments/waitlist/:id/status` at line 349 calls `updateWaitlistStatus`.
+- `POST /appointments/waitlist/:waitlistId/place` calls `placeWaitlistEntry` for atomic backend waitlist placement. Calendar V2 does not call this endpoint yet.
 - `POST /appointments/waitlist/:id/notify` at line 365 calls `notifyWaitlistEntry`.
 
 Current DTO facts:
@@ -150,6 +153,7 @@ Current DTO facts:
 - `CreateBookingRequestDto` requires `serviceId`, `clientName`, and `clientPhone`.
 - `CreateBookingRequestDto` supports `preferredStaffId`, `desiredDate`, `desiredTimePeriod`, `clientEmail`, `notes`, `consentGiven`, `publicBaseUrl`, and `deviceToken`.
 - `backend/src/modules/appointments/dto/get-slots.dto.ts:4` requires `serviceId`, `staffId`, and `date`.
+- `backend/src/modules/appointments/dto/place-waitlist-entry.dto.ts` defines the placement DTO with `staffId`, `startAt`, optional `durationMinutes`, optional `idempotencyKey`, and optional `notifyClient`.
 - `backend/src/modules/appointments/dto/update-status.dto.ts:5` accepts `AppointmentStatus`, optional `reason`, and optional `cancelledBy`.
 - `backend/src/modules/appointments/dto/update-visit-progress.dto.ts:5` accepts `VisitProgress`.
 
@@ -173,6 +177,7 @@ Current backend service behavior:
 - `createBookingRequest` maps `desiredTimePeriod` to `desiredFrom` and `desiredTo`, calls `createWaitlistEntry`, and returns `{ id, status: 'pending' }` even though the stored waitlist status is `waiting`.
 - `backend/src/modules/appointments/appointments.service.ts:1342` defines `createWaitlistEntry`, which inserts a waitlist row with status `waiting`.
 - `backend/src/modules/appointments/appointments.service.ts:1410` defines `updateWaitlistStatus`, which updates waitlist status and `booked_appointment_id`.
+- `backend/src/modules/appointments/appointments.service.ts` defines `placeWaitlistEntry`, which locks an open waitlist row, validates service/staff/time/conflicts/blocked intervals, inserts a confirmed owner-booked appointment, and marks the waitlist row `booked` in the same tenant transaction.
 - `backend/src/modules/appointments/appointments.service.ts:1453` defines `notifyWaitlistEntry`, which sends `WAITLIST_AVAILABLE`, then marks the waitlist row `notified` with `last_notified_slot_start_at`.
 - `backend/src/modules/appointments/appointments.service.ts:1534` throws `ConflictException` when waitlist notification sending fails.
 - `backend/src/modules/appointments/appointments.service.ts:1623` defines `rescheduleAppointment`, which validates appointment state, blocks group-service drag/drop moves, validates staff, staff working hours, staff exceptions, and conflicts, then updates the appointment.
@@ -346,89 +351,111 @@ The current admin flow creates an appointment through `POST /appointments/admin`
 
 The generic appointment create endpoint also does not perform all placement validations visible in other backend paths. In the inspected code, generic `create` checks appointment conflicts and minimum advance time, but staff working hours and staff exceptions are enforced by `getAvailableSlots` and `rescheduleAppointment`, not by generic `create`.
 
-Recommendation: add a dedicated placement endpoint later.
+Implemented backend foundation: add a dedicated placement endpoint and keep it unused by Calendar V2 until frontend integration is intentionally enabled behind a feature flag.
 
-Preferred endpoint:
-
-```http
-POST /appointments/waitlist/:id/place
-```
-
-Acceptable alternative if the module is split later:
+Endpoint:
 
 ```http
-POST /waitlist/:id/place
+POST /api/v1/appointments/waitlist/:waitlistId/place
 ```
 
-Because current waitlist endpoints live under `/appointments/waitlist`, the preferred endpoint keeps routing consistent with the existing controller.
+The controller-level route is `POST /appointments/waitlist/:waitlistId/place` under URI version `v1` and the global `/api` prefix. It is protected with `JwtAuthGuard` and `TenantGuard`.
 
-### Recommended payload
+### Placement payload
 
 ```json
 {
   "staffId": "uuid",
-  "startAt": "2026-05-09T10:00:00.000Z",
+  "startAt": "2026-05-11T10:00:00+03:00",
   "durationMinutes": 60,
-  "timezone": "Europe/Sofia",
-  "notificationMode": "silent",
+  "idempotencyKey": "calendar-v2-place:<waitlistId>:<stable-client-key>",
+  "notifyClient": false
+}
+```
+
+Payload notes:
+
+- `staffId` is required and must be a UUID-shaped string.
+- `startAt` is required and must be ISO 8601.
+- `durationMinutes` is optional. If present, it must be 5-480 minutes and must match the service duration. The endpoint derives `endAt` from the service duration.
+- `idempotencyKey` is optional, validated, and stored only as placement metadata. There is no new idempotency schema in this step.
+- `notifyClient` is optional and defaults to `false`. It is reserved for future notification policy. The endpoint does not send notifications even when the value is `true`.
+
+Response shape:
+
+```json
+{
+  "id": "appointment-uuid",
+  "status": "confirmed",
+  "startAt": "2026-05-11T07:00:00.000Z",
+  "endAt": "2026-05-11T08:00:00.000Z",
+  "appointment": {
+    "id": "appointment-uuid",
+    "status": "confirmed",
+    "startAt": "2026-05-11T07:00:00.000Z",
+    "endAt": "2026-05-11T08:00:00.000Z",
+    "staffId": "staff-uuid",
+    "serviceId": "service-uuid",
+    "clientId": "client-uuid"
+  },
+  "waitlist": {
+    "id": "waitlist-uuid",
+    "status": "booked",
+    "bookedAppointmentId": "appointment-uuid"
+  },
+  "notifications": {
+    "requested": false,
+    "sent": false
+  },
   "idempotencyKey": "calendar-v2-place:<waitlistId>:<stable-client-key>"
 }
 ```
 
-Recommended `notificationMode` values:
-
-- `silent`: create appointment and update waitlist without client notification.
-- `notify_client`: create appointment, update waitlist, then send the designed client message.
-- `owner_review`: create no appointment; reserve for future proposal/review workflows only if intentionally added.
-
-For the first backend implementation, support only `silent` or hard-code notification behavior behind a disabled flag. Do not silently send a client message by default.
-
 ### Required backend validations
 
-The dedicated endpoint must validate:
+The dedicated endpoint validates:
 
 - Tenant scope from `TenantGuard` and `CurrentTenant`.
 - Waitlist table exists through `ensureWaitlistTable`.
 - Waitlist/request exists in the current tenant schema.
 - Waitlist/request status is still `waiting` or `notified`.
 - Waitlist/request has no `booked_appointment_id`.
-- Service exists and is still usable for placement.
-- Staff exists, is active, and can perform or accept the service if the repo has/uses a service-staff compatibility rule.
+- Service exists.
+- Staff exists and is active.
 - Target `startAt` parses to a valid date.
-- Target `endAt` is derived from service duration unless an explicit duration override is allowed.
-- Explicit duration override, if allowed, is bounded and audited.
+- Target `endAt` is derived from service duration.
+- Explicit `durationMinutes`, if sent, is bounded and must match the service duration.
 - Appointment conflict check excludes `cancelled` and `no_show` appointments, matching current conflict behavior.
 - Staff working hours include the full target interval.
 - Staff exception/blocked time does not overlap the target interval.
-- Min advance booking rule is applied or explicitly bypassed for owner placement with a recorded reason.
-- Idempotency key is present and scoped to tenant plus waitlist id.
-- Notification mode is valid and explicit.
+- Group-service placement respects configured group day/time and slot capacity when `booking_mode = 'group'`.
+- `idempotencyKey`, when sent, matches the accepted key shape and is recorded in appointment `intake_data.waitlistPlacement`.
+- `notifyClient` is accepted only as reserved metadata; no notification work is performed.
 
 ### Transaction requirements
 
-The endpoint must perform these steps inside one transaction:
+The endpoint performs these steps inside one `withTenantSchema(...)` transaction:
 
 1. Lock the waitlist row with `SELECT ... FOR UPDATE`.
 2. Validate status and `booked_appointment_id` after lock.
 3. Validate service, staff, working hours, blocked time, and appointment conflicts.
-4. Check idempotency record or equivalent dedupe mechanism.
-5. Insert appointment.
-6. Update waitlist to `booked` and set `booked_appointment_id`.
-7. Insert audit/activity event if such storage exists by then.
-8. Commit.
-9. Run notification work after commit.
+4. Insert the appointment with `status = confirmed`, `booked_by = owner`, waitlist notes preserved as client notes, and placement metadata in `intake_data`.
+5. Update waitlist to `booked` and set `booked_appointment_id`.
+6. Commit.
 
-Current `TenantPrismaService.queryInSchema` wraps one raw query at a time. A future placement endpoint will need either a new helper for multi-query tenant transactions or a service method using `withTenantSchema(...)` and Prisma transaction APIs carefully.
+The endpoint does not call `scheduleNotifications`, `processNotificationNow`, or `notificationQueue.add`. Notification behavior remains a future explicit step.
 
 ### Conflict responses
 
-Recommended response classes:
+Response classes:
 
 - `404`: waitlist request, service, or staff not found.
-- `409`: waitlist already handled, slot already taken, staff unavailable, blocked time overlap, or idempotency conflict with different payload.
-- `400`: invalid payload, invalid date, invalid duration, unsupported notification mode.
+- `409`: waitlist already handled, slot already taken, staff unavailable, blocked time overlap, group-service capacity exhausted, or repeated placement after the waitlist row has been booked.
+- `400`: invalid payload, invalid date, invalid service duration, or duration mismatch.
 
-Response body should include a stable machine code, for example:
+Idempotency limitation: this step does not add a DB idempotency table or unique key. Duplicate creation is still prevented for the same waitlist row by locking the row and marking it `booked` in the same transaction; a repeated placement after commit returns `409` and does not create another appointment.
+
+Future frontend integration can add stable machine codes around these responses, for example:
 
 ```json
 {
@@ -443,21 +470,21 @@ Response body should include a stable machine code, for example:
 
 The repo currently stores appointment presentation state in `appointments.intake_data.stateMeta` and notification events in `notifications_log`. I did not find a generic activity-events table in the inspected schema.
 
-For the future dedicated endpoint, add audit/event logging only when there is a designed storage location. Do not overload `notifications_log` for non-notification events. Until a schema exists, return enough response data and keep the Action Inbox derived from existing entities.
+The placement endpoint stores source metadata in `appointments.intake_data.waitlistPlacement`. Add a separate audit/event log only when there is a designed storage location. Do not overload `notifications_log` for non-notification events. Until a schema exists, return enough response data and keep the Action Inbox derived from existing entities.
 
 ### Notification/outbox behavior
 
 Do not put notification sending inside the database transaction.
 
-Recommended order:
+Future notification order when notification policy is designed:
 
 1. Commit appointment placement.
-2. If `notificationMode === 'notify_client'`, enqueue or process notification.
+2. If the future placement notification policy requests client notification, enqueue or process notification after commit.
 3. Record notification success/failure in `notifications_log`.
 4. If notification fails, keep appointment and waitlist state intact.
 5. Surface notification failure as an Action Inbox item or appointment context update.
 
-Current notification paths are immediate processor calls for booking/status/waitlist availability plus queued reminders. A durable outbox would be better for race safety, but adding it requires a schema change and is not part of the first implementation.
+The current placement endpoint does not send notifications. Existing notification paths are immediate processor calls for booking/status/waitlist availability plus queued reminders. A durable outbox would be better for race safety, but adding it requires a schema change and is not part of this backend foundation step.
 
 ## 7. Frontend Implementation Strategy
 
@@ -532,21 +559,51 @@ Rollback strategy:
 
 - Disable the feature flag. Since no writes exist, rollback is UI-only.
 
-### Phase C: backend placement endpoint integration behind feature flag
+### Phase C: backend placement endpoint foundation
 
-Files to change:
+Backend files changed in this phase:
 
 - `backend/src/modules/appointments/appointments.controller.ts`
 - `backend/src/modules/appointments/appointments.service.ts`
-- `backend/src/modules/appointments/dto/` with a new placement DTO.
-- `backend/test/` with placement endpoint/service tests.
+- `backend/src/modules/appointments/dto/place-waitlist-entry.dto.ts`
+- `backend/test/appointments.service.waitlist-placement.spec.ts`
+
+Behavior added:
+
+- Add `POST /api/v1/appointments/waitlist/:waitlistId/place`.
+- Validate and place an open waitlist request in one backend transaction.
+- Return `409` instead of creating duplicates when the waitlist row is already booked or handled.
+- Do not send client notifications.
+- Do not wire any Calendar V2 frontend save path.
+
+What remains disabled:
+
+- Calendar V2 frontend confirm/save.
+- Calendar V2 frontend API calls to the placement endpoint.
+- Appointment move persistence in Calendar V2.
+- Mobile drag/drop.
+- Full appointment editor.
+- Notification sending from placement.
+
+Validation required:
+
+- Backend tests for placement success, not found, handled request, invalid staff/service, appointment conflict, blocked interval, insert failure before waitlist update, no notification call, and DTO validation.
+- Backend build.
+
+Rollback strategy:
+
+- Backend endpoint can remain unused if deployed safely because Calendar V2 frontend does not call it.
+
+### Phase D: frontend placement endpoint integration behind feature flag
+
+Files to change later:
+
 - `frontend/src/components/admin/calendar-v2/real-data/` for a small API integration layer.
 - `frontend/src/components/admin/calendar-v2/native-scheduler-spike/NativeSchedulerPlacementPreview.tsx`
 - `frontend/src/components/admin/use-admin-calendar-board-data.ts` only if a new refetch helper is needed.
 
-Behavior added:
+Behavior to add later:
 
-- Add `POST /appointments/waitlist/:id/place`.
 - Frontend confirm sends one command to the endpoint only when feature flag is enabled and not sample mode.
 - On success, invalidate/refetch `appointments-calendar-board`, `appointments-waitlist`, and `appointment-context`.
 - Show server conflict errors without optimistic committed UI.
@@ -560,7 +617,6 @@ What remains disabled:
 
 Validation required:
 
-- Backend tests for placement success and conflicts.
 - Frontend network check that exactly one placement endpoint fires on confirm.
 - Feature flag off and sample mode produce no writes.
 
@@ -569,7 +625,7 @@ Rollback strategy:
 - Disable frontend feature flag.
 - Backend endpoint can remain unused if deployed safely.
 
-### Phase D: confirm/decline pending request
+### Phase E: confirm/decline pending request
 
 Files to change:
 
@@ -600,7 +656,7 @@ Rollback strategy:
 
 - Disable Calendar V2 request status feature flag.
 
-### Phase E: notifications and audit UI
+### Phase F: notifications and audit UI
 
 Files to change:
 
@@ -630,7 +686,7 @@ Rollback strategy:
 
 - Default to silent placement and hide notification controls.
 
-### Phase F: mobile tap-to-assign flow
+### Phase G: mobile tap-to-assign flow
 
 Files to change:
 
@@ -699,20 +755,20 @@ Exact race conditions to handle:
 - Calendar board is stale after placement or conflict.
 - Network retry repeats the same placement request.
 
-Recommended backend rules:
+Current backend placement rules:
 
 - Lock waitlist row in a transaction.
-- Use idempotency key scoped by tenant and waitlist id.
+- Validate and store an optional idempotency key as metadata. A durable idempotency store is not implemented yet.
 - Recompute end time server-side from current service duration unless accepting a validated explicit override.
 - Re-run conflict, working-hours, and blocked-time checks at confirm.
-- Return `409` with a stable conflict code and `refresh: true` for stale states.
+- Return `409` for stale/handled waitlist rows, slot conflicts, blocked intervals, and unavailable staff. Stable conflict codes and `refresh: true` can be added with frontend integration.
 
 Recommended frontend rules:
 
 - Do not optimistically convert demand into an appointment block before success.
 - Preview can be local, but committed UI changes only after server success.
 - On `409`, keep request visible, clear local placement preview, refetch board and waitlist, and show a concise conflict message.
-- On idempotent retry success, treat the existing created appointment as success.
+- Until durable idempotency exists, treat a repeated placement `409` as a stale-state conflict and refetch board/waitlist.
 - On notification failure, keep the appointment in the calendar and show notification failure separately.
 
 ## 10. UI/UX Acceptance Criteria
@@ -754,20 +810,17 @@ Good tablet behavior means:
 
 ### Backend tests
 
-Add backend tests for the future dedicated placement service/endpoint:
+Backend tests added for the dedicated placement service/DTO:
 
 - Successful placement creates one appointment, marks waitlist `booked`, sets `booked_appointment_id`, and returns appointment data.
 - Slot conflict returns `409` and does not update waitlist.
 - Already handled request returns `409` and does not create a second appointment.
-- Invalid staff returns `404` or `400` according to the chosen DTO semantics.
-- Invalid service returns `404` or `400`.
-- Staff not working that day returns `409`.
-- Target outside staff working hours returns `409`.
-- Staff blocked time overlap returns `409`.
-- Service duration change is handled by server recomputation.
-- Idempotent retry with same key and same payload returns the original placement result.
-- Idempotent retry with same key and different target returns conflict.
-- Notification failure does not corrupt booking or waitlist state.
+- Invalid staff returns `404`.
+- Invalid service returns `404`.
+- Staff blocked time overlap and outside-working-hours placement return `409`.
+- Appointment insert failure does not update the waitlist row; the real operation is inside one transaction.
+- Notification processor and notification queue are not called.
+- DTO validation covers required id/date/duration/idempotency fields and defaults `notifyClient` to `false`.
 
 Use the existing backend Jest pattern in `backend/test/appointments.service.visit-progress.spec.ts` for mocked service-level tests unless the endpoint needs an integration test harness.
 
@@ -809,10 +862,10 @@ Justification:
 
 - It exercises the exact product workflow without risking bookings, notifications, tenant data, or schema.
 - Calendar V2 already has local `placeRequest` command types and preview UI in the native scheduler spike.
-- It lets us validate owner ergonomics, Action Inbox wording, command shape, and no-write guardrails before adding a backend endpoint.
+- It lets us validate owner ergonomics, Action Inbox wording, command shape, and no-write guardrails before wiring a backend endpoint from the frontend.
 - It avoids repeating the mistake of implementing a technically safe but low-value day-of action.
 
-Use this exact prompt later:
+Previous Phase B prompt kept for history:
 
 ```text
 You are working on the SalonIQ repository.
@@ -852,7 +905,7 @@ Expected final response:
 - Commit SHA
 - Files changed
 - Validation performed
-- Confirmation no backend/schema/package/deploy/runtime write behavior changed
+- Confirmation no frontend save, notification send, schema, package, deploy, tenant-resolution, secret, or env behavior changed
 ```
 
 ## 13. Risks And Non-Goals
@@ -864,7 +917,7 @@ Implementation note, 2026-05-08:
 - The preview command is typed as `placeRequest`, carries `localOnly: true`, and is not sent to the backend.
 - Confirm/save remains disabled, no data is persisted, and refresh/reload returns to fetched/sample data.
 - The current `/admin` calendar remains the default production calendar.
-- A dedicated backend placement endpoint is still required before Calendar V2 can save placements.
+- A dedicated backend placement endpoint now exists, but Calendar V2 still cannot save placements until frontend integration is intentionally added behind a feature flag.
 
 Risks:
 
@@ -888,8 +941,8 @@ Non-goals:
 
 ## 14. Final Recommendation
 
-Build Phase B first: Calendar V2 local-only request placement preview from Action Inbox.
+Keep Phase B behavior intact: Calendar V2 local-only request placement preview from Action Inbox.
 
-Keep it behind an explicit preview guard, keep confirm disabled, and verify that no write endpoints fire. This gives the product team the real planning workflow to evaluate: request in Action Inbox, choose a slot, review the placement, and understand notification policy before any data can change.
+Keep it behind an explicit preview guard, keep confirm disabled, and verify that no write endpoints fire. This gives the product team the real planning workflow to evaluate: request in Action Inbox, choose a slot, review the placement, and understand notification policy before Calendar V2 writes data.
 
-After that, build the dedicated backend placement endpoint with tests. Do not use the existing two-call `POST /appointments/admin` plus waitlist status patch as the Calendar V2 write path. Keep visit progress, mobile drag/drop, full appointment editing, recurring appointments, and drag-to-move existing appointments disabled until request placement is validated end to end.
+The backend placement endpoint is now the intended future write path. The next step is frontend integration behind a feature flag. Do not use the existing two-call `POST /appointments/admin` plus waitlist status patch as the Calendar V2 write path. Keep visit progress, mobile drag/drop, full appointment editing, recurring appointments, and drag-to-move existing appointments disabled until request placement is validated end to end.

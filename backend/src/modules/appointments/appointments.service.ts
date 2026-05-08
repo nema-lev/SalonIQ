@@ -14,6 +14,7 @@ import { randomUUID } from 'crypto';
 import { TenantPrismaService } from '../../common/prisma/tenant-prisma.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { CreateBookingRequestDto } from './dto/create-booking-request.dto';
+import { PlaceWaitlistEntryDto } from './dto/place-waitlist-entry.dto';
 import { AppointmentStatus, NotificationJobType, VisitProgress } from '../../common/types/enums';
 import { buildBulgarianPhoneVariants, normalizeBulgarianPhone } from '../../common/utils/phone';
 import type { Tenant } from '@prisma/client';
@@ -84,6 +85,49 @@ export interface WaitlistRow {
   staff_id: string | null;
   staff_name: string | null;
   staff_color: string | null;
+}
+
+interface StaffDaySchedule {
+  open: string;
+  close: string;
+  isOpen: boolean;
+}
+
+type StaffWorkingHours = Record<string, StaffDaySchedule>;
+
+interface PlacementWaitlistRow {
+  id: string;
+  status: WaitlistStatus;
+  desired_date: string | null;
+  desired_from: string | null;
+  desired_to: string | null;
+  notes: string | null;
+  booked_appointment_id: string | null;
+  client_id: string;
+  client_name: string;
+  client_phone: string;
+  service_id: string;
+  preferred_staff_id: string | null;
+}
+
+interface PlacementServiceRow {
+  id: string;
+  name: string;
+  price: unknown;
+  currency: string | null;
+  duration_minutes: number;
+  requires_confirmation: boolean;
+  booking_mode: string;
+  slot_capacity: number;
+  group_days: string[] | null;
+  group_time_slots: string[] | null;
+}
+
+interface PlacementStaffRow {
+  id: string;
+  name: string;
+  color: string | null;
+  working_hours: StaffWorkingHours | null;
 }
 
 type OwnerStateKind =
@@ -1450,6 +1494,329 @@ export class AppointmentsService {
     return updated;
   }
 
+  async placeWaitlistEntry(
+    tenant: Tenant,
+    waitlistId: string,
+    dto: PlaceWaitlistEntryDto,
+  ) {
+    await this.prisma.ensureWaitlistTable(tenant.schemaName);
+    await this.prisma.ensureServiceGroupColumns(tenant.schemaName);
+
+    const startAt = new Date(dto.startAt);
+    if (Number.isNaN(startAt.getTime())) {
+      throw new BadRequestException('Невалиден начален час.');
+    }
+
+    const requestedDurationMinutes =
+      dto.durationMinutes === undefined ? null : Number(dto.durationMinutes);
+    if (
+      requestedDurationMinutes !== null &&
+      (!Number.isInteger(requestedDurationMinutes) ||
+        requestedDurationMinutes < 5 ||
+        requestedDurationMinutes > 480)
+    ) {
+      throw new BadRequestException('Невалидна продължителност.');
+    }
+
+    return this.prisma.withTenantSchema(tenant.schemaName, async (tx) => {
+      const [waitlist] = await tx.$queryRawUnsafe<PlacementWaitlistRow[]>(
+        `
+        SELECT
+          w.id,
+          w.status,
+          w.desired_date::text,
+          w.desired_from::text,
+          w.desired_to::text,
+          w.notes,
+          w.booked_appointment_id::text,
+          w.client_id::text,
+          c.name as client_name,
+          c.phone as client_phone,
+          w.service_id::text,
+          w.staff_id::text as preferred_staff_id
+        FROM waitlist w
+        JOIN clients c ON c.id = w.client_id
+        WHERE w.id = $1::uuid
+        LIMIT 1
+        FOR UPDATE OF w
+        `,
+        waitlistId,
+      );
+
+      if (!waitlist) {
+        throw new NotFoundException('Записът в чакащи не е намерен.');
+      }
+
+      if (waitlist.booked_appointment_id || !['waiting', 'notified'].includes(waitlist.status)) {
+        throw new ConflictException('Заявката вече е обработена.');
+      }
+
+      const [service] = await tx.$queryRawUnsafe<PlacementServiceRow[]>(
+        `
+        SELECT
+          id::text,
+          name,
+          price,
+          currency,
+          duration_minutes,
+          requires_confirmation,
+          booking_mode,
+          slot_capacity,
+          group_days,
+          group_time_slots
+        FROM services
+        WHERE id = $1::uuid
+        LIMIT 1
+        `,
+        waitlist.service_id,
+      );
+
+      if (!service) {
+        throw new NotFoundException('Услугата не е намерена.');
+      }
+
+      const [staff] = await tx.$queryRawUnsafe<PlacementStaffRow[]>(
+        `
+        SELECT id::text, name, color, working_hours
+        FROM staff
+        WHERE id = $1::uuid
+          AND is_active = true
+        LIMIT 1
+        `,
+        dto.staffId,
+      );
+
+      if (!staff) {
+        throw new NotFoundException('Специалистът не е намерен.');
+      }
+
+      const serviceDurationMinutes = Number(service.duration_minutes || 0);
+      if (
+        !Number.isInteger(serviceDurationMinutes) ||
+        serviceDurationMinutes < 5 ||
+        serviceDurationMinutes > 480
+      ) {
+        throw new BadRequestException('Услугата е с невалидна продължителност.');
+      }
+
+      if (
+        requestedDurationMinutes !== null &&
+        requestedDurationMinutes !== serviceDurationMinutes
+      ) {
+        throw new BadRequestException('Продължителността трябва да съвпада с услугата.');
+      }
+
+      const endAt = addMinutes(startAt, serviceDurationMinutes);
+      if (!isBefore(startAt, endAt)) {
+        throw new BadRequestException('Краят трябва да е след началото.');
+      }
+
+      this.assertWithinStaffWorkingHours(staff.working_hours, startAt, endAt);
+
+      const exceptionConflicts = await tx.$queryRawUnsafe<{ id: string }[]>(
+        `
+        SELECT id::text
+        FROM staff_exceptions
+        WHERE staff_id = $1::uuid
+          AND start_at < $3::timestamptz
+          AND end_at > $2::timestamptz
+        LIMIT 1
+        `,
+        staff.id,
+        startAt.toISOString(),
+        endAt.toISOString(),
+      );
+
+      if (exceptionConflicts.length) {
+        throw new ConflictException('Избраният час попада в блокиран интервал.');
+      }
+
+      if (service.booking_mode === 'group') {
+        const dayOfWeek = format(toZonedTime(startAt, TIMEZONE), 'EEE').toLowerCase();
+        const allowedDays = service.group_days || [];
+        const allowedTimes = service.group_time_slots || [];
+        const startTime = format(toZonedTime(startAt, TIMEZONE), 'HH:mm');
+
+        if (!allowedDays.includes(dayOfWeek) || !allowedTimes.includes(startTime)) {
+          throw new ConflictException('Груповата услуга не се провежда в този слот.');
+        }
+
+        const overlaps = await tx.$queryRawUnsafe<
+          { service_id: string; start_at: Date | string; end_at: Date | string }[]
+        >(
+          `
+          SELECT service_id::text, start_at, end_at
+          FROM appointments
+          WHERE staff_id = $1::uuid
+            AND status NOT IN ('cancelled', 'no_show')
+            AND (start_at, end_at) OVERLAPS ($2::timestamptz, $3::timestamptz)
+          `,
+          staff.id,
+          startAt.toISOString(),
+          endAt.toISOString(),
+        );
+
+        const sameSessionBookings = overlaps.filter((booking) => {
+          const bookingStart = new Date(booking.start_at);
+          const bookingEnd = new Date(booking.end_at);
+          return (
+            booking.service_id === service.id &&
+            bookingStart.getTime() === startAt.getTime() &&
+            bookingEnd.getTime() === endAt.getTime()
+          );
+        });
+
+        const hasOtherConflict = overlaps.some((booking) => {
+          const bookingStart = new Date(booking.start_at);
+          const bookingEnd = new Date(booking.end_at);
+          const sameSession =
+            booking.service_id === service.id &&
+            bookingStart.getTime() === startAt.getTime() &&
+            bookingEnd.getTime() === endAt.getTime();
+          return !sameSession;
+        });
+
+        if (hasOtherConflict) {
+          throw new ConflictException('Специалистът вече е зает в този интервал.');
+        }
+
+        const capacity = Math.max(Number(service.slot_capacity || 1), 1);
+        if (sameSessionBookings.length >= capacity) {
+          throw new ConflictException('Няма свободни места за тази групова услуга.');
+        }
+      } else {
+        const appointmentConflicts = await tx.$queryRawUnsafe<{ id: string }[]>(
+          `
+          SELECT id::text
+          FROM appointments
+          WHERE staff_id = $1::uuid
+            AND status NOT IN ('cancelled', 'no_show')
+            AND (start_at, end_at) OVERLAPS ($2::timestamptz, $3::timestamptz)
+          LIMIT 1
+          `,
+          staff.id,
+          startAt.toISOString(),
+          endAt.toISOString(),
+        );
+
+        if (appointmentConflicts.length) {
+          throw new ConflictException('Избраният час вече е зает. Моля, изберете друг.');
+        }
+      }
+
+      const notifyClientRequested = Boolean(dto.notifyClient);
+      const idempotencyKey = dto.idempotencyKey?.trim() || null;
+      const intakeData = {
+        waitlistPlacement: {
+          waitlistId: waitlist.id,
+          previousWaitlistStatus: waitlist.status,
+          desiredDate: waitlist.desired_date,
+          desiredFrom: waitlist.desired_from,
+          desiredTo: waitlist.desired_to,
+          preferredStaffId: waitlist.preferred_staff_id,
+          idempotencyKey,
+          notifyClientRequested,
+          placedAt: new Date().toISOString(),
+        },
+        stateMeta: this.buildOwnerStateMeta(null, AppointmentStatus.CONFIRMED, 'booked_direct'),
+      };
+
+      const [appointment] = await tx.$queryRawUnsafe<
+        { id: string; status: AppointmentStatus; start_at: Date | string; end_at: Date | string }[]
+      >(
+        `
+        INSERT INTO appointments (
+          client_id,
+          staff_id,
+          service_id,
+          start_at,
+          end_at,
+          status,
+          price,
+          currency,
+          booked_by,
+          client_notes,
+          intake_data
+        )
+        VALUES (
+          $1::uuid,
+          $2::uuid,
+          $3::uuid,
+          $4::timestamptz,
+          $5::timestamptz,
+          $6,
+          $7,
+          COALESCE($8::text, 'EUR'),
+          'owner',
+          $9,
+          $10::jsonb
+        )
+        RETURNING id::text, status, start_at, end_at
+        `,
+        waitlist.client_id,
+        staff.id,
+        service.id,
+        startAt.toISOString(),
+        endAt.toISOString(),
+        AppointmentStatus.CONFIRMED,
+        service.price,
+        service.currency || null,
+        waitlist.notes?.trim() || null,
+        JSON.stringify(intakeData),
+      );
+
+      const [updatedWaitlist] = await tx.$queryRawUnsafe<
+        { id: string; status: WaitlistStatus; booked_appointment_id: string }[]
+      >(
+        `
+        UPDATE waitlist
+        SET status = 'booked',
+            booked_appointment_id = $2::uuid,
+            updated_at = NOW()
+        WHERE id = $1::uuid
+          AND status IN ('waiting', 'notified')
+          AND booked_appointment_id IS NULL
+        RETURNING id::text, status, booked_appointment_id::text
+        `,
+        waitlist.id,
+        appointment.id,
+      );
+
+      if (!updatedWaitlist) {
+        throw new ConflictException('Заявката вече е обработена.');
+      }
+
+      const appointmentStartAt = new Date(appointment.start_at).toISOString();
+      const appointmentEndAt = new Date(appointment.end_at).toISOString();
+
+      return {
+        id: appointment.id,
+        status: appointment.status,
+        startAt: appointmentStartAt,
+        endAt: appointmentEndAt,
+        appointment: {
+          id: appointment.id,
+          status: appointment.status,
+          startAt: appointmentStartAt,
+          endAt: appointmentEndAt,
+          staffId: staff.id,
+          serviceId: service.id,
+          clientId: waitlist.client_id,
+        },
+        waitlist: {
+          id: updatedWaitlist.id,
+          status: updatedWaitlist.status,
+          bookedAppointmentId: updatedWaitlist.booked_appointment_id,
+        },
+        notifications: {
+          requested: notifyClientRequested,
+          sent: false,
+        },
+        idempotencyKey,
+      };
+    });
+  }
+
   async notifyWaitlistEntry(
     tenant: Tenant,
     waitlistId: string,
@@ -1787,6 +2154,46 @@ export class AppointmentsService {
   }
 
   // ─── Private helpers ──────────────────────────────────────────────────
+
+  private assertWithinStaffWorkingHours(
+    workingHours: StaffWorkingHours | null | undefined,
+    startAt: Date,
+    endAt: Date,
+  ) {
+    const dayOfWeek = format(toZonedTime(startAt, TIMEZONE), 'EEE').toLowerCase();
+    const daySchedule = workingHours?.[dayOfWeek];
+
+    if (!daySchedule?.isOpen) {
+      throw new ConflictException('Специалистът не работи в този ден.');
+    }
+
+    const [openHour, openMin] = daySchedule.open.split(':').map(Number);
+    const [closeHour, closeMin] = daySchedule.close.split(':').map(Number);
+    if (
+      !Number.isInteger(openHour) ||
+      !Number.isInteger(openMin) ||
+      !Number.isInteger(closeHour) ||
+      !Number.isInteger(closeMin)
+    ) {
+      throw new ConflictException('Работното време на специалиста е невалидно.');
+    }
+
+    const workStart = fromZonedTime(
+      new Date(toZonedTime(startAt, TIMEZONE).setHours(openHour, openMin, 0, 0)),
+      TIMEZONE,
+    );
+    const workEnd = fromZonedTime(
+      new Date(toZonedTime(startAt, TIMEZONE).setHours(closeHour, closeMin, 0, 0)),
+      TIMEZONE,
+    );
+
+    if (
+      (isBefore(startAt, workStart) && startAt.getTime() !== workStart.getTime()) ||
+      (isAfter(endAt, workEnd) && endAt.getTime() !== workEnd.getTime())
+    ) {
+      throw new ConflictException('Избраният час е извън работното време на специалиста.');
+    }
+  }
 
   private async findOrCreateClient(schemaName: string, dto: CreateAppointmentDto): Promise<string> {
     return this.findOrCreateClientByContact(schemaName, {

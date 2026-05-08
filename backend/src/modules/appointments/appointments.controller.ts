@@ -22,6 +22,7 @@ import { AppointmentsService } from './appointments.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { CreateBookingRequestDto } from './dto/create-booking-request.dto';
 import { GetSlotsDto } from './dto/get-slots.dto';
+import { PlaceWaitlistEntryDto } from './dto/place-waitlist-entry.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
 import { UpdateVisitProgressDto } from './dto/update-visit-progress.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -360,6 +361,19 @@ export class AppointmentsController {
     }
 
     return this.appointmentsService.updateWaitlistStatus(tenant, id, dto.status, dto.bookedAppointmentId);
+  }
+
+  @Post('waitlist/:waitlistId/place')
+  @UseGuards(JwtAuthGuard, TenantGuard)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Постави заявка от чакащи в графика' })
+  async placeWaitlistEntry(
+    @Param('waitlistId', ParseUUIDPipe) waitlistId: string,
+    @Body() dto: PlaceWaitlistEntryDto,
+    @CurrentTenant() tenant: Tenant,
+  ) {
+    return this.appointmentsService.placeWaitlistEntry(tenant, waitlistId, dto);
   }
 
   @Post('waitlist/:id/notify')

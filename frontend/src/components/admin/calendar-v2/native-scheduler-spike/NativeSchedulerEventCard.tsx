@@ -76,7 +76,10 @@ export function NativeSchedulerEventCard({
       <button
         type="button"
         className={styles.eventBody}
-        onClick={() => onSelect(block.id)}
+        onClick={(event) => {
+          event.stopPropagation();
+          onSelect(block.id);
+        }}
         data-native-scheduler-role="event-body"
       >
         {isShort ? (

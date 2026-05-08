@@ -12,6 +12,9 @@ type NativeSchedulerActionInboxMockProps = {
     event: ReactPointerEvent<HTMLButtonElement>,
     item: CalendarV2DemandItem,
   ) => void;
+  onSelectDemandForPlacement: (item: CalendarV2DemandItem) => void;
+  activePlacementDemandId?: string | null;
+  placementModeEnabled?: boolean;
   readOnly?: boolean;
 };
 
@@ -19,18 +22,21 @@ export function NativeSchedulerActionInboxMock({
   demandItems,
   actionItems,
   onStartDemandDrag,
+  onSelectDemandForPlacement,
+  activePlacementDemandId = null,
+  placementModeEnabled = true,
   readOnly = false,
 }: NativeSchedulerActionInboxMockProps) {
   const demandById = new Map(demandItems.map((item) => [item.id, item]));
   const requiresAction = actionItems.filter((item) => item.bucket === 'requires_action');
   const updates = actionItems.filter((item) => item.bucket === 'updates');
-  const draggableDemandActions = requiresAction.filter(
+  const placementDemandActions = requiresAction.filter(
     (item) => item.source === 'waitlist' && demandById.has(item.sourceId),
   );
   const secondaryActions = requiresAction.filter(
     (item) => item.source !== 'waitlist' || !demandById.has(item.sourceId),
   );
-  const hasRequiredItems = draggableDemandActions.length > 0 || secondaryActions.length > 0;
+  const hasRequiredItems = placementDemandActions.length > 0 || secondaryActions.length > 0;
   const hasInboxItems = hasRequiredItems || updates.length > 0;
 
   return (
@@ -39,7 +45,7 @@ export function NativeSchedulerActionInboxMock({
         <div className={styles.panelHeaderText}>
           <p className={styles.panelTitle}>Action Inbox</p>
           <p className={styles.panelSubtitle}>
-            {readOnly ? 'Read-only requests and booking updates' : 'Requests and booking updates'}
+            {readOnly ? 'Само локален преглед' : 'Заявки и промени'}
           </p>
         </div>
         <span className={styles.panelCount}>{requiresAction.length}</span>
@@ -47,7 +53,7 @@ export function NativeSchedulerActionInboxMock({
 
       <div className={styles.inboxContent}>
         {hasRequiredItems ? (
-          <p className={styles.inboxSectionLabel}>Requires action</p>
+          <p className={styles.inboxSectionLabel}>За действие</p>
         ) : (
           <div className={styles.inboxEmptyState}>
             <span className={styles.emptyIcon}>
@@ -62,18 +68,23 @@ export function NativeSchedulerActionInboxMock({
           </div>
         )}
 
-        {draggableDemandActions.map((action) => {
+        {placementDemandActions.map((action) => {
           const demand = demandById.get(action.sourceId);
           if (!demand) return null;
           const title = action.title || demand.client.name;
           const subtitle = title === demand.client.name
             ? `${demand.service.name} · ${demand.preferredWindow.label}`
             : `${demand.client.name} · ${demand.service.name} · ${demand.preferredWindow.label}`;
+          const isActive = activePlacementDemandId === demand.id;
 
           return (
             <article
               key={action.id}
-              className={`${styles.inboxItem} ${readOnly ? styles.inboxItemReadOnly : ''}`}
+              className={[
+                styles.inboxItem,
+                readOnly ? styles.inboxItemReadOnly : '',
+                isActive ? styles.inboxItemActive : '',
+              ].filter(Boolean).join(' ')}
             >
               {!readOnly && (
                 <button
@@ -90,8 +101,21 @@ export function NativeSchedulerActionInboxMock({
                 <p className={styles.inboxSubtitle}>{subtitle}</p>
                 <span className={styles.inboxMetaRow}>
                   <span className={styles.inboxTag}>{formatGroup(action.group)}</span>
-                  <span className={styles.inboxTagMuted}>{readOnly ? 'Read-only' : 'Drag to place'}</span>
+                  <span className={styles.inboxTagMuted}>Без записване</span>
                 </span>
+                {isActive && (
+                  <p className={styles.inboxInstruction}>Изберете свободен час в календара.</p>
+                )}
+                {placementModeEnabled && (
+                  <button
+                    type="button"
+                    className={styles.inboxPlacementButton}
+                    onClick={() => onSelectDemandForPlacement(demand)}
+                    aria-pressed={isActive}
+                  >
+                    {isActive ? 'Изберете слот' : 'Постави в графика'}
+                  </button>
+                )}
               </div>
             </article>
           );
@@ -106,7 +130,7 @@ export function NativeSchedulerActionInboxMock({
               <p className={styles.inboxSubtitle}>{action.subtitle}</p>
               <span className={styles.inboxMetaRow}>
                 <span className={styles.inboxTag}>{formatGroup(action.group)}</span>
-                {readOnly && <span className={styles.inboxTagMuted}>Read-only</span>}
+                {readOnly && <span className={styles.inboxTagMuted}>Само информация</span>}
               </span>
             </div>
           </article>
@@ -131,8 +155,9 @@ export function NativeSchedulerActionInboxMock({
 }
 
 function formatGroup(group: ActionInboxItem['group']) {
-  if (group === 'needs_approval') return 'Pending approval';
-  if (group === 'needs_recovery') return 'Recovery';
-  if (group === 'needs_reply') return 'Reply';
-  return 'Action';
+  if (group === 'needs_scheduling') return 'Заявка без точен час';
+  if (group === 'needs_approval') return 'Чака одобрение';
+  if (group === 'needs_recovery') return 'Запълване';
+  if (group === 'needs_reply') return 'Отговор';
+  return 'Действие';
 }

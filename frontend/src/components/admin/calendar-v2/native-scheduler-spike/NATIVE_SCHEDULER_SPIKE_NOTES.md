@@ -19,10 +19,13 @@
 
 - Hidden route renders the native scheduler from real appointments, staff, services, waitlist entries, and staff exceptions when the feature flag is enabled and current admin auth/tenant context can read the existing calendar data.
 - Real-data route is read-only: appointment drag handles and waitlist drag-to-place controls are disabled.
+- Real-data and sample routes now allow a local-only click-to-place preview for Action Inbox waitlist/demand items. The owner selects `Постави в графика`, clicks a staff/time slot, and sees a lightweight placement preview without saving.
+- The local preview emits a typed `placeRequest` command-shaped object with the request id, target staff/start/end, source surface, idempotency key, appointment draft details, and `localOnly: true`.
+- The placement preview shows client, service, duration, staff, date/time, local conflict state when detected, and Bulgarian no-save copy. The save/confirm action remains disabled.
 - Desktop/tablet-landscape resource day grid with staff columns, 15-minute slots, 08:00-20:00 hours, sticky toolbar, sticky staff header, sticky time gutter, mocked current-time line, fixture appointments, overlap lanes, and a blocked time region.
 - Action Inbox mock shows demand/request items, pending approval, cancellation recovery, and collapsed updates.
-- Demand items can be dragged from Action Inbox into the scheduler with native pointer events.
-- Dropping a demand item emits a local `placeRequest` command-shaped object and opens a placement preview.
+- Demand items can still be dragged from Action Inbox into the isolated non-read-only component fixture with native pointer events.
+- Dropping a demand item in that isolated fixture emits the same local `placeRequest` command-shaped object and opens a placement preview.
 - Appointment cards can be moved locally by dragging only the visible handle.
 - Dropping an appointment emits a local `moveAppointment` command-shaped object and applies a local-only move.
 - Selecting the card body opens a lightweight local preview panel.
@@ -32,6 +35,9 @@
 
 - No backend writes from Calendar V2.
 - No appointment creation from Calendar V2.
+- No request placement persistence from Calendar V2.
+- No appointment, waitlist placement, waitlist status, appointment status, notification, or reschedule write API is called by the placement preview.
+- Placement confirm/save remains disabled.
 - No server validation.
 - No persistence after reset/reload.
 - No resize interaction.
@@ -49,7 +55,7 @@ The implementation is clean enough for a SalonIQ-specific scheduler because poin
 
 Feasible. Dragging demand from Action Inbox to a staff/time slot creates a typed local `placeRequest` command with target staff, start, end, and draft appointment details. The confirm action is intentionally disabled and no API is called.
 
-In the read-only real-data route, drag-to-place is disabled instead of emitting command previews.
+In the read-only real-data route, drag-to-place remains disabled, but click-to-place local preview is enabled for waitlist/demand items. This keeps the route non-writing while making the real planning workflow testable.
 
 ## Appointment Move Verdict
 
@@ -168,6 +174,23 @@ In the read-only real-data route, appointment move handles are disabled.
 - Screenshots captured under `screenshots/`: `calendar-v2-layout-hardening-sample-1440x900.png`, `calendar-v2-layout-hardening-sample-1366x768.png`, `calendar-v2-layout-hardening-real-1440x900.png`, and `calendar-v2-layout-hardening-sample-390x844.png`.
 - Visual QA result from `/private/tmp/saloniq-calendar-v2-layout-hardening-qa-results.json`: outer admin/page scroll overflow was `0` at the checked desktop sizes, the scheduler grid retained vertical scroll, the phone fallback remained visible, appointment drag grip count was `0`, waitlist placement button count was `0`, and `writesAfterV2` was empty.
 - Remaining UX limitations: phone still intentionally shows the separate agenda-renderer notice, tablet portrait remains out of scope, and long selected-booking notes can still scroll inside Booking Detail.
+
+## Local Request Placement Preview Pass
+
+- Date of pass: 2026-05-08.
+- Action Inbox waitlist/demand cards now expose `Постави в графика` in real-data and sample Calendar V2 preview mode.
+- Clicking the action enters local placement mode, highlights the active request, and shows `Изберете свободен час в календара`.
+- Clicking a scheduler staff/time slot creates a local typed `placeRequest` preview command with request id, target staff/start/end, source surface, idempotency key, appointment draft details, and `localOnly: true`.
+- `NativeSchedulerPlacementPreview` shows client, service, duration, staff, date/time, no-save copy, local conflict copy when applicable, disabled save copy, and `Отказ`.
+- Missing service/request duration uses a visible 60-minute fallback.
+- Existing appointment movement remains disabled on the read-only real-data/sample route because appointment drag handles are still hidden.
+- Confirm/save, appointment creation, waitlist placement persistence, waitlist status changes, appointment status changes, cancellation, notifications, and reschedule APIs remain disabled.
+- Sample mode supports placement preview and remains non-writing.
+- Real-data mode supports placement preview when waitlist/demand items are returned by the read endpoints.
+- Current `/admin` remains the default production calendar and is not replaced by Calendar V2.
+- Screenshots captured under `screenshots/`: `calendar-v2-local-placement-sample-active-1440x900.png`, `calendar-v2-local-placement-sample-preview-1440x900.png`, `calendar-v2-local-placement-sample-1366x768.png`, `calendar-v2-local-placement-real-1440x900.png`, and `calendar-v2-local-placement-sample-390x844.png`.
+- Visual/network QA result from `/private/tmp/saloniq-calendar-v2-local-placement-qa-results.json`: sample placement preview visible, real placement preview visible with mock demand, phone fallback visible, and `writesAfterPlacementPreview` was empty.
+- Remaining UX limitations: phone still intentionally shows the separate agenda-renderer notice, the future backend placement endpoint is not implemented, and backend conflict/working-hours validation is still required before persistence.
 
 ## Visit Progress Product Review
 

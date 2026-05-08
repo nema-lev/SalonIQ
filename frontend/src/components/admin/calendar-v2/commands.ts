@@ -45,6 +45,7 @@ export interface CalendarV2CommandBase<
   sourceSurface: CalendarV2SurfaceMode;
   requestedAt?: CalendarV2IsoDateTime;
   idempotencyKey?: string;
+  localOnly?: boolean;
   optimistic?: CalendarV2OptimisticMetadata;
 }
 

@@ -122,13 +122,13 @@ function projectWaitlistToActionInboxItem(entry: WaitlistEntry): ActionInboxItem
     status: entry.status === 'cancelled' ? 'archived' : entry.status === 'booked' ? 'handled' : 'open',
     source: 'waitlist',
     sourceId: entry.id,
-    title: entry.client_name,
+    title: 'Заявка без точен час',
     subtitle: `${entry.service_name} | ${getRequestWindowLabel(entry)}`,
     sortAt: entry.updated_at ?? entry.created_at,
     primaryAction: isOpen
       ? {
           type: 'placeRequest',
-          label: 'Place request',
+          label: 'Постави в графика',
           commandType: 'placeRequest',
         }
       : {
@@ -140,7 +140,7 @@ function projectWaitlistToActionInboxItem(entry: WaitlistEntry): ActionInboxItem
       ? [
           {
             type: 'findFirstAvailable',
-            label: 'Find first available',
+            label: 'Първи свободен',
           },
           {
             type: 'archiveActionItem',

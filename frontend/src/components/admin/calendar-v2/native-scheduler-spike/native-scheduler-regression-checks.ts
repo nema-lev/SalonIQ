@@ -20,10 +20,15 @@ import {
   type NativeSchedulerResource,
 } from './native-scheduler-geometry';
 import {
+  DEFAULT_PLACEMENT_DURATION_MINUTES,
   commandPreviewLabel,
   createMoveAppointmentCommand,
   createPlaceRequestCommand,
+  createPlaceRequestCommandPreview,
+  detectLocalPlacementConflict,
+  getPlacementDurationMinutes,
   hasPassedDragThreshold,
+  usesFallbackPlacementDuration,
 } from './native-scheduler-drag';
 
 export type NativeSchedulerRegressionCheckResult = {
@@ -204,7 +209,8 @@ const checks: RegressionCheck[] = [
       assertEqual(placeCommand.target.staffId, 'staff-2', 'place command should carry staff id');
       assertEqual(placeCommand.target.startAt, target.startAt, 'place command should carry start time');
       assertEqual(placeCommand.target.endAt, target.endAt, 'place command should carry end time');
-      assertEqual(placeCommand.sourceSurface, 'desktop_scheduler', 'place command should identify scheduler surface');
+      assertEqual(placeCommand.sourceSurface, 'action_inbox', 'place command should identify Action Inbox surface');
+      assertEqual(placeCommand.localOnly, true, 'place command should remain explicitly local-only');
       assert(
         placeCommand.idempotencyKey?.startsWith('calendar-v2-spike:placeRequest:demand-1:') === true,
         'place command should carry a local idempotency key',
@@ -244,6 +250,112 @@ const checks: RegressionCheck[] = [
         commandPreviewLabel(moveCommand),
         `moveAppointment -> ${target.startAt}`,
         'move label should be stable',
+      );
+    },
+  },
+  {
+    name: 'local placement preview rejects invalid resource targets',
+    run: () => {
+      const invalidSlot = slotFromPointer({
+        clientX: GRID_RECT.left + GRID_RECT.width + 12,
+        clientY: GRID_RECT.top + timeToY(9 * 60),
+        gridRect: GRID_RECT,
+        resources: RESOURCES,
+        date: CHECK_DATE,
+        durationMinutes: 60,
+      });
+      const command = createPlaceRequestCommandPreview({
+        demandItem: demandFixture(),
+        target: invalidSlot
+          ? {
+              startAt: invalidSlot.startAt,
+              endAt: invalidSlot.endAt,
+              staffId: invalidSlot.resource.id,
+              staffName: invalidSlot.resource.name,
+            }
+          : null,
+        timezone: 'Europe/Sofia',
+      });
+
+      assertEqual(invalidSlot, null, 'invalid x/resource should not resolve a slot');
+      assertEqual(command, null, 'invalid x/resource should not create a placement command');
+    },
+  },
+  {
+    name: 'local placement preview uses safe fallback duration',
+    run: () => {
+      const demandWithoutDuration = demandFixture({ durationMinutes: null });
+      const target = {
+        staffId: 'staff-2',
+        staffName: 'Boris',
+        startAt: dateAndMinutesToIso(CHECK_DATE, 11 * 60),
+        endAt: dateAndMinutesToIso(
+          CHECK_DATE,
+          11 * 60 + getPlacementDurationMinutes(demandWithoutDuration),
+        ),
+      };
+      const command = createPlaceRequestCommandPreview({
+        demandItem: demandWithoutDuration,
+        target,
+        timezone: 'Europe/Sofia',
+      });
+
+      assertEqual(
+        getPlacementDurationMinutes(demandWithoutDuration),
+        DEFAULT_PLACEMENT_DURATION_MINUTES,
+        'missing duration should use 60-minute fallback',
+      );
+      assertEqual(
+        usesFallbackPlacementDuration(demandWithoutDuration),
+        true,
+        'missing duration should be marked as fallback',
+      );
+      assertDefined(command, 'fallback duration should still create a local preview command');
+      assertEqual(
+        command.target.endAt,
+        dateAndMinutesToIso(CHECK_DATE, 12 * 60),
+        'fallback duration should drive target end time',
+      );
+      assertEqual(command.localOnly, true, 'fallback placement preview should remain local-only');
+    },
+  },
+  {
+    name: 'local placement conflict helper detects overlap without blocking preview shape',
+    run: () => {
+      const blocks = [
+        calendarBlock('existing-a', 'staff-1', 9 * 60, 10 * 60),
+        calendarBlock('existing-b', 'staff-2', 9 * 60, 10 * 60),
+      ];
+
+      assertEqual(
+        detectLocalPlacementConflict({
+          blocks,
+          staffId: 'staff-1',
+          startAt: dateAndMinutesToIso(CHECK_DATE, 9 * 60 + 30),
+          endAt: dateAndMinutesToIso(CHECK_DATE, 10 * 60 + 30),
+        }),
+        true,
+        'same-staff overlapping target should be detected locally',
+      );
+      assertEqual(
+        detectLocalPlacementConflict({
+          blocks,
+          staffId: 'staff-1',
+          startAt: dateAndMinutesToIso(CHECK_DATE, 10 * 60),
+          endAt: dateAndMinutesToIso(CHECK_DATE, 11 * 60),
+        }),
+        false,
+        'adjacent same-staff target should remain available locally',
+      );
+      assertEqual(
+        detectLocalPlacementConflict({
+          blocks,
+          staffId: 'staff-3',
+          startAt: dateAndMinutesToIso(CHECK_DATE, 9 * 60 + 30),
+          endAt: dateAndMinutesToIso(CHECK_DATE, 10 * 60 + 30),
+        }),
+        false,
+        'different-staff overlap should not be treated as a conflict',
       );
     },
   },
@@ -352,7 +464,11 @@ function appointmentFixture(
   };
 }
 
-function demandFixture(): CalendarV2DemandItem {
+function demandFixture(
+  options: {
+    durationMinutes?: number | null;
+  } = {},
+): CalendarV2DemandItem {
   return {
     id: 'demand-1',
     version: 2,
@@ -369,7 +485,7 @@ function demandFixture(): CalendarV2DemandItem {
     service: {
       id: 'service-1',
       name: 'Cut and style',
-      durationMinutes: 60,
+      durationMinutes: 'durationMinutes' in options ? options.durationMinutes : 60,
       color: '#64748b',
     },
     preferredWindow: {

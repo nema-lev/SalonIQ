@@ -854,6 +854,15 @@ Expected final response:
 
 ## 13. Risks And Non-Goals
 
+Implementation note, 2026-05-08:
+
+- Phase B has started with a local-only Calendar V2 Action Inbox placement preview.
+- Real-data mode and sample mode can enter placement mode from waitlist/demand items and preview a clicked staff/time slot.
+- The preview command is typed as `placeRequest`, carries `localOnly: true`, and is not sent to the backend.
+- Confirm/save remains disabled, no data is persisted, and refresh/reload returns to fetched/sample data.
+- The current `/admin` calendar remains the default production calendar.
+- A dedicated backend placement endpoint is still required before Calendar V2 can save placements.
+
 Risks:
 
 - Reusing `POST /appointments/admin` plus `PATCH /appointments/waitlist/:id/status` would preserve the current non-atomic split write.

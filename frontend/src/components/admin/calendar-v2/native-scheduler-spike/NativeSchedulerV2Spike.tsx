@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
@@ -44,9 +45,13 @@ import {
   type NativeSchedulerResource,
 } from './native-scheduler-geometry';
 import {
+  createPlaceRequestCommandPreview,
+  detectLocalPlacementConflict,
   createMoveAppointmentCommand,
   createPlaceRequestCommand,
+  getPlacementDurationMinutes,
   hasPassedDragThreshold,
+  usesFallbackPlacementDuration,
   type NativeSchedulerDragOverlay,
 } from './native-scheduler-drag';
 import styles from './native-scheduler.module.css';
@@ -90,6 +95,7 @@ type NativeSchedulerV2SpikeProps = {
   toolbarPills?: string[];
   toolbarNote?: ReactNode;
   toolbarControls?: ReactNode;
+  enableLocalPlacementPreview?: boolean;
 };
 
 export function NativeSchedulerV2Spike({
@@ -105,6 +111,7 @@ export function NativeSchedulerV2Spike({
   toolbarPills,
   toolbarNote,
   toolbarControls,
+  enableLocalPlacementPreview = true,
 }: NativeSchedulerV2SpikeProps = {}) {
   const sourceBlocks = calendarBlocks ?? nativeSchedulerCalendarBlocks;
   const schedulerDate = date ?? nativeSchedulerDate;
@@ -119,6 +126,9 @@ export function NativeSchedulerV2Spike({
   const [dropPreview, setDropPreview] = useState<NativeSchedulerGridDropPreview | null>(null);
   const [dragOverlay, setDragOverlay] = useState<NativeSchedulerDragOverlay | null>(null);
   const [placementPreview, setPlacementPreview] = useState<NativeSchedulerPlacementPreviewState | null>(null);
+  const [placementDemandItem, setPlacementDemandItem] = useState<CalendarV2DemandItem | null>(null);
+  const [placementTarget, setPlacementTarget] = useState<NativeSchedulerGridDropPreview | null>(null);
+  const [placementMessage, setPlacementMessage] = useState<string | null>(null);
   const [lastCommand, setLastCommand] = useState<CalendarV2Command | null>(null);
 
   const resources = useMemo<NativeSchedulerResource[]>(
@@ -137,6 +147,16 @@ export function NativeSchedulerV2Spike({
   );
   const dateLabel = format(schedulerDate, "EEEE, d MMMM yyyy 'г.'", { locale: bg });
   const visibleToolbarPills = toolbarPills ?? [];
+  const placementModeActive = enableLocalPlacementPreview && Boolean(placementDemandItem);
+
+  const clearPlacementMode = useCallback(() => {
+    setPlacementDemandItem(null);
+    setPlacementTarget(null);
+    setPlacementPreview(null);
+    setPlacementMessage(null);
+    setDropPreview(null);
+    setLastCommand(null);
+  }, []);
 
   useEffect(() => {
     setBlocks(sourceBlocks);
@@ -150,9 +170,19 @@ export function NativeSchedulerV2Spike({
     setDraggingBlockId(null);
     setDropPreview(null);
     setDragOverlay(null);
+    setPlacementDemandItem(null);
+    setPlacementTarget(null);
     setPlacementPreview(null);
+    setPlacementMessage(null);
     setLastCommand(null);
   }, [sourceBlocks]);
+
+  useEffect(() => {
+    if (!placementDemandItem) return;
+    if (demandItems.some((item) => item.id === placementDemandItem.id)) return;
+
+    clearPlacementMode();
+  }, [clearPlacementMode, demandItems, placementDemandItem]);
 
   const resolveDropTarget = useCallback(
     ({
@@ -170,14 +200,22 @@ export function NativeSchedulerV2Spike({
     }): NativeSchedulerGridDropPreview | null => {
       const grid = gridRef.current;
       if (!grid) return null;
+      const gridRect = grid.getBoundingClientRect();
+      const resourceColumnWidth = resources.length
+        ? gridRect.width / resources.length
+        : NATIVE_SCHEDULER_GEOMETRY.resourceColumnWidth;
 
       const slot = slotFromPointer({
         clientX,
         clientY,
-        gridRect: grid.getBoundingClientRect(),
+        gridRect,
         resources,
         date: schedulerDate,
         durationMinutes,
+        config: {
+          ...NATIVE_SCHEDULER_GEOMETRY,
+          resourceColumnWidth,
+        },
       });
 
       if (!slot) return null;
@@ -189,7 +227,13 @@ export function NativeSchedulerV2Spike({
         startAt: slot.startAt,
         endAt: slot.endAt,
         durationMinutes,
-        hasConflict: detectDropConflict(blocks, slot.resource.id, slot.startAt, slot.endAt, ignoredBlockId),
+        hasConflict: detectLocalPlacementConflict({
+          blocks,
+          staffId: slot.resource.id,
+          startAt: slot.startAt,
+          endAt: slot.endAt,
+          ignoredBlockId,
+        }),
       };
 
       return target;
@@ -221,6 +265,9 @@ export function NativeSchedulerV2Spike({
           command,
           staffName: target.staffName,
           timeLabel: formatTargetTime(target),
+          durationMinutes: target.durationMinutes,
+          usesFallbackDuration: usesFallbackPlacementDuration(drag.demandItem),
+          hasConflict: target.hasConflict,
         });
         setLastCommand(command);
         console.info('[Calendar V2 native scheduler preview command]', command);
@@ -333,7 +380,7 @@ export function NativeSchedulerV2Spike({
       startPointerDrag(event);
       const durationMinutes = Math.max(
         NATIVE_SCHEDULER_GEOMETRY.slotMinutes,
-        demandItem.service.durationMinutes ?? 45,
+        getPlacementDurationMinutes(demandItem),
       );
 
       activeDragRef.current = {
@@ -361,6 +408,25 @@ export function NativeSchedulerV2Spike({
       });
     },
     [readOnly],
+  );
+
+  const handleSelectDemandForPlacement = useCallback(
+    (demandItem: CalendarV2DemandItem) => {
+      if (!enableLocalPlacementPreview) return;
+
+      activeDragRef.current = null;
+      setDragActive(false);
+      setDraggingBlockId(null);
+      setDragOverlay(null);
+      setDropPreview(null);
+      setPlacementPreview(null);
+      setPlacementTarget(null);
+      setLastCommand(null);
+      setSelectedBlockId(null);
+      setPlacementDemandItem(demandItem);
+      setPlacementMessage('Изберете свободен час в календара.');
+    },
+    [enableLocalPlacementPreview],
   );
 
   const handleStartAppointmentDrag = useCallback(
@@ -405,9 +471,100 @@ export function NativeSchedulerV2Spike({
     setDraggingBlockId(null);
     setDropPreview(null);
     setDragOverlay(null);
+    setPlacementDemandItem(null);
+    setPlacementTarget(null);
     setPlacementPreview(null);
+    setPlacementMessage(null);
     setLastCommand(null);
   };
+
+  const handlePlacementPointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (!placementDemandItem || dragActive) return;
+
+      const durationMinutes = Math.max(
+        NATIVE_SCHEDULER_GEOMETRY.slotMinutes,
+        getPlacementDurationMinutes(placementDemandItem),
+      );
+      const target = resolveDropTarget({
+        clientX: event.clientX,
+        clientY: event.clientY,
+        durationMinutes,
+        kind: 'demand_item',
+      });
+
+      setDropPreview(target);
+    },
+    [dragActive, placementDemandItem, resolveDropTarget],
+  );
+
+  const handlePlacementPointerLeave = useCallback(() => {
+    if (!placementDemandItem || placementPreview || placementTarget) return;
+
+    setDropPreview(null);
+  }, [placementDemandItem, placementPreview, placementTarget]);
+
+  const handlePlacementSlotClick = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      if (!placementDemandItem) return;
+
+      const durationMinutes = Math.max(
+        NATIVE_SCHEDULER_GEOMETRY.slotMinutes,
+        getPlacementDurationMinutes(placementDemandItem),
+      );
+      const target = resolveDropTarget({
+        clientX: event.clientX,
+        clientY: event.clientY,
+        durationMinutes,
+        kind: 'demand_item',
+      });
+
+      if (!target) {
+        setPlacementTarget(null);
+        setDropPreview(null);
+        setPlacementPreview(null);
+        setPlacementMessage('Изберете слот в колона на специалист.');
+        return;
+      }
+
+      const timezone = getClientTimezone();
+      const command = createPlaceRequestCommandPreview({
+        demandItem: placementDemandItem,
+        target: {
+          startAt: target.startAt,
+          endAt: target.endAt,
+          staffId: target.staffId,
+          staffName: target.staffName,
+        },
+        timezone,
+        sourceSurface: 'action_inbox',
+      });
+
+      if (!command) return;
+
+      const preview = {
+        demandItem: placementDemandItem,
+        command,
+        staffName: target.staffName,
+        timeLabel: formatTargetTime(target),
+        durationMinutes: target.durationMinutes,
+        usesFallbackDuration: usesFallbackPlacementDuration(placementDemandItem),
+        hasConflict: target.hasConflict,
+      };
+
+      setPlacementTarget(target);
+      setDropPreview(target);
+      setPlacementPreview(preview);
+      setLastCommand(command);
+      setPlacementMessage(
+        target.hasConflict
+          ? 'Избраният слот има локален конфликт. Прегледът не записва час.'
+          : 'Прегледът е готов. Няма записване.',
+      );
+      console.info('[Calendar V2 local placement preview command]', command);
+    },
+    [placementDemandItem, resolveDropTarget],
+  );
 
   return (
     <>
@@ -463,12 +620,33 @@ export function NativeSchedulerV2Spike({
                 onStartAppointmentDrag={handleStartAppointmentDrag}
                 readOnly={readOnly}
                 schedulerNotice={schedulerNotice}
+                placementModeActive={placementModeActive}
+                onPlacementPointerMove={handlePlacementPointerMove}
+                onPlacementPointerLeave={handlePlacementPointerLeave}
+                onPlacementSlotClick={handlePlacementSlotClick}
               />
+
+              {placementDemandItem && (
+                <div className={styles.placementModeBanner}>
+                  <div className={styles.placementModeText}>
+                    <p className={styles.placementModeTitle}>Изберете свободен час в календара</p>
+                    <p className={styles.placementModeSubtitle}>
+                      {placementDemandItem.client.name} · {placementDemandItem.service.name} ·{' '}
+                      {getPlacementDurationMinutes(placementDemandItem)} мин
+                      {usesFallbackPlacementDuration(placementDemandItem) ? ' · резервна продължителност' : ''}
+                    </p>
+                    {placementMessage && <p className={styles.placementModeMessage}>{placementMessage}</p>}
+                  </div>
+                  <button type="button" className={styles.placementModeCancel} onClick={clearPlacementMode}>
+                    Отказ
+                  </button>
+                </div>
+              )}
 
               {placementPreview && (
                 <NativeSchedulerPlacementPreview
                   preview={placementPreview}
-                  onClose={() => setPlacementPreview(null)}
+                  onClose={clearPlacementMode}
                 />
               )}
             </div>
@@ -478,6 +656,9 @@ export function NativeSchedulerV2Spike({
                 demandItems={demandItems}
                 actionItems={actionItems}
                 onStartDemandDrag={handleStartDemandDrag}
+                onSelectDemandForPlacement={handleSelectDemandForPlacement}
+                activePlacementDemandId={placementDemandItem?.id ?? null}
+                placementModeEnabled={enableLocalPlacementPreview}
                 readOnly={readOnly}
               />
               <NativeSchedulerPreviewPanel
@@ -518,26 +699,6 @@ function startPointerDrag(event: ReactPointerEvent<HTMLButtonElement>) {
   event.preventDefault();
   event.stopPropagation();
   event.currentTarget.setPointerCapture(event.pointerId);
-}
-
-function detectDropConflict(
-  blocks: CalendarV2CalendarBlock[],
-  staffId: string,
-  startAt: string,
-  endAt: string,
-  ignoredBlockId?: string,
-) {
-  const start = new Date(startAt).getTime();
-  const end = new Date(endAt).getTime();
-
-  return blocks.some((block) => {
-    if (block.id === ignoredBlockId || block.staffId !== staffId) return false;
-    if (block.kind !== 'appointment' && block.kind !== 'blocked_time') return false;
-
-    const blockStart = new Date(block.startAt).getTime();
-    const blockEnd = new Date(block.endAt).getTime();
-    return start < blockEnd && end > blockStart;
-  });
 }
 
 function moveBlockLocally(

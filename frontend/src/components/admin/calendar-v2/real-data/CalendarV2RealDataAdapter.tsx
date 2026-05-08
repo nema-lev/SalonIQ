@@ -174,6 +174,7 @@ export function CalendarV2RealDataAdapter() {
       demandItems={activeProjection.demandItems}
       actionItems={activeProjection.actionItems}
       readOnly
+      enableLocalPlacementPreview
       readOnlyNotice={CALENDAR_V2_READONLY_NOTICE}
       schedulerNotice={schedulerNotice}
       toolbarEyebrow="Calendar V2 Preview"

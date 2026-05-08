@@ -1,6 +1,10 @@
 'use client';
 
-import type { PointerEvent as ReactPointerEvent, RefObject } from 'react';
+import type {
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+  RefObject,
+} from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CalendarV2CalendarBlock } from '..';
 import {
@@ -52,6 +56,10 @@ type NativeSchedulerGridProps = {
   ) => void;
   readOnly?: boolean;
   schedulerNotice?: NativeSchedulerNotice | null;
+  placementModeActive?: boolean;
+  onPlacementPointerMove?: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onPlacementPointerLeave?: () => void;
+  onPlacementSlotClick?: (event: ReactMouseEvent<HTMLDivElement>) => void;
 };
 
 const HEADER_HEIGHT = 56;
@@ -71,6 +79,10 @@ export function NativeSchedulerGrid({
   onStartAppointmentDrag,
   readOnly = false,
   schedulerNotice,
+  placementModeActive = false,
+  onPlacementPointerMove,
+  onPlacementPointerLeave,
+  onPlacementSlotClick,
 }: NativeSchedulerGridProps) {
   const containerRef = useRef<HTMLElement | null>(null);
   const [availableWidth, setAvailableWidth] = useState(0);
@@ -174,12 +186,15 @@ export function NativeSchedulerGrid({
 
           <div
             ref={gridRef}
-            className={styles.gridLayer}
+            className={`${styles.gridLayer} ${placementModeActive ? styles.gridLayerPlacementMode : ''}`}
             style={{
               width: columnsWidth,
               height: gridHeight,
               backgroundSize: `${geometry.resourceColumnWidth}px 100%, 100% 30px`,
             }}
+            onPointerMove={placementModeActive ? onPlacementPointerMove : undefined}
+            onPointerLeave={placementModeActive ? onPlacementPointerLeave : undefined}
+            onClick={placementModeActive ? onPlacementSlotClick : undefined}
           >
             {schedulerNotice && (
               <SchedulerNotice notice={schedulerNotice} />
@@ -278,7 +293,10 @@ function SchedulerNotice({ notice }: { notice?: NativeSchedulerNotice | null }) 
   if (!notice) return null;
 
   return (
-    <div className={`${styles.schedulerNotice} ${getNoticeToneClass(notice.tone)}`}>
+    <div
+      className={`${styles.schedulerNotice} ${getNoticeToneClass(notice.tone)}`}
+      onClick={(event) => event.stopPropagation()}
+    >
       <p className={styles.schedulerNoticeTitle}>{notice.title}</p>
       {notice.message && <p className={styles.schedulerNoticeText}>{notice.message}</p>}
       {notice.action && (

@@ -1,11 +1,15 @@
 import type {
   CalendarV2Appointment,
   CalendarV2Command,
+  CalendarV2CalendarBlock,
   CalendarV2DemandItem,
+  CalendarV2SurfaceMode,
   CalendarV2TimeTarget,
   MoveAppointmentCommand,
   PlaceRequestCommand,
 } from '..';
+
+export const DEFAULT_PLACEMENT_DURATION_MINUTES = 60;
 
 export type NativeSchedulerCommandTarget = CalendarV2TimeTarget & {
   staffName?: string | null;
@@ -34,10 +38,12 @@ export function createPlaceRequestCommand({
   demandItem,
   target,
   timezone,
+  sourceSurface = 'action_inbox',
 }: {
   demandItem: CalendarV2DemandItem;
   target: NativeSchedulerCommandTarget;
   timezone?: string;
+  sourceSurface?: CalendarV2SurfaceMode;
 }): PlaceRequestCommand {
   return {
     type: 'placeRequest',
@@ -47,9 +53,10 @@ export function createPlaceRequestCommand({
       version: demandItem.version,
     },
     actorIntent: 'Place unscheduled demand from Calendar V2 Action Inbox.',
-    sourceSurface: 'desktop_scheduler',
+    sourceSurface,
     requestedAt: new Date().toISOString(),
     idempotencyKey: buildLocalCommandKey('placeRequest', demandItem.id),
+    localOnly: true,
     target: {
       startAt: target.startAt,
       endAt: target.endAt,
@@ -64,6 +71,68 @@ export function createPlaceRequestCommand({
       notes: demandItem.notes,
     },
   };
+}
+
+export function createPlaceRequestCommandPreview({
+  demandItem,
+  target,
+  timezone,
+  sourceSurface,
+}: {
+  demandItem: CalendarV2DemandItem;
+  target: NativeSchedulerCommandTarget | null;
+  timezone?: string;
+  sourceSurface?: CalendarV2SurfaceMode;
+}) {
+  if (!target) return null;
+
+  return createPlaceRequestCommand({
+    demandItem,
+    target,
+    timezone,
+    sourceSurface,
+  });
+}
+
+export function getPlacementDurationMinutes(demandItem: CalendarV2DemandItem) {
+  const durationMinutes = demandItem.service.durationMinutes;
+
+  if (typeof durationMinutes === 'number' && Number.isFinite(durationMinutes) && durationMinutes > 0) {
+    return durationMinutes;
+  }
+
+  return DEFAULT_PLACEMENT_DURATION_MINUTES;
+}
+
+export function usesFallbackPlacementDuration(demandItem: CalendarV2DemandItem) {
+  const durationMinutes = demandItem.service.durationMinutes;
+  return !(typeof durationMinutes === 'number' && Number.isFinite(durationMinutes) && durationMinutes > 0);
+}
+
+export function detectLocalPlacementConflict({
+  blocks,
+  staffId,
+  startAt,
+  endAt,
+  ignoredBlockId,
+}: {
+  blocks: CalendarV2CalendarBlock[];
+  staffId: string;
+  startAt: string;
+  endAt: string;
+  ignoredBlockId?: string;
+}) {
+  const start = new Date(startAt).getTime();
+  const end = new Date(endAt).getTime();
+
+  return blocks.some((block) => {
+    if (block.id === ignoredBlockId || block.staffId !== staffId) return false;
+    if (block.kind !== 'appointment' && block.kind !== 'blocked_time') return false;
+
+    const blockStart = new Date(block.startAt).getTime();
+    const blockEnd = new Date(block.endAt).getTime();
+    return start < blockEnd && end > blockStart;
+  });
 }
 
 export function createMoveAppointmentCommand({

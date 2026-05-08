@@ -283,6 +283,13 @@
   box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.18);
 }
 
+.gridLayerPlacementMode {
+  cursor: crosshair;
+  box-shadow:
+    inset 0 0 0 2px rgba(15, 118, 110, 0.22),
+    inset 0 1px 0 rgba(148, 163, 184, 0.18);
+}
+
 .schedulerNotice {
   position: absolute;
   left: 16px;
@@ -797,6 +804,16 @@
   color: #475569;
 }
 
+.panelCountWarning {
+  border-radius: 999px;
+  border: 1px solid #fecaca;
+  background: #fff1f2;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 900;
+  color: #b91c1c;
+}
+
 .inboxContent {
   display: flex;
   min-height: 0;
@@ -896,6 +913,15 @@
   grid-template-columns: minmax(0, 1fr);
 }
 
+.inboxItemActive {
+  border-color: #99f6e4;
+  background:
+    linear-gradient(180deg, rgba(240, 253, 250, 0.92), rgba(255, 255, 255, 0.98));
+  box-shadow:
+    0 0 0 1px rgba(15, 118, 110, 0.1),
+    0 12px 24px rgba(15, 118, 110, 0.08);
+}
+
 .inboxGrip {
   display: flex;
   width: 26px;
@@ -969,6 +995,38 @@
   font-weight: 900;
   line-height: 1.3;
   color: #64748b;
+}
+
+.inboxInstruction {
+  margin: 6px 0 0;
+  border-left: 3px solid #14b8a6;
+  padding-left: 7px;
+  font-size: 10.5px;
+  font-weight: 850;
+  line-height: 1.35;
+  color: #0f766e;
+}
+
+.inboxPlacementButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  margin-top: 7px;
+  border: 1px solid #0f766e;
+  border-radius: 8px;
+  background: #0f766e;
+  padding: 7px 9px;
+  font-size: 11px;
+  font-weight: 950;
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.inboxPlacementButton[aria-pressed="true"] {
+  border-color: #99f6e4;
+  background: #f0fdfa;
+  color: #0f766e;
 }
 
 .secondaryItem {
@@ -1190,8 +1248,118 @@
   box-shadow: 0 18px 50px rgba(15, 23, 42, 0.16);
 }
 
+.placementModeBanner {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 42;
+  display: flex;
+  max-width: min(500px, calc(100% - 28px));
+  align-items: flex-start;
+  gap: 12px;
+  border: 1px solid #99f6e4;
+  border-radius: 8px;
+  background: rgba(240, 253, 250, 0.96);
+  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.12);
+  padding: 10px 11px;
+}
+
+.placementModeText {
+  min-width: 0;
+}
+
+.placementModeTitle {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 950;
+  color: #0f172a;
+}
+
+.placementModeSubtitle,
+.placementModeMessage {
+  margin: 3px 0 0;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1.35;
+  color: #0f766e;
+}
+
+.placementModeMessage {
+  color: #475569;
+}
+
+.placementModeCancel {
+  flex: 0 0 auto;
+  border: 1px solid #99f6e4;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 6px 8px;
+  font-size: 11px;
+  font-weight: 950;
+  color: #0f766e;
+  cursor: pointer;
+}
+
+.placementFacts {
+  display: grid;
+  gap: 6px;
+}
+
+.placementFactRow {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 118px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fbfdff;
+  padding: 7px 8px;
+}
+
+.placementFactLabel {
+  min-width: 0;
+  font-size: 9px;
+  font-weight: 950;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.placementFactValue {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 950;
+  color: #0f172a;
+}
+
+.previewReadOnlyNote,
+.previewConflictNote {
+  margin: 8px 0 0;
+  border-radius: 8px;
+  padding: 8px 9px;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1.4;
+}
+
+.previewReadOnlyNote {
+  border: 1px solid #bae6fd;
+  background: #f0f9ff;
+  color: #0369a1;
+}
+
+.previewConflictNote {
+  border: 1px solid #fecaca;
+  background: #fff1f2;
+  color: #b91c1c;
+}
+
 .placementActions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
   padding: 0 12px 12px;

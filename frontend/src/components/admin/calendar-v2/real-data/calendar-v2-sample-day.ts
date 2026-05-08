@@ -181,8 +181,9 @@ function buildSampleActionInboxItems(at: (time: string) => string): ActionInboxI
       title: 'Заявка без точен час',
       subtitle: 'Ива · Маникюр · след 15:00',
       sortAt: at('07:55'),
-      primaryType: 'findFirstAvailable',
-      primaryLabel: 'Find first available',
+      primaryType: 'placeRequest',
+      primaryLabel: 'Постави в графика',
+      commandType: 'placeRequest',
     }),
     buildActionInboxItem({
       id: 'sample-action-approval',

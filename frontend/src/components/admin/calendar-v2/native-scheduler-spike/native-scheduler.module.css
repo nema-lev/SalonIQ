@@ -1168,63 +1168,6 @@
   color: #475569;
 }
 
-.previewActions {
-  display: grid;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.previewActionButton {
-  display: inline-flex;
-  min-height: 34px;
-  width: fit-content;
-  max-width: 100%;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border: 1px solid #0f766e;
-  border-radius: 8px;
-  background: #0f766e;
-  padding: 8px 11px;
-  font-size: 11px;
-  font-weight: 950;
-  color: #ffffff;
-  cursor: pointer;
-  transition: background 140ms ease, border-color 140ms ease, opacity 140ms ease;
-}
-
-.previewActionButton:hover:not(:disabled) {
-  border-color: #115e59;
-  background: #115e59;
-}
-
-.previewActionButton:disabled {
-  cursor: not-allowed;
-  opacity: 0.68;
-}
-
-.previewActionMessage {
-  margin: 0;
-  border: 1px solid;
-  border-radius: 8px;
-  padding: 7px 8px;
-  font-size: 10.5px;
-  font-weight: 900;
-  line-height: 1.35;
-}
-
-.previewActionMessageSuccess {
-  border-color: #bbf7d0;
-  background: #ecfdf5;
-  color: #047857;
-}
-
-.previewActionMessageError {
-  border-color: #fecdd3;
-  background: #fff1f2;
-  color: #be123c;
-}
-
 .commandLine {
   margin-top: 10px;
   overflow: hidden;

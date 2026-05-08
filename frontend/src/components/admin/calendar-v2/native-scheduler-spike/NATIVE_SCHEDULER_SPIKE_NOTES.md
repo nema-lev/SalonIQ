@@ -133,7 +133,7 @@ In the read-only real-data route, appointment move handles are disabled.
 - Empty real-data states stay non-blocking and can show a compact `Show sample day` action. Sample data is never implied to be production data.
 - Sample mode is labeled `Sample day · Read-only` with `Back to real data` in the toolbar note.
 - Sample staff/resources are Bulgarian salon names: `Елена`, `Мария`, `Никол`, and `Ани`, with the existing 08:00-20:00 scheduler hours.
-- Sample appointments cover 15-minute, 30-minute, 60-minute, 90-minute, and 120-minute cards, adjacent spacing, a message cue, a visit-progress cue, and a blocked break.
+- Sample appointments cover 15-minute, 30-minute, 60-minute, 90-minute, and 120-minute cards, adjacent spacing, a message cue, and a blocked break.
 - Sample Action Inbox includes read-only examples for an untimed request, pending approval, cancellation recovery, and a client message needing response.
 - Booking Detail shows selected sample appointment time, service, staff, status/progress, message cue, and notes without enabling edits.
 - Calendar V2 remains read-only: no appointment creation, move persistence, waitlist placement persistence, status changes, or write API calls from sample mode.
@@ -169,15 +169,15 @@ In the read-only real-data route, appointment move handles are disabled.
 - Visual QA result from `/private/tmp/saloniq-calendar-v2-layout-hardening-qa-results.json`: outer admin/page scroll overflow was `0` at the checked desktop sizes, the scheduler grid retained vertical scroll, the phone fallback remained visible, appointment drag grip count was `0`, waitlist placement button count was `0`, and `writesAfterV2` was empty.
 - Remaining UX limitations: phone still intentionally shows the separate agenda-renderer notice, tablet portrait remains out of scope, and long selected-booking notes can still scroll inside Booking Detail.
 
-## Feature-Flagged Arrived Action
+## Visit Progress Product Review
 
 - Date of pass: 2026-05-08.
-- Added the first real Calendar V2 write action behind `NEXT_PUBLIC_ENABLE_CALENDAR_V2_VISIT_ACTIONS=true`.
-- Only `Пристигнал` is wired, and only in real-data Booking Detail for eligible confirmed appointments with `scheduled` visit progress.
-- The action calls the existing `PATCH /appointments/:id/visit-progress` endpoint with `{ progress: "checked_in" }`, then refetches/invalidates the shared calendar board data.
-- Sample mode remains visual-only and read-only; the adapter disables the real-data read queries when `sample=1` is present and never renders the action there.
+- The `Пристигнал` Calendar V2 UI action was removed after product review.
+- Small salon owners and specialists are unlikely to mark every client as arrived during the working day, so this action is not part of the core salon workflow.
+- Calendar V2 should focus on planning, pending approvals, untimed request placement, confirmations, and rescheduling.
+- Day-of visit progress remains backend-capable for future clinic/front-desk workflows, but Calendar V2 does not expose a visit-progress write action.
 - Scheduler drag, appointment move persistence, waitlist/request placement, appointment creation, cancel, confirm, no-show, completed, and in-service actions remain disabled.
-- Backend DTO validation restricts visit progress values, and checked-in handling is idempotent while preserving existing `intake_data` metadata with a targeted JSON update.
+- Backend DTO validation and idempotent checked-in hardening remain in place.
 
 ## Short-Card Readability Verdict
 

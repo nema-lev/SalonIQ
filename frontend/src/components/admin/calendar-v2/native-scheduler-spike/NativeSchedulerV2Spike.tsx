@@ -29,10 +29,7 @@ import {
   NativeSchedulerPlacementPreview,
   type NativeSchedulerPlacementPreviewState,
 } from './NativeSchedulerPlacementPreview';
-import {
-  NativeSchedulerPreviewPanel,
-  type NativeSchedulerVisitAction,
-} from './NativeSchedulerPreviewPanel';
+import { NativeSchedulerPreviewPanel } from './NativeSchedulerPreviewPanel';
 import {
   nativeSchedulerActionInboxItems,
   nativeSchedulerCalendarBlocks,
@@ -93,7 +90,6 @@ type NativeSchedulerV2SpikeProps = {
   toolbarPills?: string[];
   toolbarNote?: ReactNode;
   toolbarControls?: ReactNode;
-  visitAction?: NativeSchedulerVisitAction;
 };
 
 export function NativeSchedulerV2Spike({
@@ -109,7 +105,6 @@ export function NativeSchedulerV2Spike({
   toolbarPills,
   toolbarNote,
   toolbarControls,
-  visitAction,
 }: NativeSchedulerV2SpikeProps = {}) {
   const sourceBlocks = calendarBlocks ?? nativeSchedulerCalendarBlocks;
   const schedulerDate = date ?? nativeSchedulerDate;
@@ -489,7 +484,6 @@ export function NativeSchedulerV2Spike({
                 selectedBlock={selectedBlock}
                 lastCommand={lastCommand}
                 readOnly={readOnly}
-                visitAction={visitAction}
               />
             </aside>
           </div>

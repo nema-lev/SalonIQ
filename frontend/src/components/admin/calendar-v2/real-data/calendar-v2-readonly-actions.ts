@@ -3,9 +3,6 @@ import type { CalendarV2CommandType } from '../commands';
 export const CALENDAR_V2_READONLY_NOTICE =
   'Calendar V2 Preview · Read-only';
 
-export const CALENDAR_V2_VISIT_ACTION_NOTICE =
-  'Calendar V2 Preview · Само Пристигнал';
-
 export type CalendarV2ReadOnlyAction =
   | Extract<CalendarV2CommandType, 'moveAppointment' | 'placeRequest' | 'confirmRequest' | 'declineRequest' | 'cancelAppointment'>
   | 'createAppointment'

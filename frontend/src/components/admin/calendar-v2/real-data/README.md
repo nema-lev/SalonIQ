@@ -22,7 +22,7 @@ This folder connects the direct `/admin/calendar-v2` preview route to the existi
   - `GET /services/admin`
 - Uses the existing `apiClient`, so current admin auth and tenant headers stay unchanged.
 - Does not add backend endpoints.
-- The only write path available from this adapter is behind `NEXT_PUBLIC_ENABLE_CALENDAR_V2_VISIT_ACTIONS=true` and calls `PATCH /appointments/:id/visit-progress` with `{ progress: "checked_in" }`.
+- Does not call write APIs from Calendar V2.
 - Sample mode is built in the frontend adapter only; it does not read or write sample records through backend APIs.
 
 ## Projection
@@ -50,28 +50,26 @@ This folder connects the direct `/admin/calendar-v2` preview route to the existi
 - No appointment creation.
 - No appointment move persistence.
 - No waitlist placement.
-- No status transitions except the feature-flagged real-data `Пристигнал` visit-progress action.
+- No status transitions.
 - No optimistic persistence.
-- No backend writes from Calendar V2 unless `NEXT_PUBLIC_ENABLE_CALENDAR_V2_VISIT_ACTIONS=true`.
+- No backend writes from Calendar V2.
 
-The native scheduler receives `readOnly` props on the hidden real-data route. Appointment drag handles and demand drag-to-place controls are disabled there. The `Пристигнал` action is rendered only in Booking Detail for eligible real-data appointments and refetches the shared calendar board after success.
+The native scheduler receives `readOnly` props on the hidden real-data route. Appointment drag handles and demand drag-to-place controls are disabled there.
 
-## Visit Action Guardrails
+## Visit Progress Direction
 
-- Flag: `NEXT_PUBLIC_ENABLE_CALENDAR_V2_VISIT_ACTIONS=true`.
-- Only action: `Пристигнал`.
-- Payload: `{ progress: "checked_in" }`.
-- Eligible selected bookings must be real confirmed appointments with scheduled visit progress.
-- Sample mode never renders the action and does not call the API.
-- Backend validation accepts only `scheduled`, `checked_in`, `in_service`, `completed`, and `no_show`.
-- Backend checked-in handling is idempotent and updates only `intake_data.visitProgress`, preserving other intake metadata.
+- The `Пристигнал` UI action was intentionally removed from Calendar V2 after product review.
+- Main salon Calendar V2 UX should focus on planning, pending approvals, untimed request placement, confirmations, and rescheduling.
+- Day-of visit progress may remain backend-capable for future clinic/front-desk workflows, but Calendar V2 does not expose it in the salon planning surface.
+- Backend validation still accepts only `scheduled`, `checked_in`, `in_service`, `completed`, and `no_show`.
+- Backend checked-in handling remains idempotent and updates only `intake_data.visitProgress`, preserving other intake metadata.
 
 ## What Not To Do Here
 
 - Do not add backend APIs or change tenant resolution.
 - Do not change the current `/admin` calendar route behavior.
 - Do not move renderer-specific behavior into domain projections.
-- Do not persist Calendar V2 commands from this layer, except the explicitly flagged `Пристигнал` visit-progress action.
+- Do not persist Calendar V2 commands from this layer.
 - Do not place untimed waitlist/request demand as scheduled calendar blocks.
 
 ## Known Limitations

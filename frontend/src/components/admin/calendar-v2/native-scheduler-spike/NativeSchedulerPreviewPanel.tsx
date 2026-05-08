@@ -1,48 +1,25 @@
 'use client';
 
-import { CalendarCheck2, Clock3, MessageCircle, Scissors, UserCheck, UserRound } from 'lucide-react';
+import { CalendarCheck2, Clock3, MessageCircle, Scissors, UserRound } from 'lucide-react';
 import type { CalendarV2CalendarBlock, CalendarV2Command } from '..';
 import { commandPreviewLabel } from './native-scheduler-drag';
 import styles from './native-scheduler.module.css';
-
-export type NativeSchedulerVisitActionFeedback = {
-  appointmentId: string;
-  tone: 'success' | 'error';
-  message: string;
-};
-
-export type NativeSchedulerVisitAction = {
-  pendingAppointmentId: string | null;
-  feedback: NativeSchedulerVisitActionFeedback | null;
-  onMarkArrived: (appointmentId: string) => void;
-};
 
 type NativeSchedulerPreviewPanelProps = {
   selectedBlock: CalendarV2CalendarBlock | null;
   lastCommand: CalendarV2Command | null;
   readOnly?: boolean;
-  visitAction?: NativeSchedulerVisitAction;
 };
 
 export function NativeSchedulerPreviewPanel({
   selectedBlock,
   lastCommand,
   readOnly = false,
-  visitAction,
 }: NativeSchedulerPreviewPanelProps) {
   const appointment = selectedBlock?.appointment;
   const clientName = appointment?.client.name ?? selectedBlock?.title ?? '';
   const serviceName = appointment?.service.name ?? selectedBlock?.subtitle ?? 'Service unavailable';
   const staffName = appointment?.staff.name ?? selectedBlock?.cardSummary?.staffLabel ?? selectedBlock?.staffId ?? '';
-  const canMarkArrived = Boolean(visitAction && selectedBlock && canMarkAppointmentArrived(selectedBlock));
-  const isMarkingArrived = Boolean(
-    appointment &&
-      visitAction?.pendingAppointmentId === appointment.id,
-  );
-  const visitFeedback =
-    appointment && visitAction?.feedback?.appointmentId === appointment.id
-      ? visitAction.feedback
-      : null;
 
   return (
     <section className={`${styles.previewPanel} ${selectedBlock ? '' : styles.previewPanelEmpty}`}>
@@ -92,34 +69,6 @@ export function NativeSchedulerPreviewPanel({
               </p>
             )}
             {appointment?.notes && <p className={styles.previewNote}>{appointment.notes}</p>}
-            {visitAction && appointment && (canMarkArrived || visitFeedback) && (
-              <div className={styles.previewActions}>
-                {canMarkArrived && (
-                  <button
-                    type="button"
-                    className={styles.previewActionButton}
-                    onClick={() => visitAction.onMarkArrived(appointment.id)}
-                    disabled={isMarkingArrived}
-                    data-calendar-v2-action="mark-arrived"
-                  >
-                    <UserCheck size={13} strokeWidth={2.6} />
-                    {isMarkingArrived ? 'Маркиране…' : 'Пристигнал'}
-                  </button>
-                )}
-                {visitFeedback && (
-                  <p
-                    className={[
-                      styles.previewActionMessage,
-                      visitFeedback.tone === 'error'
-                        ? styles.previewActionMessageError
-                        : styles.previewActionMessageSuccess,
-                    ].join(' ')}
-                  >
-                    {visitFeedback.message}
-                  </p>
-                )}
-              </div>
-            )}
           </>
         ) : (
           <div className={styles.previewEmptyState}>
@@ -139,16 +88,6 @@ export function NativeSchedulerPreviewPanel({
       </div>
     </section>
   );
-}
-
-function canMarkAppointmentArrived(block: CalendarV2CalendarBlock) {
-  const appointment = block.appointment;
-  if (!appointment) return false;
-  if (block.kind !== 'appointment' || block.sourceEntityType !== 'appointment') return false;
-  if (appointment.rawStatus !== 'confirmed') return false;
-  if (appointment.schedulingState !== 'scheduled') return false;
-
-  return appointment.visitProgress === 'scheduled';
 }
 
 function PreviewFact({

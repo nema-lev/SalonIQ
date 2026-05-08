@@ -132,9 +132,9 @@ function getCardCues(block: CalendarV2CalendarBlock) {
     });
   }
 
-  if (appointment.visitProgress === 'checked_in' || appointment.visitProgress === 'in_service') {
+  if (appointment.visitProgress === 'in_service') {
     cues.push({
-      label: appointment.visitProgress === 'in_service' ? 'В услуга' : 'Пристигнал',
+      label: 'В услуга',
       icon: <CircleDot size={12} strokeWidth={2.4} />,
     });
   }

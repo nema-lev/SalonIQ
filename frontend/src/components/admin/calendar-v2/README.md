@@ -7,9 +7,10 @@ This folder contains renderer-independent contracts for a future admin Calendar 
 - An explicit read-only sample scenario is available at `/admin/calendar-v2?sample=1` for visual review when the current tenant has no bookings.
 - The preview route is enabled by default and can be disabled with `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW=true`.
 - The current `/admin` calendar remains the default production calendar.
-- Calendar V2 write actions are disabled by default in the deployed preview.
-- The only wired Calendar V2 write action is feature-flagged with `NEXT_PUBLIC_ENABLE_CALENDAR_V2_VISIT_ACTIONS=true`.
-- With that flag enabled, real-data mode can mark an eligible confirmed booking as `Пристигнал` by sending `checked_in` visit progress to the existing backend endpoint.
+- Calendar V2 write actions are intentionally disabled in the deployed preview.
+- The previously explored `Пристигнал` action was intentionally removed from Calendar V2 UI after product review.
+- Calendar V2 should prioritize planning, pending approvals, untimed request placement, confirmations, and rescheduling.
+- Day-of visit progress can remain backend-capable for future clinic/front-desk use cases, but it is not part of the main salon Calendar V2 UX.
 - Sample mode remains visual-only and read-only; it does not call read or write APIs.
 - Move, create, cancel, request placement, no-show, completed, and in-service actions remain disabled in Calendar V2.
 - The preview UI is desktop-first: the scheduler is the hero, the right rail stays lightweight, and the header keeps only date controls plus one subtle capability indicator.
@@ -24,4 +25,4 @@ This folder contains renderer-independent contracts for a future admin Calendar 
 - Desktop and tablet landscape should use a scheduler-engine adapter.
 - Phone should keep a separate custom agenda/day renderer instead of sharing the desktop scheduler renderer.
 - Untimed demand belongs in demand/request/waitlist projections, not in scheduled calendar blocks.
-- Future write interactions should go through typed commands before they are wired to API calls. The current exception is the guarded `Пристигнал` visit action, which uses backend DTO validation and idempotent checked-in handling.
+- Future write interactions should go through typed commands before they are wired to API calls.

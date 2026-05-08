@@ -7,6 +7,14 @@ export enum AppointmentStatus {
   NO_SHOW = 'no_show',
 }
 
+export enum VisitProgress {
+  SCHEDULED = 'scheduled',
+  CHECKED_IN = 'checked_in',
+  IN_SERVICE = 'in_service',
+  COMPLETED = 'completed',
+  NO_SHOW = 'no_show',
+}
+
 export enum NotificationJobType {
   BOOKING_CONFIRMED = 'booking-confirmed',
   BOOKING_PENDING = 'booking-pending',

@@ -7,8 +7,12 @@ This folder contains renderer-independent contracts for a future admin Calendar 
 - An explicit read-only sample scenario is available at `/admin/calendar-v2?sample=1` for visual review when the current tenant has no bookings.
 - The preview route is enabled by default and can be disabled with `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW=true`.
 - The current `/admin` calendar remains the default production calendar.
-- Calendar V2 write actions are intentionally disabled in the deployed preview.
-- The preview UI is desktop-first: the scheduler is the hero, the right rail stays lightweight, and the header keeps only date controls plus one subtle `Calendar V2 Preview · Read-only` indicator.
+- Calendar V2 write actions are disabled by default in the deployed preview.
+- The only wired Calendar V2 write action is feature-flagged with `NEXT_PUBLIC_ENABLE_CALENDAR_V2_VISIT_ACTIONS=true`.
+- With that flag enabled, real-data mode can mark an eligible confirmed booking as `Пристигнал` by sending `checked_in` visit progress to the existing backend endpoint.
+- Sample mode remains visual-only and read-only; it does not call read or write APIs.
+- Move, create, cancel, request placement, no-show, completed, and in-service actions remain disabled in Calendar V2.
+- The preview UI is desktop-first: the scheduler is the hero, the right rail stays lightweight, and the header keeps only date controls plus one subtle capability indicator.
 - The production preview renders available staff/resources even when names look like sample/demo labels, with a quiet toolbar note when that happens.
 - Real data mode remains the default. Empty real-data days keep staff columns visible and offer a compact `Show sample day` action instead of injecting fake production data.
 - Sample mode uses clearly labeled Bulgarian salon sample data, shows `Sample day · Read-only`, and provides `Back to real data`.
@@ -20,4 +24,4 @@ This folder contains renderer-independent contracts for a future admin Calendar 
 - Desktop and tablet landscape should use a scheduler-engine adapter.
 - Phone should keep a separate custom agenda/day renderer instead of sharing the desktop scheduler renderer.
 - Untimed demand belongs in demand/request/waitlist projections, not in scheduled calendar blocks.
-- Write interactions should go through typed commands before they are wired to API calls.
+- Future write interactions should go through typed commands before they are wired to API calls. The current exception is the guarded `Пристигнал` visit action, which uses backend DTO validation and idempotent checked-in handling.

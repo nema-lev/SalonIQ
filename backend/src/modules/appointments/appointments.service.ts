@@ -14,7 +14,7 @@ import { randomUUID } from 'crypto';
 import { TenantPrismaService } from '../../common/prisma/tenant-prisma.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { CreateBookingRequestDto } from './dto/create-booking-request.dto';
-import { AppointmentStatus, NotificationJobType } from '../../common/types/enums';
+import { AppointmentStatus, NotificationJobType, VisitProgress } from '../../common/types/enums';
 import { buildBulgarianPhoneVariants, normalizeBulgarianPhone } from '../../common/utils/phone';
 import type { Tenant } from '@prisma/client';
 import { NotificationProcessor } from '../notifications/notification.processor';
@@ -26,7 +26,6 @@ type ProposalKind = 'admin_inquiry' | 'counter_offer';
 type ProposalDecision = 'accept' | 'reject';
 type UpcomingMode = 'all' | 'attention' | 'pending';
 type SlotResult = { start: string; end: string; remainingSpots?: number; capacity?: number };
-type VisitProgress = 'scheduled' | 'checked_in' | 'in_service' | 'completed' | 'no_show';
 type WaitlistStatus = 'waiting' | 'notified' | 'booked' | 'cancelled';
 
 interface ProposalMetadata {
@@ -46,7 +45,7 @@ interface IntakeDataWithProposal {
   proposal?: ProposalMetadata;
   ownerActionAlert?: '' | 'client_cancelled';
   stateMeta?: OwnerStateMeta;
-  visitProgress?: 'scheduled' | 'checked_in' | 'in_service';
+  visitProgress?: VisitProgress;
   [key: string]: unknown;
 }
 
@@ -1159,7 +1158,7 @@ export class AppointmentsService {
     appointmentId: string,
     progress: VisitProgress,
   ) {
-    if (progress === 'completed') {
+    if (progress === VisitProgress.COMPLETED) {
       await this.updateStatus(tenant, appointmentId, AppointmentStatus.COMPLETED);
       return {
         id: appointmentId,
@@ -1168,7 +1167,7 @@ export class AppointmentsService {
       };
     }
 
-    if (progress === 'no_show') {
+    if (progress === VisitProgress.NO_SHOW) {
       await this.updateStatus(tenant, appointmentId, AppointmentStatus.NO_SHOW);
       return {
         id: appointmentId,
@@ -1192,21 +1191,39 @@ export class AppointmentsService {
     }
 
     const intakeData = this.parseIntakeData(appointment.intake_data);
+    const currentProgress = this.resolveVisitProgress(
+      appointment.status as AppointmentStatus,
+      intakeData,
+    );
+
+    if (progress === VisitProgress.CHECKED_IN) {
+      if (currentProgress === VisitProgress.CHECKED_IN) {
+        return {
+          id: appointmentId,
+          progress,
+          label: this.getVisitProgressLabel(progress),
+        };
+      }
+
+      if (currentProgress !== VisitProgress.SCHEDULED) {
+        throw new BadRequestException('Часът вече е в друг етап на посещението.');
+      }
+    }
+
     await this.prisma.queryInSchema(
       tenant.schemaName,
       `
       UPDATE appointments
-      SET intake_data = $1::jsonb,
+      SET intake_data = jsonb_set(
+            COALESCE(intake_data, '{}'::jsonb),
+            '{visitProgress}',
+            to_jsonb($1::text),
+            true
+          ),
           updated_at = NOW()
       WHERE id = $2::uuid
       `,
-      [
-        JSON.stringify({
-          ...intakeData,
-          visitProgress: progress,
-        }),
-        appointmentId,
-      ],
+      [progress, appointmentId],
     );
 
     return {
@@ -2177,24 +2194,24 @@ export class AppointmentsService {
     status: AppointmentStatus | string,
     intakeData: IntakeDataWithProposal,
   ): VisitProgress {
-    if (status === AppointmentStatus.COMPLETED) return 'completed';
-    if (status === AppointmentStatus.NO_SHOW) return 'no_show';
+    if (status === AppointmentStatus.COMPLETED) return VisitProgress.COMPLETED;
+    if (status === AppointmentStatus.NO_SHOW) return VisitProgress.NO_SHOW;
 
     const raw = intakeData?.visitProgress;
-    if (raw === 'checked_in' || raw === 'in_service') {
+    if (raw === VisitProgress.CHECKED_IN || raw === VisitProgress.IN_SERVICE) {
       return raw;
     }
 
-    return 'scheduled';
+    return VisitProgress.SCHEDULED;
   }
 
   private getVisitProgressLabel(progress: VisitProgress) {
     const labels: Record<VisitProgress, string> = {
-      scheduled: 'Очаква се',
-      checked_in: 'Пристигнал',
-      in_service: 'В процес',
-      completed: 'Приключен',
-      no_show: 'Неявил се',
+      [VisitProgress.SCHEDULED]: 'Очаква се',
+      [VisitProgress.CHECKED_IN]: 'Пристигнал',
+      [VisitProgress.IN_SERVICE]: 'В процес',
+      [VisitProgress.COMPLETED]: 'Приключен',
+      [VisitProgress.NO_SHOW]: 'Неявил се',
     };
 
     return labels[progress];

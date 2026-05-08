@@ -23,6 +23,7 @@ import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { CreateBookingRequestDto } from './dto/create-booking-request.dto';
 import { GetSlotsDto } from './dto/get-slots.dto';
 import { UpdateStatusDto } from './dto/update-status.dto';
+import { UpdateVisitProgressDto } from './dto/update-visit-progress.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { CurrentTenant } from '../../common/decorators/tenant.decorator';
@@ -258,13 +259,9 @@ export class AppointmentsController {
   @ApiOperation({ summary: 'Обнови progress-а на посещението за потвърден час' })
   async updateVisitProgress(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: { progress?: 'scheduled' | 'checked_in' | 'in_service' | 'completed' | 'no_show' },
+    @Body() dto: UpdateVisitProgressDto,
     @CurrentTenant() tenant: Tenant,
   ) {
-    if (!dto?.progress) {
-      throw new BadRequestException('Липсва progress стойност.');
-    }
-
     return this.appointmentsService.updateVisitProgress(tenant, id, dto.progress);
   }
 

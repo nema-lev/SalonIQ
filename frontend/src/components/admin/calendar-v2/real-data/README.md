@@ -22,6 +22,7 @@ This folder connects the direct `/admin/calendar-v2` preview route to the existi
   - `GET /services/admin`
 - Uses the existing `apiClient`, so current admin auth and tenant headers stay unchanged.
 - Does not add backend endpoints.
+- The only write path available from this adapter is behind `NEXT_PUBLIC_ENABLE_CALENDAR_V2_VISIT_ACTIONS=true` and calls `PATCH /appointments/:id/visit-progress` with `{ progress: "checked_in" }`.
 - Sample mode is built in the frontend adapter only; it does not read or write sample records through backend APIs.
 
 ## Projection
@@ -49,18 +50,28 @@ This folder connects the direct `/admin/calendar-v2` preview route to the existi
 - No appointment creation.
 - No appointment move persistence.
 - No waitlist placement.
-- No status transitions.
+- No status transitions except the feature-flagged real-data `Пристигнал` visit-progress action.
 - No optimistic persistence.
-- No backend writes from Calendar V2.
+- No backend writes from Calendar V2 unless `NEXT_PUBLIC_ENABLE_CALENDAR_V2_VISIT_ACTIONS=true`.
 
-The native scheduler receives `readOnly` props on the hidden real-data route. Appointment drag handles and demand drag-to-place controls are disabled there.
+The native scheduler receives `readOnly` props on the hidden real-data route. Appointment drag handles and demand drag-to-place controls are disabled there. The `Пристигнал` action is rendered only in Booking Detail for eligible real-data appointments and refetches the shared calendar board after success.
+
+## Visit Action Guardrails
+
+- Flag: `NEXT_PUBLIC_ENABLE_CALENDAR_V2_VISIT_ACTIONS=true`.
+- Only action: `Пристигнал`.
+- Payload: `{ progress: "checked_in" }`.
+- Eligible selected bookings must be real confirmed appointments with scheduled visit progress.
+- Sample mode never renders the action and does not call the API.
+- Backend validation accepts only `scheduled`, `checked_in`, `in_service`, `completed`, and `no_show`.
+- Backend checked-in handling is idempotent and updates only `intake_data.visitProgress`, preserving other intake metadata.
 
 ## What Not To Do Here
 
 - Do not add backend APIs or change tenant resolution.
 - Do not change the current `/admin` calendar route behavior.
 - Do not move renderer-specific behavior into domain projections.
-- Do not persist Calendar V2 commands from this layer.
+- Do not persist Calendar V2 commands from this layer, except the explicitly flagged `Пристигнал` visit-progress action.
 - Do not place untimed waitlist/request demand as scheduled calendar blocks.
 
 ## Known Limitations

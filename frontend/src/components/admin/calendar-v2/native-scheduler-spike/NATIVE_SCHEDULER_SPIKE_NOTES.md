@@ -169,6 +169,16 @@ In the read-only real-data route, appointment move handles are disabled.
 - Visual QA result from `/private/tmp/saloniq-calendar-v2-layout-hardening-qa-results.json`: outer admin/page scroll overflow was `0` at the checked desktop sizes, the scheduler grid retained vertical scroll, the phone fallback remained visible, appointment drag grip count was `0`, waitlist placement button count was `0`, and `writesAfterV2` was empty.
 - Remaining UX limitations: phone still intentionally shows the separate agenda-renderer notice, tablet portrait remains out of scope, and long selected-booking notes can still scroll inside Booking Detail.
 
+## Feature-Flagged Arrived Action
+
+- Date of pass: 2026-05-08.
+- Added the first real Calendar V2 write action behind `NEXT_PUBLIC_ENABLE_CALENDAR_V2_VISIT_ACTIONS=true`.
+- Only `Пристигнал` is wired, and only in real-data Booking Detail for eligible confirmed appointments with `scheduled` visit progress.
+- The action calls the existing `PATCH /appointments/:id/visit-progress` endpoint with `{ progress: "checked_in" }`, then refetches/invalidates the shared calendar board data.
+- Sample mode remains visual-only and read-only; the adapter disables the real-data read queries when `sample=1` is present and never renders the action there.
+- Scheduler drag, appointment move persistence, waitlist/request placement, appointment creation, cancel, confirm, no-show, completed, and in-service actions remain disabled.
+- Backend DTO validation restricts visit progress values, and checked-in handling is idempotent while preserving existing `intake_data` metadata with a targeted JSON update.
+
 ## Short-Card Readability Verdict
 
 Feasible. The 15-minute fixture uses a short-card variant that keeps initials, a useful time cue, and the drag grip visible. Text is intentionally compact instead of disappearing.

@@ -1,18 +1,31 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import axios from 'axios';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { addDays, endOfDay, format, startOfDay } from 'date-fns';
 import { ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { apiClient } from '@/lib/api-client';
 import { useAdminCalendarBoardData } from '../../use-admin-calendar-board-data';
 import { NativeSchedulerV2Spike } from '../native-scheduler-spike/NativeSchedulerV2Spike';
 import type { NativeSchedulerNotice } from '../native-scheduler-spike/NativeSchedulerGrid';
+import type { NativeSchedulerVisitActionFeedback } from '../native-scheduler-spike/NativeSchedulerPreviewPanel';
 import { buildCalendarV2RealDataProjection } from './calendar-v2-real-data-mappers';
-import { CALENDAR_V2_READONLY_NOTICE } from './calendar-v2-readonly-actions';
+import {
+  CALENDAR_V2_READONLY_NOTICE,
+  CALENDAR_V2_VISIT_ACTION_NOTICE,
+} from './calendar-v2-readonly-actions';
 import { buildCalendarV2SampleDayProjection } from './calendar-v2-sample-day';
+
+const CALENDAR_V2_VISIT_ACTIONS_ENABLED =
+  process.env.NEXT_PUBLIC_ENABLE_CALENDAR_V2_VISIT_ACTIONS === 'true';
 
 export function CalendarV2RealDataAdapter() {
   const [currentDate, setCurrentDate] = useState(() => startOfDay(new Date()));
+  const [visitActionFeedback, setVisitActionFeedback] =
+    useState<NativeSchedulerVisitActionFeedback | null>(null);
+  const queryClient = useQueryClient();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -35,6 +48,38 @@ export function CalendarV2RealDataAdapter() {
   } = useAdminCalendarBoardData({
     rangeStart,
     rangeEndExclusive,
+    enabled: !isSampleMode,
+  });
+  const visitProgressMutation = useMutation({
+    mutationFn: (appointmentId: string) =>
+      apiClient.patch<{ id: string; progress: 'checked_in'; label: string }>(
+        `/appointments/${appointmentId}/visit-progress`,
+        { progress: 'checked_in' },
+      ),
+    onMutate: (appointmentId) => {
+      setVisitActionFeedback((current) =>
+        current?.appointmentId === appointmentId ? null : current,
+      );
+    },
+    onSuccess: async (_result, appointmentId) => {
+      setVisitActionFeedback({
+        appointmentId,
+        tone: 'success',
+        message: 'Клиентът е маркиран като пристигнал.',
+      });
+      await refetchCalendarBoard();
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['appointments-calendar-board'] }),
+        queryClient.invalidateQueries({ queryKey: ['appointment-context'] }),
+      ]);
+    },
+    onError: (error, appointmentId) => {
+      setVisitActionFeedback({
+        appointmentId,
+        tone: 'error',
+        message: getApiErrorMessage(error, 'Неуспешно маркиране на пристигането.'),
+      });
+    },
   });
 
   const projection = useMemo(
@@ -52,6 +97,19 @@ export function CalendarV2RealDataAdapter() {
     [currentDate],
   );
   const activeProjection = isSampleMode ? sampleProjection : projection;
+  const visitAction =
+    CALENDAR_V2_VISIT_ACTIONS_ENABLED && !isSampleMode
+      ? {
+          pendingAppointmentId: visitProgressMutation.isPending
+            ? visitProgressMutation.variables ?? null
+            : null,
+          feedback: visitActionFeedback,
+          onMarkArrived: (appointmentId: string) => {
+            if (visitProgressMutation.isPending) return;
+            visitProgressMutation.mutate(appointmentId);
+          },
+        }
+      : undefined;
 
   const headerControls = (
     <div className="inline-flex min-w-0 items-center gap-2">
@@ -102,7 +160,7 @@ export function CalendarV2RealDataAdapter() {
             preview route.
           </p>
           <p className="mt-3 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">
-            {getErrorMessage(error)}
+            {getApiErrorMessage(error, 'The existing calendar read endpoint returned an unknown error.')}
           </p>
           <div className="mt-5 flex flex-wrap items-center gap-3">
             <button
@@ -172,21 +230,36 @@ export function CalendarV2RealDataAdapter() {
       demandItems={activeProjection.demandItems}
       actionItems={activeProjection.actionItems}
       readOnly
-      readOnlyNotice={CALENDAR_V2_READONLY_NOTICE}
+      readOnlyNotice={visitAction ? CALENDAR_V2_VISIT_ACTION_NOTICE : CALENDAR_V2_READONLY_NOTICE}
       schedulerNotice={schedulerNotice}
       toolbarEyebrow="Calendar V2 Preview"
       toolbarNote={toolbarNote}
       toolbarControls={headerControls}
+      visitAction={visitAction}
     />
   );
 }
 
-function getErrorMessage(error: unknown) {
+function getApiErrorMessage(error: unknown, fallback: string) {
+  if (axios.isAxiosError(error)) {
+    const message = error.response?.data?.message;
+    const normalizedMessage =
+      typeof message === 'string'
+        ? message
+        : Array.isArray(message)
+          ? message.find((entry): entry is string => typeof entry === 'string')
+          : null;
+
+    if (normalizedMessage) {
+      return normalizedMessage;
+    }
+  }
+
   if (error instanceof Error && error.message) {
     return error.message;
   }
 
-  return 'The existing calendar read endpoint returned an unknown error.';
+  return fallback;
 }
 
 function getSchedulerNotice({

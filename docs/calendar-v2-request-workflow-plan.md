@@ -1,6 +1,6 @@
 # Calendar V2 Request Workflow Implementation Plan
 
-This document is a living implementation blueprint. It records the current repo behavior and the staged Calendar V2 request workflow. As of the backend foundation step, the server has a dedicated waitlist placement endpoint, but Calendar V2 frontend save remains disabled and no Calendar V2 write is wired.
+This document is a living implementation blueprint. It records the current repo behavior and the staged Calendar V2 request workflow. As of the frontend placement-save step, the server has a dedicated waitlist placement endpoint and Calendar V2 can call it only when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"` in real-data mode. The current `/admin` calendar remains the default.
 
 ## 1. Executive Decision
 
@@ -28,7 +28,9 @@ The correct first write surface is request-to-slot placement, not visit tracking
 
 May 8 local-only UX note: the current Calendar V2 preview now supports the intended request-to-slot placement review without persistence. The UI keeps the active Action Inbox request selected, shows a local placement block and a human Bulgarian preview, hides internal command ids/timestamps from visible UI, and switches the lower right rail to placement context instead of unrelated booking details. Saving remains disabled in the frontend.
 
-May 8 backend foundation note: `POST /api/v1/appointments/waitlist/:waitlistId/place` now exists for authenticated admin use. It validates and places an open waitlist/request item in one tenant transaction, but Calendar V2 does not call it yet and client notifications are intentionally not sent by this endpoint.
+May 8 backend foundation note: `POST /api/v1/appointments/waitlist/:waitlistId/place` now exists for authenticated admin use. It validates and places an open waitlist/request item in one tenant transaction, and client notifications are intentionally not sent by this endpoint.
+
+May 9 frontend flag note: Calendar V2 placement preview remains local-only by default. The preview save button is enabled only when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"` and the page is using real data. Sample mode remains non-writing and shows `Sample режимът не записва часове.` The save call sends `notifyClient: false`, refreshes backend-backed calendar and waitlist data after success, and does not call appointment create/status/cancel/reschedule or notification endpoints.
 
 ## 2. Current Code Inventory
 
@@ -141,7 +143,7 @@ Current controller endpoints in `backend/src/modules/appointments/appointments.c
 - `GET /appointments/waitlist` at line 311 calls `listWaitlist`.
 - `POST /appointments/waitlist` at line 323 calls `createWaitlistEntry`.
 - `PATCH /appointments/waitlist/:id/status` at line 349 calls `updateWaitlistStatus`.
-- `POST /appointments/waitlist/:waitlistId/place` calls `placeWaitlistEntry` for atomic backend waitlist placement. Calendar V2 does not call this endpoint yet.
+- `POST /appointments/waitlist/:waitlistId/place` calls `placeWaitlistEntry` for atomic backend waitlist placement. Calendar V2 calls this endpoint only from the placement preview save action when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"` and sample mode is off.
 - `POST /appointments/waitlist/:id/notify` at line 365 calls `notifyWaitlistEntry`.
 
 Current DTO facts:
@@ -596,17 +598,24 @@ Rollback strategy:
 
 ### Phase D: frontend placement endpoint integration behind feature flag
 
-Files to change later:
+Files changed in this phase:
 
-- `frontend/src/components/admin/calendar-v2/real-data/` for a small API integration layer.
+- `frontend/src/components/admin/calendar-v2/real-data/CalendarV2RealDataAdapter.tsx`
 - `frontend/src/components/admin/calendar-v2/native-scheduler-spike/NativeSchedulerPlacementPreview.tsx`
-- `frontend/src/components/admin/use-admin-calendar-board-data.ts` only if a new refetch helper is needed.
+- `frontend/src/components/admin/calendar-v2/native-scheduler-spike/NativeSchedulerV2Spike.tsx`
+- `frontend/src/components/admin/calendar-v2/native-scheduler-spike/native-scheduler-drag.ts`
+- `frontend/src/components/admin/calendar-v2/native-scheduler-spike/native-scheduler-regression-checks.ts`
 
-Behavior to add later:
+Behavior added:
 
-- Frontend confirm sends one command to the endpoint only when feature flag is enabled and not sample mode.
+- Frontend save sends one placement request only when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"` and not sample mode.
+- Flag off keeps placement preview local-only and the save button disabled.
+- Sample mode keeps save disabled and non-writing.
+- The save payload is `{ staffId, startAt, durationMinutes, idempotencyKey, notifyClient: false }`.
+- The endpoint is `POST /appointments/waitlist/:waitlistId/place` through the existing API client.
 - On success, invalidate/refetch `appointments-calendar-board`, `appointments-waitlist`, and `appointment-context`.
 - Show server conflict errors without optimistic committed UI.
+- Do not call notification endpoints and do not call appointment create/status/cancel/reschedule endpoints.
 
 What remains disabled:
 
@@ -915,9 +924,12 @@ Implementation note, 2026-05-08:
 - Phase B has started with a local-only Calendar V2 Action Inbox placement preview.
 - Real-data mode and sample mode can enter placement mode from waitlist/demand items and preview a clicked staff/time slot.
 - The preview command is typed as `placeRequest`, carries `localOnly: true`, and is not sent to the backend.
-- Confirm/save remains disabled, no data is persisted, and refresh/reload returns to fetched/sample data.
+- Confirm/save remains disabled unless `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"` and real-data mode is active.
+- With the flag on in real-data mode, explicit save calls `POST /appointments/waitlist/:waitlistId/place` with `notifyClient: false`, then backend refresh wins.
+- With the flag off, placement remains local-only and no write API is called.
+- In sample mode, save remains disabled and no write API is called.
 - The current `/admin` calendar remains the default production calendar.
-- A dedicated backend placement endpoint now exists, but Calendar V2 still cannot save placements until frontend integration is intentionally added behind a feature flag.
+- A dedicated backend placement endpoint now exists and is wired only behind the frontend feature flag.
 
 Risks:
 

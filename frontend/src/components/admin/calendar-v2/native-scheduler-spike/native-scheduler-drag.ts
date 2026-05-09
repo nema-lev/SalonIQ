@@ -15,6 +15,19 @@ export type NativeSchedulerCommandTarget = CalendarV2TimeTarget & {
   staffName?: string | null;
 };
 
+export type WaitlistPlacementSavePayload = {
+  staffId: string;
+  startAt: string;
+  durationMinutes: number;
+  idempotencyKey: string;
+  notifyClient: false;
+};
+
+export type WaitlistPlacementSaveRequest = {
+  path: string;
+  payload: WaitlistPlacementSavePayload;
+};
+
 export type NativeSchedulerDragOverlay = {
   kind: 'appointment' | 'demand_item';
   title: string;
@@ -92,6 +105,31 @@ export function createPlaceRequestCommandPreview({
     timezone,
     sourceSurface,
   });
+}
+
+export function buildWaitlistPlacementSaveRequest({
+  waitlistId,
+  command,
+  durationMinutes,
+}: {
+  waitlistId: string;
+  command: PlaceRequestCommand;
+  durationMinutes: number;
+}): WaitlistPlacementSaveRequest {
+  return {
+    path: `/appointments/waitlist/${waitlistId}/place`,
+    payload: {
+      staffId: command.target.staffId,
+      startAt: command.target.startAt,
+      durationMinutes,
+      idempotencyKey: buildPlacementSaveIdempotencyKey({
+        waitlistId,
+        staffId: command.target.staffId,
+        startAt: command.target.startAt,
+      }),
+      notifyClient: false,
+    },
+  };
 }
 
 export function getPlacementDurationMinutes(demandItem: CalendarV2DemandItem) {
@@ -186,4 +224,16 @@ export function commandPreviewLabel(command: CalendarV2Command) {
 
 function buildLocalCommandKey(type: string, entityId: string) {
   return `calendar-v2-spike:${type}:${entityId}:${Date.now()}`;
+}
+
+function buildPlacementSaveIdempotencyKey({
+  waitlistId,
+  staffId,
+  startAt,
+}: {
+  waitlistId: string;
+  staffId: string;
+  startAt: string;
+}) {
+  return `calendar-v2-placement:${waitlistId}:${staffId}:${startAt}`;
 }

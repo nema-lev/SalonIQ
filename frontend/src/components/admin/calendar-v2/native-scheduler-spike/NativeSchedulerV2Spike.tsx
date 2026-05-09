@@ -48,6 +48,7 @@ import {
   type NativeSchedulerResource,
 } from './native-scheduler-geometry';
 import {
+  buildWaitlistPlacementSaveRequest,
   createPlaceRequestCommandPreview,
   detectLocalPlacementConflict,
   createMoveAppointmentCommand,
@@ -99,7 +100,24 @@ type NativeSchedulerV2SpikeProps = {
   toolbarNote?: ReactNode;
   toolbarControls?: ReactNode;
   enableLocalPlacementPreview?: boolean;
+  placementSave?: NativeSchedulerPlacementSaveOptions;
 };
+
+export type NativeSchedulerPlacementSaveResult = {
+  appointmentId?: string | null;
+};
+
+export type NativeSchedulerPlacementSaveOptions = {
+  enabled: boolean;
+  disabledReason?: string;
+  onSave?: (request: ReturnType<typeof buildWaitlistPlacementSaveRequest>) => Promise<NativeSchedulerPlacementSaveResult | void>;
+};
+
+type PlacementSaveStatus =
+  | { state: 'idle'; message: null }
+  | { state: 'saving'; message: null }
+  | { state: 'success'; message: string }
+  | { state: 'error'; message: string };
 
 export function NativeSchedulerV2Spike({
   date,
@@ -115,6 +133,7 @@ export function NativeSchedulerV2Spike({
   toolbarNote,
   toolbarControls,
   enableLocalPlacementPreview = true,
+  placementSave,
 }: NativeSchedulerV2SpikeProps = {}) {
   const sourceBlocks = calendarBlocks ?? nativeSchedulerCalendarBlocks;
   const schedulerDate = date ?? nativeSchedulerDate;
@@ -132,6 +151,10 @@ export function NativeSchedulerV2Spike({
   const [placementDemandItem, setPlacementDemandItem] = useState<CalendarV2DemandItem | null>(null);
   const [placementTarget, setPlacementTarget] = useState<NativeSchedulerGridDropPreview | null>(null);
   const [placementMessage, setPlacementMessage] = useState<string | null>(null);
+  const [placementSaveStatus, setPlacementSaveStatus] = useState<PlacementSaveStatus>({
+    state: 'idle',
+    message: null,
+  });
   const [lastCommand, setLastCommand] = useState<CalendarV2Command | null>(null);
 
   const resources = useMemo<NativeSchedulerResource[]>(
@@ -156,6 +179,7 @@ export function NativeSchedulerV2Spike({
     setPlacementTarget(null);
     setPlacementPreview(null);
     setPlacementMessage(null);
+    setPlacementSaveStatus({ state: 'idle', message: null });
     setDropPreview(null);
     setLastCommand(null);
   }, []);
@@ -207,6 +231,7 @@ export function NativeSchedulerV2Spike({
     setPlacementTarget(null);
     setPlacementPreview(null);
     setPlacementMessage(null);
+    setPlacementSaveStatus({ state: 'idle', message: null });
     setLastCommand(null);
   }, [sourceBlocks]);
 
@@ -455,6 +480,7 @@ export function NativeSchedulerV2Spike({
       setDropPreview(null);
       setPlacementPreview(null);
       setPlacementTarget(null);
+      setPlacementSaveStatus({ state: 'idle', message: null });
       setLastCommand(null);
       setSelectedBlockId(null);
       setPlacementDemandItem(demandItem);
@@ -509,6 +535,7 @@ export function NativeSchedulerV2Spike({
     setPlacementTarget(null);
     setPlacementPreview(null);
     setPlacementMessage(null);
+    setPlacementSaveStatus({ state: 'idle', message: null });
     setLastCommand(null);
   };
 
@@ -557,6 +584,7 @@ export function NativeSchedulerV2Spike({
         setPlacementTarget(null);
         setDropPreview(null);
         setPlacementPreview(null);
+        setPlacementSaveStatus({ state: 'idle', message: null });
         setPlacementMessage('Изберете слот в колона на специалист.');
         return;
       }
@@ -589,6 +617,7 @@ export function NativeSchedulerV2Spike({
       setPlacementTarget(target);
       setDropPreview(target);
       setPlacementPreview(preview);
+      setPlacementSaveStatus({ state: 'idle', message: null });
       setLastCommand(command);
       setPlacementMessage(
         target.hasConflict
@@ -599,6 +628,38 @@ export function NativeSchedulerV2Spike({
     },
     [placementDemandItem, resolveDropTarget],
   );
+
+  const handleSavePlacementPreview = useCallback(async () => {
+    if (!placementPreview || !placementSave?.enabled || !placementSave.onSave) return;
+
+    const request = buildWaitlistPlacementSaveRequest({
+      waitlistId: placementPreview.demandItem.id,
+      command: placementPreview.command,
+      durationMinutes: placementPreview.durationMinutes,
+    });
+
+    setPlacementSaveStatus({ state: 'saving', message: null });
+
+    try {
+      const result = await placementSave.onSave(request);
+      setPlacementSaveStatus({ state: 'success', message: 'Часът е записан.' });
+      setPlacementMessage('Часът е записан.');
+
+      if (result?.appointmentId) {
+        setSelectedBlockId(result.appointmentId);
+      }
+
+      window.setTimeout(() => {
+        clearPlacementMode();
+      }, 900);
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : 'Не успяхме да запишем часа. Опитайте отново.';
+      setPlacementSaveStatus({ state: 'error', message });
+      setPlacementMessage(message);
+    }
+  }, [clearPlacementMode, placementPreview, placementSave]);
 
   return (
     <>
@@ -681,6 +742,19 @@ export function NativeSchedulerV2Spike({
                 <NativeSchedulerPlacementPreview
                   preview={placementPreview}
                   onClose={clearPlacementMode}
+                  onSave={handleSavePlacementPreview}
+                  canSave={Boolean(placementSave?.enabled)}
+                  isSaving={placementSaveStatus.state === 'saving'}
+                  saveDisabledReason={
+                    placementSave?.disabledReason ?? 'Записването ще добавим в следващата стъпка'
+                  }
+                  saveFeedback={
+                    placementSaveStatus.state === 'success'
+                      ? { tone: 'success', message: placementSaveStatus.message }
+                      : placementSaveStatus.state === 'error'
+                        ? { tone: 'error', message: placementSaveStatus.message }
+                        : null
+                  }
                 />
               )}
             </div>

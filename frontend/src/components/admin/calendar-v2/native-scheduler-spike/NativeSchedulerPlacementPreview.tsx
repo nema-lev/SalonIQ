@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { CalendarClock, Clock3, Scissors, UserRound } from 'lucide-react';
 import type { CalendarV2DemandItem, PlaceRequestCommand } from '..';
 import styles from './native-scheduler.module.css';
@@ -17,17 +18,31 @@ export type NativeSchedulerPlacementPreviewState = {
 type NativeSchedulerPlacementPreviewProps = {
   preview: NativeSchedulerPlacementPreviewState;
   onClose: () => void;
+  onSave?: () => void;
+  canSave?: boolean;
+  isSaving?: boolean;
+  saveDisabledReason?: string;
+  saveFeedback?: {
+    tone: 'success' | 'error' | 'info';
+    message: string;
+  } | null;
 };
 
 export function NativeSchedulerPlacementPreview({
   preview,
   onClose,
+  onSave,
+  canSave = false,
+  isSaving = false,
+  saveDisabledReason = 'Записването ще добавим в следващата стъпка',
+  saveFeedback = null,
 }: NativeSchedulerPlacementPreviewProps) {
   const demand = preview.demandItem;
   const dateLabel = formatPlacementDate(preview.command.target.startAt);
   const durationLabel = `${preview.durationMinutes} мин${
     preview.usesFallbackDuration ? ' · резервна продължителност' : ''
   }`;
+  const saveEnabled = canSave && Boolean(onSave) && !isSaving && saveFeedback?.tone !== 'success';
 
   return (
     <aside className={styles.placementPanel}>
@@ -78,15 +93,32 @@ export function NativeSchedulerPlacementPreview({
           </p>
         )}
         <p className={styles.previewReadOnlyNote}>
-          Това е само преглед. Часът няма да бъде записан.
+          {canSave
+            ? 'Часът ще се запише само след натискане на „Запази час“.'
+            : 'Това е само преглед. Часът няма да бъде записан.'}
         </p>
+        {saveFeedback && (
+          <p className={getSaveFeedbackClassName(saveFeedback.tone)}>
+            {saveFeedback.message}
+          </p>
+        )}
       </div>
       <div className={styles.placementActions}>
         <button type="button" className={styles.ghostButton} onClick={onClose}>
           Отказ
         </button>
-        <button type="button" className={styles.disabledButton} disabled>
-          Записването ще добавим в следващата стъпка
+        <button
+          type="button"
+          className={saveEnabled ? styles.primaryButton : styles.disabledButton}
+          disabled={!saveEnabled}
+          onClick={saveEnabled ? onSave : undefined}
+        >
+          {getSaveButtonCopy({
+            isSaving,
+            success: saveFeedback?.tone === 'success',
+            canSave,
+            disabledReason: saveDisabledReason,
+          })}
         </button>
       </div>
     </aside>
@@ -98,7 +130,7 @@ function PreviewDetail({
   label,
   value,
 }: {
-  icon: React.ReactNode;
+  icon: ReactNode;
   label: string;
   value: string;
 }) {
@@ -111,6 +143,29 @@ function PreviewDetail({
       </span>
     </div>
   );
+}
+
+function getSaveFeedbackClassName(tone: 'success' | 'error' | 'info') {
+  if (tone === 'success') return styles.previewSuccessNote;
+  if (tone === 'error') return styles.previewConflictNote;
+  return styles.previewReadOnlyNote;
+}
+
+function getSaveButtonCopy({
+  isSaving,
+  success,
+  canSave,
+  disabledReason,
+}: {
+  isSaving: boolean;
+  success: boolean;
+  canSave: boolean;
+  disabledReason: string;
+}) {
+  if (isSaving) return 'Записване…';
+  if (success) return 'Часът е записан.';
+  if (canSave) return 'Запази час';
+  return disabledReason;
 }
 
 function getInitials(value: string) {

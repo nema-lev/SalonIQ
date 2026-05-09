@@ -1,19 +1,37 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import axios from 'axios';
+import { useQueryClient } from '@tanstack/react-query';
 import { addDays, endOfDay, format, startOfDay } from 'date-fns';
 import { ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { toast } from 'sonner';
+import { apiClient } from '@/lib/api-client';
 import { useAdminCalendarBoardData } from '../../use-admin-calendar-board-data';
-import { NativeSchedulerV2Spike } from '../native-scheduler-spike/NativeSchedulerV2Spike';
+import {
+  NativeSchedulerV2Spike,
+  type NativeSchedulerPlacementSaveResult,
+} from '../native-scheduler-spike/NativeSchedulerV2Spike';
 import type { NativeSchedulerNotice } from '../native-scheduler-spike/NativeSchedulerGrid';
+import type { WaitlistPlacementSaveRequest } from '../native-scheduler-spike/native-scheduler-drag';
 import { buildCalendarV2RealDataProjection } from './calendar-v2-real-data-mappers';
 import { CALENDAR_V2_READONLY_NOTICE } from './calendar-v2-readonly-actions';
 import { buildCalendarV2SampleDayProjection } from './calendar-v2-sample-day';
 
+const ENABLE_CALENDAR_V2_PLACEMENT_SAVE =
+  process.env.NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === 'true';
+
+type PlaceWaitlistEntryResponse = {
+  id?: string;
+  appointment?: {
+    id?: string;
+  };
+};
+
 export function CalendarV2RealDataAdapter() {
   const [currentDate, setCurrentDate] = useState(() => startOfDay(new Date()));
+  const queryClient = useQueryClient();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -38,6 +56,11 @@ export function CalendarV2RealDataAdapter() {
     rangeEndExclusive,
     enabled: !isSampleMode,
   });
+  const canSavePlacement = ENABLE_CALENDAR_V2_PLACEMENT_SAVE && !isSampleMode;
+  const placementSaveDisabledReason =
+    ENABLE_CALENDAR_V2_PLACEMENT_SAVE && isSampleMode
+      ? 'Sample режимът не записва часове.'
+      : 'Записването ще добавим в следващата стъпка';
 
   const projection = useMemo(
     () =>
@@ -54,6 +77,43 @@ export function CalendarV2RealDataAdapter() {
     [currentDate],
   );
   const activeProjection = isSampleMode ? sampleProjection : projection;
+
+  const handleSavePlacement = useCallback(
+    async (request: WaitlistPlacementSaveRequest): Promise<NativeSchedulerPlacementSaveResult> => {
+      if (!canSavePlacement) {
+        throw new Error(placementSaveDisabledReason);
+      }
+
+      try {
+        const result = await apiClient.post<PlaceWaitlistEntryResponse>(request.path, request.payload);
+
+        await Promise.all([
+          refetchCalendarBoard(),
+          refetchWaitlist(),
+          queryClient.invalidateQueries({ queryKey: ['appointments-calendar-board'] }),
+          queryClient.invalidateQueries({ queryKey: ['appointments-waitlist'] }),
+          queryClient.invalidateQueries({ queryKey: ['appointment-context'] }),
+        ]);
+
+        toast.success('Часът е записан.');
+
+        return {
+          appointmentId: result.appointment?.id ?? result.id ?? null,
+        };
+      } catch (error) {
+        const message = getPlacementSaveErrorMessage(error);
+        toast.error(message);
+        throw new Error(message);
+      }
+    },
+    [
+      canSavePlacement,
+      placementSaveDisabledReason,
+      queryClient,
+      refetchCalendarBoard,
+      refetchWaitlist,
+    ],
+  );
 
   const headerControls = (
     <div className="inline-flex min-w-0 items-center gap-2">
@@ -180,6 +240,11 @@ export function CalendarV2RealDataAdapter() {
       toolbarEyebrow="Calendar V2 Preview"
       toolbarNote={toolbarNote}
       toolbarControls={headerControls}
+      placementSave={{
+        enabled: canSavePlacement,
+        disabledReason: placementSaveDisabledReason,
+        onSave: handleSavePlacement,
+      }}
     />
   );
 }
@@ -204,6 +269,52 @@ function getApiErrorMessage(error: unknown, fallback: string) {
   }
 
   return fallback;
+}
+
+function getPlacementSaveErrorMessage(error: unknown) {
+  const fallback = 'Не успяхме да запишем часа. Опитайте отново.';
+
+  if (!axios.isAxiosError(error)) {
+    return error instanceof Error && error.message ? error.message : fallback;
+  }
+
+  const status = error.response?.status;
+  const message = extractApiMessage(error);
+
+  if (isRequestAlreadyHandledMessage(message)) {
+    return 'Заявката вече е обработена.';
+  }
+
+  if (status === 409 && isConflictMessage(message)) {
+    return 'Този час вече е зает.';
+  }
+
+  if (status === 400 || status === 404 || status === 409) {
+    return 'Този час не е наличен.';
+  }
+
+  return fallback;
+}
+
+function extractApiMessage(error: unknown) {
+  if (!axios.isAxiosError(error)) return null;
+
+  const message = error.response?.data?.message;
+  if (typeof message === 'string') return message;
+  if (Array.isArray(message)) {
+    return message.find((entry): entry is string => typeof entry === 'string') ?? null;
+  }
+
+  return null;
+}
+
+function isRequestAlreadyHandledMessage(message: string | null) {
+  return Boolean(message?.toLocaleLowerCase('bg-BG').includes('заявката вече е обработена'));
+}
+
+function isConflictMessage(message: string | null) {
+  const normalized = message?.toLocaleLowerCase('bg-BG') ?? '';
+  return normalized.includes('зает') || normalized.includes('няма свободни места');
 }
 
 function getSchedulerNotice({

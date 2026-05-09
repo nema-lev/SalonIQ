@@ -23,6 +23,7 @@ import {
 } from './native-scheduler-geometry';
 import {
   DEFAULT_PLACEMENT_DURATION_MINUTES,
+  buildWaitlistPlacementSaveRequest,
   commandPreviewLabel,
   createMoveAppointmentCommand,
   createPlaceRequestCommand,
@@ -227,6 +228,26 @@ const checks: RegressionCheck[] = [
       assertNoInternalLabel(commandPreviewLabel(placeCommand), 'place label should hide command internals');
       assertNoWriteTransportMarkers(placeCommand, 'place preview should not carry write transport details');
 
+      const saveRequest = buildWaitlistPlacementSaveRequest({
+        waitlistId: demandItem.id,
+        command: placeCommand,
+        durationMinutes: 60,
+      });
+      assertEqual(
+        saveRequest.path,
+        '/appointments/waitlist/demand-1/place',
+        'explicit placement save should target the dedicated waitlist placement endpoint',
+      );
+      assertEqual(saveRequest.payload.staffId, 'staff-2', 'save payload should carry selected staff');
+      assertEqual(saveRequest.payload.startAt, target.startAt, 'save payload should carry selected start');
+      assertEqual(saveRequest.payload.durationMinutes, 60, 'save payload should carry placement duration');
+      assertEqual(saveRequest.payload.notifyClient, false, 'save payload should explicitly suppress notifications');
+      assertEqual(
+        saveRequest.payload.idempotencyKey,
+        `calendar-v2-placement:demand-1:staff-2:${target.startAt}`,
+        'save payload should use a stable slot-based idempotency key',
+      );
+
       const appointment = appointmentFixture();
       const moveCommand = createMoveAppointmentCommand({
         appointment,
@@ -412,6 +433,56 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
         );
         assertNoInternalLabel(placementPreviewSource, 'placement preview source should not expose debug labels');
         assertNoInternalLabel(previewPanelSource, 'preview panel source should not expose debug labels');
+      },
+    },
+    {
+      name: 'placement save remains feature-flagged and real-data only',
+      run: () => {
+        const adapterSource = readSource(sourceDir, '../real-data/CalendarV2RealDataAdapter.tsx');
+
+        assert(
+          adapterSource.includes('NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE') &&
+            adapterSource.includes('ENABLE_CALENDAR_V2_PLACEMENT_SAVE && !isSampleMode'),
+          'placement save should be enabled only by the Calendar V2 placement save flag in real-data mode',
+        );
+        assert(
+          adapterSource.includes('enabled: canSavePlacement'),
+          'save control should stay disabled when the flag is off',
+        );
+        assert(
+          adapterSource.includes('Sample режимът не записва часове.'),
+          'sample mode should keep the placement save disabled with explicit copy',
+        );
+      },
+    },
+    {
+      name: 'placement save uses one safe waitlist write and no notification writes',
+      run: () => {
+        const adapterSource = readSource(sourceDir, '../real-data/CalendarV2RealDataAdapter.tsx');
+        const dragSource = readSource(sourceDir, 'native-scheduler-drag.ts');
+
+        assert(
+          dragSource.includes('path: `/appointments/waitlist/${waitlistId}/place`'),
+          'save request helper should use the backend waitlist placement endpoint',
+        );
+        assert(
+          dragSource.includes('notifyClient: false'),
+          'save request helper should explicitly keep notifications off',
+        );
+        assert(
+          !adapterSource.includes('/appointments/admin') &&
+            !adapterSource.includes('/appointments/:id/status') &&
+            !adapterSource.includes('/appointments/:id/reschedule') &&
+            !adapterSource.includes('/notifications') &&
+            !adapterSource.includes('/notify'),
+          'Calendar V2 placement save should not call appointment create/status/reschedule or notification endpoints',
+        );
+        assert(
+          !adapterSource.includes('apiClient.patch') &&
+            !adapterSource.includes('apiClient.delete') &&
+            adapterSource.includes('apiClient.post<PlaceWaitlistEntryResponse>(request.path, request.payload)'),
+          'Calendar V2 placement save should have one explicit POST write path',
+        );
       },
     },
     {

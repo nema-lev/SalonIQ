@@ -5,7 +5,7 @@
 - Route: `/admin/calendar-v2`
 - Gate: enabled by default unless `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW === "true"`.
 - Visibility: direct URL only and unlinked from admin navigation.
-- Default route data: read-only real data through the current admin calendar board, waitlist, and services read endpoints.
+- Default route data: real data through the current admin calendar board, waitlist, and services read endpoints.
 - Fixture data is preserved for isolated native scheduler component work only. The deployed `/admin/calendar-v2` real-data preview no longer links to fixture data after a read error.
 
 ## Package and Library Verdict
@@ -18,10 +18,11 @@
 ## What Works
 
 - Hidden route renders the native scheduler from real appointments, staff, services, waitlist entries, and staff exceptions when the feature flag is enabled and current admin auth/tenant context can read the existing calendar data.
-- Real-data route is read-only: appointment drag handles and waitlist drag-to-place controls are disabled.
-- Real-data and sample routes now allow a local-only click-to-place preview for Action Inbox waitlist/demand items. The owner selects `Постави в графика`, clicks a staff/time slot, and sees a lightweight placement preview without saving.
+- Real-data route keeps appointment drag handles and waitlist drag-to-place controls disabled.
+- Real-data and sample routes now allow a click-to-place preview for Action Inbox waitlist/demand items. The owner selects `Постави в графика`, clicks a staff/time slot, and sees a lightweight placement preview.
+- Real-data route can save only that waitlist/request placement when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"`. Sample mode and flag-off real mode remain non-writing.
 - The local preview emits a typed `placeRequest` command-shaped object with the request id, target staff/start/end, source surface, idempotency key, appointment draft details, and `localOnly: true`.
-- The placement preview shows client, service, duration, staff, date/time, local conflict state when detected, and Bulgarian no-save copy. It does not render command ids, idempotency keys, ISO timestamps, or internal command names. The save/confirm action remains disabled.
+- The placement preview shows client, service, duration, staff, date/time, local conflict state when detected, and Bulgarian save/no-save copy that reflects the active mode. It does not render command ids, idempotency keys, ISO timestamps, or internal command names.
 - During placement mode, the lower right rail shows the active request context before slot selection and selected slot context after selection instead of unrelated Booking Detail content.
 - Desktop/tablet-landscape resource day grid with staff columns, 15-minute slots, 08:00-20:00 hours, sticky toolbar, sticky staff header, sticky time gutter, mocked current-time line, fixture appointments, overlap lanes, and a blocked time region.
 - Action Inbox mock shows demand/request items, pending approval, cancellation recovery, and collapsed updates.
@@ -34,11 +35,11 @@
 
 ## What Does Not Work
 
-- No backend writes from Calendar V2.
+- No backend writes from Calendar V2 unless the placement-save flag is enabled and a real-data waitlist/request placement is explicitly saved.
 - No appointment creation from Calendar V2.
-- No request placement persistence from Calendar V2.
+- No request placement persistence from Calendar V2 unless `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"` in real-data mode.
 - No appointment, waitlist placement, waitlist status, appointment status, notification, or reschedule write API is called by the placement preview.
-- Placement confirm/save remains disabled.
+- Placement confirm/save remains disabled in sample mode and flag-off real mode.
 - No server validation.
 - No persistence after reset/reload.
 - No resize interaction.
@@ -56,13 +57,13 @@ The implementation is clean enough for a SalonIQ-specific scheduler because poin
 
 Feasible. Dragging demand from Action Inbox to a staff/time slot creates a typed local `placeRequest` command with target staff, start, end, and draft appointment details. The confirm action is intentionally disabled and no API is called.
 
-In the read-only real-data route, drag-to-place remains disabled, but click-to-place local preview is enabled for waitlist/demand items. This keeps the route non-writing while making the real planning workflow testable.
+In the real-data route, drag-to-place remains disabled, but click-to-place preview is enabled for waitlist/demand items. With the placement-save flag off this remains non-writing; with the flag on, only explicit request placement save is enabled.
 
 ## Appointment Move Verdict
 
 Feasible for the narrow SalonIQ day scheduler. Existing appointment cards emit a typed `moveAppointment` command and move locally. The code comment marks the production requirement: server validation plus rollback/reconciliation on failure.
 
-In the read-only real-data route, appointment move handles are disabled.
+In the real-data route, appointment move handles are disabled.
 
 ## Read-only real-data adapter pass
 

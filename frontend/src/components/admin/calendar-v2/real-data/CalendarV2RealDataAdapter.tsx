@@ -16,11 +16,12 @@ import {
 import type { NativeSchedulerNotice } from '../native-scheduler-spike/NativeSchedulerGrid';
 import type { WaitlistPlacementSaveRequest } from '../native-scheduler-spike/native-scheduler-drag';
 import { buildCalendarV2RealDataProjection } from './calendar-v2-real-data-mappers';
-import { CALENDAR_V2_READONLY_NOTICE } from './calendar-v2-readonly-actions';
 import { buildCalendarV2SampleDayProjection } from './calendar-v2-sample-day';
 
 const ENABLE_CALENDAR_V2_PLACEMENT_SAVE =
   process.env.NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === 'true';
+const CALENDAR_V2_READONLY_NOTICE = 'Calendar V2 Preview · Read-only';
+const CALENDAR_V2_PLACEMENT_SAVE_NOTICE = 'Calendar V2 Preview · Request placement enabled';
 
 type PlaceWaitlistEntryResponse = {
   id?: string;
@@ -61,6 +62,14 @@ export function CalendarV2RealDataAdapter() {
     ENABLE_CALENDAR_V2_PLACEMENT_SAVE && isSampleMode
       ? 'Sample режимът не записва часове.'
       : 'Записването ще добавим в следващата стъпка';
+  const modeNotice = canSavePlacement
+    ? CALENDAR_V2_PLACEMENT_SAVE_NOTICE
+    : CALENDAR_V2_READONLY_NOTICE;
+  const actionInboxSubtitle = canSavePlacement
+    ? 'Поставяне на заявки в графика'
+    : isSampleMode
+      ? 'Само преглед'
+      : 'Само локален преглед';
 
   const projection = useMemo(
     () =>
@@ -157,7 +166,7 @@ export function CalendarV2RealDataAdapter() {
     return (
       <section className="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-700 shadow-sm">
         <div className="max-w-3xl">
-          <p className="text-xs font-black uppercase text-slate-500">Calendar V2 Preview · Read-only</p>
+          <p className="text-xs font-black uppercase text-slate-500">{modeNotice}</p>
           <h2 className="mt-2 text-xl font-black text-slate-950">Calendar data is unavailable.</h2>
           <p className="mt-2 max-w-2xl font-semibold leading-6 text-slate-600">
             The current admin calendar read did not complete. Fixture data is not shown on this production
@@ -235,11 +244,12 @@ export function CalendarV2RealDataAdapter() {
       actionItems={activeProjection.actionItems}
       readOnly
       enableLocalPlacementPreview
-      readOnlyNotice={CALENDAR_V2_READONLY_NOTICE}
+      readOnlyNotice={modeNotice}
       schedulerNotice={schedulerNotice}
       toolbarEyebrow="Calendar V2 Preview"
       toolbarNote={toolbarNote}
       toolbarControls={headerControls}
+      actionInboxSubtitle={actionInboxSubtitle}
       placementSave={{
         enabled: canSavePlacement,
         disabledReason: placementSaveDisabledReason,

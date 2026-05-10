@@ -456,6 +456,41 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
       },
     },
     {
+      name: 'placement save labels describe the active mode honestly',
+      run: () => {
+        const adapterSource = readSource(sourceDir, '../real-data/CalendarV2RealDataAdapter.tsx');
+        const schedulerSource = readSource(sourceDir, 'NativeSchedulerV2Spike.tsx');
+        const inboxSource = readSource(sourceDir, 'NativeSchedulerActionInboxMock.tsx');
+        const placementPreviewSource = readSource(sourceDir, 'NativeSchedulerPlacementPreview.tsx');
+
+        assert(
+          adapterSource.includes('Calendar V2 Preview · Request placement enabled') &&
+            adapterSource.includes('const modeNotice = canSavePlacement'),
+          'real-data placement-save mode should use an enabled placement label instead of read-only copy',
+        );
+        assert(
+          adapterSource.includes('Поставяне на заявки в графика') &&
+            adapterSource.includes("isSampleMode\n      ? 'Само преглед'\n      : 'Само локален преглед'"),
+          'Action Inbox subtitle should distinguish sample, flag-off real, and flag-on real modes',
+        );
+        assert(
+          schedulerSource.includes('actionInboxSubtitle?: string') &&
+            schedulerSource.includes('subtitle={actionInboxSubtitle}'),
+          'scheduler should pass the explicit Action Inbox subtitle through without changing behavior',
+        );
+        assert(
+          inboxSource.includes('subtitle ?? (readOnly ?') &&
+            inboxSource.includes('Само локален преглед'),
+          'Action Inbox should preserve the previous local-preview fallback when no explicit subtitle is passed',
+        );
+        assert(
+          placementPreviewSource.includes('Часът ще се запише само след натискане на „Запази час“.') &&
+            placementPreviewSource.includes('Това е само преглед. Часът няма да бъде записан.'),
+          'placement preview should use save-capable copy only when save is enabled',
+        );
+      },
+    },
+    {
       name: 'placement save uses one safe waitlist write and no notification writes',
       run: () => {
         const adapterSource = readSource(sourceDir, '../real-data/CalendarV2RealDataAdapter.tsx');

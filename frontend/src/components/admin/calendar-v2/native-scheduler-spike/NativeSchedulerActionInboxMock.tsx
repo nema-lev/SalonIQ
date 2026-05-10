@@ -15,6 +15,7 @@ type NativeSchedulerActionInboxMockProps = {
   onSelectDemandForPlacement: (item: CalendarV2DemandItem) => void;
   activePlacementDemandId?: string | null;
   placementModeEnabled?: boolean;
+  subtitle?: string;
   readOnly?: boolean;
 };
 
@@ -25,6 +26,7 @@ export function NativeSchedulerActionInboxMock({
   onSelectDemandForPlacement,
   activePlacementDemandId = null,
   placementModeEnabled = true,
+  subtitle,
   readOnly = false,
 }: NativeSchedulerActionInboxMockProps) {
   const demandById = new Map(demandItems.map((item) => [item.id, item]));
@@ -45,7 +47,7 @@ export function NativeSchedulerActionInboxMock({
         <div className={styles.panelHeaderText}>
           <p className={styles.panelTitle}>Action Inbox</p>
           <p className={styles.panelSubtitle}>
-            {readOnly ? 'Само локален преглед' : 'Заявки и промени'}
+            {subtitle ?? (readOnly ? 'Само локален преглед' : 'Заявки и промени')}
           </p>
         </div>
         <span className={styles.panelCount}>{requiresAction.length}</span>

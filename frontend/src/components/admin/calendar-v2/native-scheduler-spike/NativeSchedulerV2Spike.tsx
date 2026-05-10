@@ -100,6 +100,7 @@ type NativeSchedulerV2SpikeProps = {
   toolbarNote?: ReactNode;
   toolbarControls?: ReactNode;
   enableLocalPlacementPreview?: boolean;
+  actionInboxSubtitle?: string;
   placementSave?: NativeSchedulerPlacementSaveOptions;
 };
 
@@ -133,6 +134,7 @@ export function NativeSchedulerV2Spike({
   toolbarNote,
   toolbarControls,
   enableLocalPlacementPreview = true,
+  actionInboxSubtitle,
   placementSave,
 }: NativeSchedulerV2SpikeProps = {}) {
   const sourceBlocks = calendarBlocks ?? nativeSchedulerCalendarBlocks;
@@ -767,6 +769,7 @@ export function NativeSchedulerV2Spike({
                 onSelectDemandForPlacement={handleSelectDemandForPlacement}
                 activePlacementDemandId={placementDemandItem?.id ?? null}
                 placementModeEnabled={enableLocalPlacementPreview}
+                subtitle={actionInboxSubtitle}
                 readOnly={readOnly}
               />
               <NativeSchedulerPreviewPanel

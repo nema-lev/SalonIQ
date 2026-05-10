@@ -4,7 +4,7 @@ This folder connects the direct `/admin/calendar-v2` preview route to the existi
 
 ## Main Preview Route
 
-- Calendar V2 read-only preview is deployed on `main` for hands-on Oracle testing.
+- Calendar V2 preview is deployed on `main` for hands-on Oracle testing.
 - Route: `/admin/calendar-v2`.
 - Explicit sample route: `/admin/calendar-v2?sample=1`.
 - The current `/admin` calendar remains the default and production calendar.
@@ -22,7 +22,7 @@ This folder connects the direct `/admin/calendar-v2` preview route to the existi
   - `GET /services/admin`
 - Uses the existing `apiClient`, so current admin auth and tenant headers stay unchanged.
 - Does not add backend endpoints.
-- Does not call write APIs from Calendar V2.
+- Does not call write APIs from Calendar V2 unless `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"` and real-data request placement is explicitly saved.
 - Sample mode is built in the frontend adapter only; it does not read or write sample records through backend APIs.
 
 ## Projection
@@ -37,7 +37,7 @@ This folder connects the direct `/admin/calendar-v2` preview route to the existi
 
 ## Preview UX States
 
-- Header: date navigation, date picker, Today, and one subtle `Calendar V2 Preview · Read-only` indicator.
+- Header: date navigation, date picker, Today, and one subtle mode indicator. Sample mode and flag-off real mode show `Calendar V2 Preview · Read-only`; flag-on real mode shows `Calendar V2 Preview · Request placement enabled`.
 - Scheduler: fills the desktop calendar canvas and shows compact, non-blocking notices for loading, no staff resources, and no scheduled appointments.
 - Action Inbox: shows request/recovery items when present and a compact empty state when there is nothing to act on.
 - Booking Detail: shows selected booking facts or a compact no-selection state.
@@ -45,14 +45,14 @@ This folder connects the direct `/admin/calendar-v2` preview route to the existi
 - Sample mode: shows `Sample day · Read-only` plus `Back to real data`.
 - Read error: shows retry and `Show sample day` actions while stating that fixture data is not shown on the production preview route.
 
-## Read-Only Contract
+## Limited Write Contract
 
 - No appointment creation.
 - No appointment move persistence.
-- No waitlist placement.
+- No waitlist placement unless `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"` and the user explicitly saves a real-data placement preview.
 - No status transitions.
 - No optimistic persistence.
-- No backend writes from Calendar V2.
+- No notifications from Calendar V2 placement save.
 
 The native scheduler receives `readOnly` props on the hidden real-data route. Appointment drag handles and demand drag-to-place controls are disabled there.
 

@@ -521,6 +521,33 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
       },
     },
     {
+      name: 'selected placement target stays locked against hover movement',
+      run: () => {
+        const schedulerSource = readSource(sourceDir, 'NativeSchedulerV2Spike.tsx');
+
+        assert(
+          schedulerSource.includes('const visibleDropPreview = placementTarget ?? dropPreview') &&
+            schedulerSource.includes('dropPreview={visibleDropPreview}'),
+          'grid preview should prefer the selected placement target over transient hover state',
+        );
+        assert(
+          schedulerSource.includes('if (!placementDemandItem || dragActive || placementTarget) return;'),
+          'hover movement should stop updating the preview after a placement target is selected',
+        );
+        assert(
+          schedulerSource.includes('waitlistId: placementPreview.demandItem.id') &&
+            schedulerSource.includes('command: placementPreview.command') &&
+            schedulerSource.includes('durationMinutes: placementPreview.durationMinutes'),
+          'save request should continue using the selected placement preview, not hover state',
+        );
+        assert(
+          schedulerSource.includes('setPlacementTarget(null);') &&
+            schedulerSource.includes('setPlacementPreview(null);'),
+          'cancel/reset paths should clear the selected placement target and preview',
+        );
+      },
+    },
+    {
       name: 'placement preview cancel action remains wired',
       run: () => {
         const placementPreviewSource = readSource(sourceDir, 'NativeSchedulerPlacementPreview.tsx');

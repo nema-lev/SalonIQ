@@ -10,6 +10,7 @@ This folder contains renderer-independent contracts for a future admin Calendar 
 - Calendar V2 write actions are disabled by default. With `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"`, real-data mode can save only waitlist/request placement through the dedicated placement endpoint.
 - Calendar V2 now supports a local-only Action Inbox request placement preview: choose an untimed demand item, click a staff/time slot, and review the proposed placement without saving.
 - Placement preview UI is customer-facing Bulgarian copy only: command ids, local idempotency keys, ISO timestamps, and internal command names are not rendered.
+- After a placement slot is selected, the calendar outline is locked to that selected slot. Hover movement no longer moves the selected placement target.
 - During placement mode, the lower right rail follows the active request context before and after slot selection instead of showing unrelated selected booking details.
 - The previously explored `Пристигнал` action was intentionally removed from Calendar V2 UI after product review.
 - Calendar V2 should prioritize planning, pending approvals, untimed request placement, confirmations, and rescheduling.

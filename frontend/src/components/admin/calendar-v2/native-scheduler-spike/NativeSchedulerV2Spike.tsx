@@ -186,6 +186,7 @@ export function NativeSchedulerV2Spike({
     setLastCommand(null);
   }, []);
   const placementModeActive = enableLocalPlacementPreview && Boolean(placementDemandItem);
+  const visibleDropPreview = placementTarget ?? dropPreview;
   const placementContextDemandItem = placementDemandItem ?? placementPreview?.demandItem ?? null;
   const placementPanelContext = useMemo<NativeSchedulerPlacementPanelContext | null>(() => {
     if (!placementContextDemandItem) return null;
@@ -543,7 +544,7 @@ export function NativeSchedulerV2Spike({
 
   const handlePlacementPointerMove = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (!placementDemandItem || dragActive) return;
+      if (!placementDemandItem || dragActive || placementTarget) return;
 
       const durationMinutes = Math.max(
         NATIVE_SCHEDULER_GEOMETRY.slotMinutes,
@@ -558,7 +559,7 @@ export function NativeSchedulerV2Spike({
 
       setDropPreview(target);
     },
-    [dragActive, placementDemandItem, resolveDropTarget],
+    [dragActive, placementDemandItem, placementTarget, resolveDropTarget],
   );
 
   const handlePlacementPointerLeave = useCallback(() => {
@@ -711,7 +712,7 @@ export function NativeSchedulerV2Spike({
                 blocks={blocks}
                 selectedBlockId={selectedBlockId}
                 draggingBlockId={draggingBlockId}
-                dropPreview={dropPreview}
+                dropPreview={visibleDropPreview}
                 gridRef={gridRef}
                 onSelectBlock={setSelectedBlockId}
                 onStartAppointmentDrag={handleStartAppointmentDrag}

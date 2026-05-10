@@ -23,6 +23,7 @@
 - Real-data route can save only that waitlist/request placement when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"`. Sample mode and flag-off real mode remain non-writing.
 - The local preview emits a typed `placeRequest` command-shaped object with the request id, target staff/start/end, source surface, idempotency key, appointment draft details, and `localOnly: true`.
 - The placement preview shows client, service, duration, staff, date/time, local conflict state when detected, and Bulgarian save/no-save copy that reflects the active mode. It does not render command ids, idempotency keys, ISO timestamps, or internal command names.
+- Once a placement slot is selected, the dashed calendar preview stays locked on that selected slot. Pointer hover still previews candidates before selection, but hover no longer moves the selected target after selection.
 - During placement mode, the lower right rail shows the active request context before slot selection and selected slot context after selection instead of unrelated Booking Detail content.
 - Desktop/tablet-landscape resource day grid with staff columns, 15-minute slots, 08:00-20:00 hours, sticky toolbar, sticky staff header, sticky time gutter, mocked current-time line, fixture appointments, overlap lanes, and a blocked time region.
 - Action Inbox mock shows demand/request items, pending approval, cancellation recovery, and collapsed updates.
@@ -207,6 +208,14 @@ In the real-data route, appointment move handles are disabled.
 - Sample mode and real-data mode remain non-writing; current `/admin` remains the default production calendar.
 - A future dedicated backend placement endpoint is still required before Calendar V2 can persist request placement.
 - Screenshots captured under `screenshots/`: `calendar-v2-placement-polish-sample-active-1440x900.png`, `calendar-v2-placement-polish-sample-preview-1440x900.png`, `calendar-v2-placement-polish-sample-preview-1366x768.png`, `calendar-v2-placement-polish-real-1440x900.png`, and `calendar-v2-placement-polish-sample-390x844.png`.
+
+## Placement Slot Lock Pass
+
+- Date of pass: 2026-05-10.
+- The placement hover candidate and selected target are now visually separated.
+- Before slot selection, the dashed preview can follow pointer hover.
+- After slot selection, the dashed preview is locked to the selected target and does not move when the pointer travels toward `Запази час`.
+- The save request still uses the selected placement preview command and duration; no backend endpoint, payload, notification, or API behavior changed.
 
 ## Visit Progress Product Review
 

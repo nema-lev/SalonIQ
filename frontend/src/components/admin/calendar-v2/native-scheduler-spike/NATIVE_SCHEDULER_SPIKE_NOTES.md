@@ -25,7 +25,8 @@
 - The placement preview shows client, service, duration, staff, date/time, local conflict state when detected, and Bulgarian save/no-save copy that reflects the active mode. It does not render command ids, idempotency keys, ISO timestamps, or internal command names.
 - Once a placement slot is selected, the dashed calendar preview stays locked on that selected slot. Pointer hover still previews candidates before selection, but hover no longer moves the selected target after selection.
 - During placement mode, the lower right rail shows the active request context before slot selection and selected slot context after selection instead of unrelated Booking Detail content.
-- Desktop/tablet-landscape resource day grid with staff columns, 15-minute slots, 08:00-20:00 hours, sticky toolbar, sticky staff header, sticky time gutter, mocked current-time line, fixture appointments, overlap lanes, and a blocked time region.
+- Desktop/tablet-landscape resource day grid with staff columns, 15-minute slots, 08:00-20:00 hours, sticky toolbar, sticky staff header, sticky time gutter, date-aware current-time line, fixture appointments, overlap lanes, and a blocked time region.
+- The current-time line renders only when the selected local calendar date is today, updates once per minute while eligible, and is hidden for past/future dates or when the current time is outside 08:00-20:00.
 - Action Inbox mock shows demand/request items, pending approval, cancellation recovery, and collapsed updates.
 - Demand items can still be dragged from Action Inbox into the isolated non-read-only component fixture with native pointer events.
 - Dropping a demand item in that isolated fixture emits the same local `placeRequest` command-shaped object and opens a placement preview.
@@ -216,6 +217,16 @@ In the real-data route, appointment move handles are disabled.
 - Before slot selection, the dashed preview can follow pointer hover.
 - After slot selection, the dashed preview is locked to the selected target and does not move when the pointer travels toward `Запази час`.
 - The save request still uses the selected placement preview command and duration; no backend endpoint, payload, notification, or API behavior changed.
+
+## Current-Time Indicator Pass
+
+- Date of pass: 2026-05-10.
+- Replaced the fixed mocked current-time line with a date-aware indicator based on the user's local current time.
+- The line renders only when the selected scheduler date is today.
+- Past and future selected dates render no current-time line or marker.
+- The indicator updates once per minute while the page is open and clears its timer on unmount.
+- The indicator is hidden outside visible scheduler hours instead of being clamped to the top or bottom of the grid.
+- No backend, endpoint, payload, placement save, notification, or current `/admin` calendar behavior changed.
 
 ## Visit Progress Product Review
 

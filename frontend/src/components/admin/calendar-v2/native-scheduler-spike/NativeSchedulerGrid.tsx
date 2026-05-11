@@ -13,10 +13,10 @@ import {
   calendarBlockToColumnRect,
   detectLocalOverlap,
   formatMinutesAsTime,
+  getCurrentTimeIndicatorTop,
   getGridHeight,
   getTimeSlots,
   minutesToPixels,
-  timeToY,
   type NativeSchedulerResource,
 } from './native-scheduler-geometry';
 import { NativeSchedulerEventCard } from './NativeSchedulerEventCard';
@@ -43,6 +43,7 @@ export type NativeSchedulerGridDropPreview = {
 };
 
 type NativeSchedulerGridProps = {
+  date: Date;
   resources: NativeSchedulerResource[];
   blocks: CalendarV2CalendarBlock[];
   selectedBlockId: string | null;
@@ -64,11 +65,12 @@ type NativeSchedulerGridProps = {
 
 const HEADER_HEIGHT = 56;
 const GUTTER_WIDTH = 74;
-const MOCK_CURRENT_TIME_MINUTES = 14 * 60 + 10;
 const MIN_READ_ONLY_RESOURCE_COLUMN_WIDTH = 208;
 const SCROLLBAR_GUTTER_WIDTH = 16;
+const CURRENT_TIME_REFRESH_MS = 60 * 1000;
 
 export function NativeSchedulerGrid({
+  date,
   resources,
   blocks,
   selectedBlockId,
@@ -85,6 +87,7 @@ export function NativeSchedulerGrid({
   onPlacementSlotClick,
 }: NativeSchedulerGridProps) {
   const containerRef = useRef<HTMLElement | null>(null);
+  const [currentTime, setCurrentTime] = useState(() => new Date());
   const [availableWidth, setAvailableWidth] = useState(0);
   const resourceColumnWidth = useMemo(
     () =>
@@ -113,6 +116,11 @@ export function NativeSchedulerGrid({
   const previewRect = dropPreview
     ? calendarBlockToColumnRect(dropPreview, resources, geometry, 8)
     : null;
+  const currentTimeTop = getCurrentTimeIndicatorTop({
+    schedulerDate: date,
+    now: currentTime,
+    config: geometry,
+  });
 
   useEffect(() => {
     const node = containerRef.current;
@@ -126,6 +134,15 @@ export function NativeSchedulerGrid({
 
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    const updateCurrentTime = () => setCurrentTime(new Date());
+    updateCurrentTime();
+
+    const intervalId = window.setInterval(updateCurrentTime, CURRENT_TIME_REFRESH_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [date]);
 
   if (resources.length === 0) {
     return (
@@ -219,11 +236,13 @@ export function NativeSchedulerGrid({
               />
             ))}
 
-            <span
-              className={styles.currentTimeLine}
-              style={{ top: timeToY(MOCK_CURRENT_TIME_MINUTES, geometry) }}
-              aria-hidden="true"
-            />
+            {currentTimeTop !== null && (
+              <span
+                className={styles.currentTimeLine}
+                style={{ top: currentTimeTop }}
+                aria-hidden="true"
+              />
+            )}
 
             {blockedBlocks.map((block) => {
               const rect = calendarBlockToColumnRect(block, resources, geometry);

@@ -708,6 +708,7 @@ export function NativeSchedulerV2Spike({
           <div className={styles.spikeBody}>
             <div className={styles.schedulerStage}>
               <NativeSchedulerGrid
+                date={schedulerDate}
                 resources={resources}
                 blocks={blocks}
                 selectedBlockId={selectedBlockId}

@@ -11,9 +11,12 @@ import {
   clampToBusinessHours,
   dateAndMinutesToIso,
   detectLocalOverlap,
+  getCurrentTimeIndicatorMinutes,
+  getCurrentTimeIndicatorTop,
   getGridHeight,
   getMinutesFromDateTime,
   getResourceFromX,
+  isSameLocalCalendarDate,
   minutesToPixels,
   slotFromPointer,
   snapToSlot,
@@ -67,6 +70,51 @@ const checks: RegressionCheck[] = [
       assertEqual(timeToY(8 * 60), 0, 'business start should map to top of grid');
       assertEqual(timeToY(20 * 60), getGridHeight(), 'business end should map to grid bottom');
       assertEqual(getMinutesFromDateTime(yToTime(0, CHECK_DATE)), 8 * 60, 'grid top should map to 08:00');
+    },
+  },
+  {
+    name: 'current-time indicator is eligible only for today within visible hours',
+    run: () => {
+      const today = new Date(2026, 4, 10);
+      const withinHours = new Date(2026, 4, 10, 10, 30);
+      const futureDate = new Date(2026, 4, 11);
+      const pastDate = new Date(2026, 4, 9);
+
+      assertEqual(
+        isSameLocalCalendarDate(today, withinHours),
+        true,
+        'same local calendar day should match',
+      );
+      assertEqual(
+        getCurrentTimeIndicatorMinutes({ schedulerDate: today, now: withinHours }),
+        10 * 60 + 30,
+        'today within hours should return current minutes',
+      );
+      assertEqual(
+        getCurrentTimeIndicatorTop({ schedulerDate: today, now: withinHours }),
+        timeToY(10 * 60 + 30),
+        'today within hours should map to the current-time y position',
+      );
+      assertEqual(
+        getCurrentTimeIndicatorMinutes({ schedulerDate: futureDate, now: withinHours }),
+        null,
+        'future selected dates should not render a current-time indicator',
+      );
+      assertEqual(
+        getCurrentTimeIndicatorMinutes({ schedulerDate: pastDate, now: withinHours }),
+        null,
+        'past selected dates should not render a current-time indicator',
+      );
+      assertEqual(
+        getCurrentTimeIndicatorMinutes({ schedulerDate: today, now: new Date(2026, 4, 10, 7, 59) }),
+        null,
+        'before scheduler hours should hide the current-time indicator',
+      );
+      assertEqual(
+        getCurrentTimeIndicatorMinutes({ schedulerDate: today, now: new Date(2026, 4, 10, 20, 1) }),
+        null,
+        'after scheduler hours should hide the current-time indicator',
+      );
     },
   },
   {
@@ -544,6 +592,33 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
           schedulerSource.includes('setPlacementTarget(null);') &&
             schedulerSource.includes('setPlacementPreview(null);'),
           'cancel/reset paths should clear the selected placement target and preview',
+        );
+      },
+    },
+    {
+      name: 'current-time line is date-aware and refreshes while open',
+      run: () => {
+        const gridSource = readSource(sourceDir, 'NativeSchedulerGrid.tsx');
+        const schedulerSource = readSource(sourceDir, 'NativeSchedulerV2Spike.tsx');
+
+        assert(
+          gridSource.includes('getCurrentTimeIndicatorTop') &&
+            gridSource.includes('currentTimeTop !== null'),
+          'grid should render the current-time line only when the helper returns an eligible position',
+        );
+        assert(
+          gridSource.includes('CURRENT_TIME_REFRESH_MS = 60 * 1000') &&
+            gridSource.includes('window.setInterval') &&
+            gridSource.includes('window.clearInterval'),
+          'grid should refresh the current-time indicator once per minute and clean up the timer',
+        );
+        assert(
+          !gridSource.includes('MOCK_CURRENT_TIME_MINUTES'),
+          'grid should not use a mocked current-time value',
+        );
+        assert(
+          schedulerSource.includes('date={schedulerDate}'),
+          'scheduler should pass the selected calendar date to the grid',
         );
       },
     },

@@ -61,6 +61,46 @@ export function timeToY(value: string | number, config = NATIVE_SCHEDULER_GEOMET
   return minutesToPixels(minutes - config.businessStartMinutes, config.pixelsPerMinute);
 }
 
+export function isSameLocalCalendarDate(left: Date, right: Date) {
+  return (
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+  );
+}
+
+export function getCurrentTimeIndicatorMinutes({
+  schedulerDate,
+  now,
+  config = NATIVE_SCHEDULER_GEOMETRY,
+}: {
+  schedulerDate: Date;
+  now: Date;
+  config?: NativeSchedulerGeometryConfig;
+}) {
+  if (!isSameLocalCalendarDate(schedulerDate, now)) return null;
+
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  if (minutes < config.businessStartMinutes || minutes > config.businessEndMinutes) {
+    return null;
+  }
+
+  return minutes;
+}
+
+export function getCurrentTimeIndicatorTop({
+  schedulerDate,
+  now,
+  config = NATIVE_SCHEDULER_GEOMETRY,
+}: {
+  schedulerDate: Date;
+  now: Date;
+  config?: NativeSchedulerGeometryConfig;
+}) {
+  const minutes = getCurrentTimeIndicatorMinutes({ schedulerDate, now, config });
+  return minutes === null ? null : timeToY(minutes, config);
+}
+
 export function yToTime(y: number, date: Date, config = NATIVE_SCHEDULER_GEOMETRY) {
   const rawMinutes = config.businessStartMinutes + y / config.pixelsPerMinute;
   const minutes = clampToBusinessHours(snapToSlot(rawMinutes, config.slotMinutes), 0, config);

@@ -55,9 +55,10 @@ The production rule is:
 
 ### Current Admin Calendar Baseline
 
-- `frontend/src/components/admin/admin-calendar-workspace.tsx` still has the current admin calendar write path.
-- `createAppointmentFromRequestMutation` calls `POST /appointments/admin`, then separately calls `PATCH /appointments/waitlist/:id/status`.
-- `resolvePlacement(...)` performs frontend checks for staff working hours, staff exceptions, and appointment overlap before the current admin drag placement.
+- `frontend/src/components/admin/admin-calendar-workspace.tsx` keeps the current production admin calendar UI, but request placement now calls the dedicated transactional waitlist placement endpoint.
+- `placeRequestMutation` calls `POST /appointments/waitlist/:waitlistId/place` with `{ staffId, startAt, durationMinutes, idempotencyKey, notifyClient: false }`.
+- The old placement-only two-call sequence of `POST /appointments/admin` followed by `PATCH /appointments/waitlist/:id/status` has been removed from the current `/admin` request placement flow; the endpoint now creates the appointment and books the waitlist row together.
+- `resolvePlacement(...)` still performs frontend checks for staff working hours, staff exceptions, and appointment overlap before the current admin drag placement.
 - Existing `/admin` remains default. Calendar V2 is a direct preview route.
 
 ### Backend Endpoint And Transaction Behavior
@@ -176,7 +177,7 @@ The second insert should fail on `calendar_allocations_no_active_exclusive_overl
 - Local UI preview is correctly not committed state and must remain that way.
 - Existing appointments and staff exceptions are not backfilled yet. New standard allocation writes are protected against each other by the DB constraint, while transition safety against older appointments still depends on the retained legacy appointment query.
 - Group waitlist placement remains on the existing group-capacity flow in this step; it does not yet create the future single authoritative `group_session` allocation model.
-- The next backend decision after this lifecycle-parity slice should be whether to retire the old two-call `/admin` request placement path first or plan the validated legacy backfill first; allocation-only authority should wait until one of those transition steps is intentionally completed.
+- The old two-call `/admin` request placement path has now been retired for current-calendar request placement. Validated legacy backfill is still pending, so allocation-only authority remains intentionally deferred.
 
 ## 3. Target Domain Model
 

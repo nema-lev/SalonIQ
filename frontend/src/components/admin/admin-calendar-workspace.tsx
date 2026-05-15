@@ -17,7 +17,6 @@ import { bg } from 'date-fns/locale';
 import { Clock3, GripVertical } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiClient } from '@/lib/api-client';
-import { normalizeBulgarianPhone } from '@/lib/phone';
 import { AdminBookingModal } from './admin-booking-modal';
 import { AdminCalendarDesktop } from './admin-calendar-desktop';
 import { AdminCalendarMobile } from './admin-calendar-mobile';
@@ -117,6 +116,50 @@ function getErrorMessage(error: unknown, fallback: string) {
   }
 
   return fallback;
+}
+
+function extractApiMessage(error: unknown) {
+  if (!axios.isAxiosError(error)) return null;
+
+  const message = error.response?.data?.message;
+  if (typeof message === 'string') return message;
+  if (Array.isArray(message)) {
+    return message.find((entry): entry is string => typeof entry === 'string') ?? null;
+  }
+
+  return null;
+}
+
+function getRequestPlacementErrorMessage(error: unknown) {
+  const fallback = 'Не успяхме да поставим заявката. Опитайте отново.';
+
+  if (!axios.isAxiosError(error)) {
+    return fallback;
+  }
+
+  const status = error.response?.status;
+  const normalizedMessage = extractApiMessage(error)?.toLocaleLowerCase('bg-BG') ?? '';
+
+  if (normalizedMessage.includes('заявката вече е обработена')) {
+    return 'Заявката вече е обработена.';
+  }
+
+  if (
+    status === 409 &&
+    (normalizedMessage.includes('зает') || normalizedMessage.includes('няма свободни места'))
+  ) {
+    return 'Този час вече е зает. Изберете друг свободен слот.';
+  }
+
+  if (status === 400 || status === 404 || status === 409) {
+    return 'Този час не е наличен.';
+  }
+
+  return fallback;
+}
+
+function buildAdminWaitlistPlacementIdempotencyKey(waitlistId: string, staffId: string, startAt: string) {
+  return `admin-waitlist-place:${waitlistId}:${staffId}:${startAt}`;
 }
 
 function buildHeaderLabel(currentDate: Date, view: CalendarViewMode) {
@@ -362,25 +405,18 @@ export function AdminCalendarWorkspace() {
     },
   });
 
-  const createAppointmentFromRequestMutation = useMutation({
+  const placeRequestMutation = useMutation({
     mutationFn: async ({ request, staffId, startAt }: { request: WaitlistEntry; staffId: string; startAt: string }) => {
-      const created = await apiClient.post<{ id: string; status: string; startAt: string }>('/appointments/admin', {
-        serviceId: request.service_id,
-        staffId,
-        startAt,
-        clientName: request.client_name,
-        clientPhone: normalizeBulgarianPhone(request.client_phone),
-        notes: request.notes || undefined,
-        consentGiven: true,
-        publicBaseUrl: typeof window !== 'undefined' ? window.location.origin : undefined,
-      });
-
-      await apiClient.patch(`/appointments/waitlist/${request.id}/status`, {
-        status: 'booked',
-        bookedAppointmentId: created.id,
-      });
-
-      return created;
+      return apiClient.post<{ id: string; status: string; startAt: string }>(
+        `/appointments/waitlist/${request.id}/place`,
+        {
+          staffId,
+          startAt,
+          durationMinutes: serviceMap.get(request.service_id)?.duration_minutes,
+          idempotencyKey: buildAdminWaitlistPlacementIdempotencyKey(request.id, staffId, startAt),
+          notifyClient: false,
+        },
+      );
     },
     onSuccess: async (created, variables) => {
       await invalidateCalendar();
@@ -394,7 +430,7 @@ export function AdminCalendarWorkspace() {
       toast.success('Заявката е поставена в календара.');
     },
     onError: (error: unknown) => {
-      toast.error(getErrorMessage(error, 'Неуспешно създаване на час от заявката.'));
+      toast.error(getRequestPlacementErrorMessage(error));
     },
   });
 
@@ -634,7 +670,7 @@ export function AdminCalendarWorkspace() {
         return;
       }
 
-      createAppointmentFromRequestMutation.mutate({
+      placeRequestMutation.mutate({
         request: dragState.request,
         startAt: preview.startAt,
         staffId: preview.staffId,
@@ -649,7 +685,7 @@ export function AdminCalendarWorkspace() {
       window.removeEventListener('pointerup', handlePointerEnd);
       window.removeEventListener('pointercancel', handlePointerEnd);
     };
-  }, [createAppointmentFromRequestMutation, dropPreview, resolvePreviewFromPoint, rescheduleMutation]);
+  }, [dropPreview, placeRequestMutation, resolvePreviewFromPoint, rescheduleMutation]);
 
   const beginDrag = useCallback(
     (
@@ -794,7 +830,7 @@ export function AdminCalendarWorkspace() {
           return;
         }
 
-        createAppointmentFromRequestMutation.mutate({
+        placeRequestMutation.mutate({
           request,
           staffId: best.staffId,
           startAt: best.startAt,
@@ -805,7 +841,7 @@ export function AdminCalendarWorkspace() {
         setFirstAvailableId(null);
       }
     },
-    [createAppointmentFromRequestMutation, staffList],
+    [placeRequestMutation, staffList],
   );
 
   const desktopDayColumns = useMemo<DayColumn[]>(

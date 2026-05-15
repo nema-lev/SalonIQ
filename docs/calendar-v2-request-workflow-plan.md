@@ -38,6 +38,8 @@ May 15 deployment hardening note: changing `001_init.sql` alone is not enough fo
 
 May 15 standard-lifecycle parity note: standard exact-time `POST /appointments` and `POST /appointments/admin` now create appointment + staff allocation together in one tenant transaction, using `held` for pending appointments and `booked` for confirmed appointments. Standard status transitions now promote held allocations on confirmation and make cancelled/completed/no-show allocations non-active. Standard reschedule now updates appointment + allocation atomically, keeps the legacy fallback check during transition, and creates a missing allocation when a legacy appointment is safely rescheduled. Group-service behavior remains unchanged and no standard exclusive participant allocation is created for group services.
 
+May 15 current-calendar routing note: the production `/admin` request placement flow now calls `POST /appointments/waitlist/:waitlistId/place` with `notifyClient: false` instead of performing a separate appointment create followed by a separate waitlist-booked patch. The dedicated endpoint remains silent, backfill is still pending, and allocation-only authority is still deferred.
+
 ## 2. Current Code Inventory
 
 ### Calendar V2 route and read-only contract
@@ -112,12 +114,11 @@ May 15 standard-lifecycle parity note: standard exact-time `POST /appointments` 
 - `frontend/src/components/admin/admin-calendar-workspace.tsx:321` defines `invalidateCalendar`, which refetches the board and invalidates `appointments-calendar-board`, `appointments-waitlist`, and `appointment-context`.
 - `frontend/src/components/admin/admin-calendar-workspace.tsx:328` patches `/appointments/:id/status`.
 - `frontend/src/components/admin/admin-calendar-workspace.tsx:341` patches `/appointments/:id/reschedule`.
-- `frontend/src/components/admin/admin-calendar-workspace.tsx:353` patches `/appointments/waitlist/:id/status`.
-- `frontend/src/components/admin/admin-calendar-workspace.tsx:365` creates an appointment from a waitlist request by calling `POST /appointments/admin`, then `PATCH /appointments/waitlist/:id/status`.
-- That current request placement flow is not atomic because appointment creation and waitlist status update are two separate API calls.
+- `frontend/src/components/admin/admin-calendar-workspace.tsx` still patches `/appointments/waitlist/:id/status` for archive/cancel handling only.
+- `frontend/src/components/admin/admin-calendar-workspace.tsx` places a waitlist request by calling `POST /appointments/waitlist/:waitlistId/place` with `staffId`, `startAt`, `durationMinutes`, `idempotencyKey`, and `notifyClient: false`.
+- The old current-calendar placement-only sequence of `POST /appointments/admin` followed by `PATCH /appointments/waitlist/:id/status` has been removed; appointment creation and waitlist booking now happen in one backend transaction.
 - `frontend/src/components/admin/admin-calendar-workspace.tsx:401` performs client-side placement checks for staff working hours, blocked time, and appointment overlap.
-- `frontend/src/components/admin/admin-calendar-workspace.tsx:637` writes a request drop by calling `createAppointmentFromRequestMutation`.
-- `frontend/src/components/admin/admin-calendar-workspace.tsx:752` finds first available slot by looping over `GET /appointments/slots`, then creates the appointment from the request.
+- `frontend/src/components/admin/admin-calendar-workspace.tsx` writes both request drop placement and the `Първи свободен` action through the same transactional waitlist placement mutation.
 - `frontend/src/components/admin/calendar-request-sections.tsx:27` renders current-calendar waitlist and pending appointment sections.
 - `frontend/src/components/admin/calendar-request-sections.tsx:52` labels untimed requests as `Без избран час`.
 - `frontend/src/components/admin/calendar-request-sections.tsx:129` labels pending timed appointments as `Чакат потвърждение`.
@@ -360,15 +361,15 @@ Current backend status transitions already allow:
 
 ### Are existing endpoints enough?
 
-Existing endpoints are enough for the current admin calendar, but they are not the right backend contract for Calendar V2 request placement.
+The dedicated waitlist placement endpoint is now the write contract for both Calendar V2 placement save and the current production `/admin` request placement flow.
 
-The current admin flow creates an appointment through `POST /appointments/admin` and then marks the waitlist row booked through `PATCH /appointments/waitlist/:id/status`. That creates two independent writes from the frontend. It can leave inconsistent state if the appointment is created but the waitlist update fails, if two tabs place the same request, or if notification behavior is added between the two calls.
+The old current-calendar placement flow created an appointment through `POST /appointments/admin` and then marked the waitlist row booked through `PATCH /appointments/waitlist/:id/status`. That two-write sequence has been removed from request placement because it could leave inconsistent state if the appointment was created but the waitlist update failed, if two tabs placed the same request, or if notification behavior was added between the two calls.
 
 The generic appointment create endpoint also does not perform all placement validations visible in other backend paths. In the inspected code, generic `create` checks appointment conflicts and minimum advance time, but staff working hours and staff exceptions are enforced by `getAvailableSlots` and `rescheduleAppointment`, not by generic `create`.
 
-Implemented backend foundation: add a dedicated placement endpoint and keep it unused by Calendar V2 until frontend integration is intentionally enabled behind a feature flag.
+Implemented backend foundation: use the dedicated placement endpoint from Calendar V2 only behind its explicit save flag, and use the same endpoint from the current `/admin` request placement flow without adding notifications.
 
-After this lifecycle-parity slice, the next backend decision should be whether to clean up the old two-call `/admin` request placement route first or plan the validated legacy allocation backfill first. Existing appointments are still not backfilled, so allocation-only authority remains intentionally deferred.
+The old two-call `/admin` request placement route has now been cleaned up. Existing appointments are still not backfilled, so allocation-only authority remains intentionally deferred.
 
 Endpoint:
 

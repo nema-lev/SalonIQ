@@ -395,6 +395,14 @@ runs `deploy/oracle-dev/deploy-backend.sh`
 verifies the internal backend health endpoint
 verifies the public HTTPS health endpoint
 
+Calendar allocation schema upgrade behavior
+
+The Oracle deploy path rebuilds and restarts the backend container; it does not rerun `backend/prisma/migrations/001_init.sql` against an already-populated Postgres volume.
+
+`001_init.sql` is the bootstrap path for a fresh database. Existing tenant schemas are upgraded by backend startup instead: `TenantPrismaService.onModuleInit()` enumerates tenant schemas already present in the database and runs an idempotent allocation ensure helper for each one. That helper creates `btree_gist` if missing, creates `calendar_allocations` if missing, creates the allocation indexes if missing, and adds the active-exclusive exclusion constraint only if it is absent.
+
+Existing appointments are not backfilled during this startup upgrade. The current waitlist placement flow keeps its buffer-aware legacy appointment overlap query until a separate validated backfill phase exists.
+
 Manual validation commands on the VM
 
 Run these checks on the VM:
@@ -409,6 +417,63 @@ docker compose exec -T backend curl -fsS http://localhost:3001/api/v1/health
 curl -fsSI -H 'Host: saloniq.duckdns.org' http://127.0.0.1/api/v1/health
 curl -fsS https://saloniq.duckdns.org/api/v1/health
 ```
+
+Calendar allocation verification SQL
+
+Run the following against a staging or production tenant after the backend has restarted, replacing `tenant_demo_business` with the tenant schema you are checking:
+
+```sql
+SELECT extname
+FROM pg_extension
+WHERE extname = 'btree_gist';
+
+SELECT to_regclass('tenant_demo_business.calendar_allocations') IS NOT NULL
+  AS calendar_allocations_exists;
+
+SELECT indexname
+FROM pg_indexes
+WHERE schemaname = 'tenant_demo_business'
+  AND tablename = 'calendar_allocations'
+ORDER BY indexname;
+
+SELECT c.conname, pg_get_constraintdef(c.oid)
+FROM pg_constraint c
+JOIN pg_class t ON t.oid = c.conrelid
+JOIN pg_namespace n ON n.oid = t.relnamespace
+WHERE n.nspname = 'tenant_demo_business'
+  AND t.relname = 'calendar_allocations'
+  AND c.conname = 'calendar_allocations_no_active_exclusive_overlap';
+```
+
+To verify the exclusion constraint in a test or staging tenant without leaving data behind:
+
+```sql
+BEGIN;
+
+INSERT INTO tenant_demo_business.calendar_allocations (
+  source_type, source_id, resource_type, resource_id, status,
+  display_start_at, display_end_at, occupied_start_at, occupied_end_at
+) VALUES (
+  'verification', '00000000-0000-0000-0000-000000000001',
+  'staff', '11111111-1111-1111-1111-111111111111', 'booked',
+  '2099-01-01T09:00:00Z', '2099-01-01T10:00:00Z',
+  '2099-01-01T09:00:00Z', '2099-01-01T10:00:00Z'
+);
+
+INSERT INTO tenant_demo_business.calendar_allocations (
+  source_type, source_id, resource_type, resource_id, status,
+  display_start_at, display_end_at, occupied_start_at, occupied_end_at
+) VALUES (
+  'verification', '00000000-0000-0000-0000-000000000002',
+  'staff', '11111111-1111-1111-1111-111111111111', 'booked',
+  '2099-01-01T09:30:00Z', '2099-01-01T10:30:00Z',
+  '2099-01-01T09:30:00Z', '2099-01-01T10:30:00Z'
+);
+
+ROLLBACK;
+```
+
+The second insert should fail on `calendar_allocations_no_active_exclusive_overlap`.
 
 Manual auto-deploy verification on the VM
 

@@ -95,7 +95,67 @@ The production rule is:
 - May 15 foundation step adds tenant-local `calendar_allocations` through both the tenant bootstrap migration and `TenantPrismaService.ensureCalendarAllocationsTable(...)` for existing schemas.
 - The table stores source/resource identity, display interval, occupied interval, buffers, status, exclusivity, metadata, and timestamps. It adds indexes for resource lookup, occupied interval lookup, source lookup, and status.
 - The migration now installs `btree_gist` and adds `calendar_allocations_no_active_exclusive_overlap`, a GiST exclusion constraint over active exclusive allocations using half-open `tstzrange(..., '[)')`.
+- `001_init.sql` remains a bootstrap SQL file. Updating it changes fresh database bootstrap and future tenant-schema creation from the current function definition; it does not by itself mutate tenant schemas that already exist in a deployed database.
+- `TenantPrismaService.onModuleInit()` now runs `ensureExistingTenantCalendarAllocations()` after platform compatibility. Startup enumerates schemas present in both `public.tenants` and `information_schema.schemata`, then runs the idempotent allocation ensure helper for each existing tenant schema.
+- The existing-schema ensure path executes `CREATE EXTENSION IF NOT EXISTS btree_gist`, `CREATE TABLE IF NOT EXISTS "<schema>".calendar_allocations`, four `CREATE INDEX IF NOT EXISTS ...` statements, and a constraint existence probe before `ALTER TABLE ... ADD CONSTRAINT calendar_allocations_no_active_exclusive_overlap EXCLUDE USING gist (...)`.
 - There is still no backfill in this step, no durable idempotency storage, and no allocation-only authority for legacy appointments until existing appointment rows are backfilled.
+
+#### Existing Tenant Verification
+
+Use a staging tenant schema name in place of `tenant_demo_business`:
+
+```sql
+SELECT extname
+FROM pg_extension
+WHERE extname = 'btree_gist';
+
+SELECT to_regclass('tenant_demo_business.calendar_allocations') IS NOT NULL
+  AS calendar_allocations_exists;
+
+SELECT indexname
+FROM pg_indexes
+WHERE schemaname = 'tenant_demo_business'
+  AND tablename = 'calendar_allocations'
+ORDER BY indexname;
+
+SELECT c.conname, pg_get_constraintdef(c.oid)
+FROM pg_constraint c
+JOIN pg_class t ON t.oid = c.conrelid
+JOIN pg_namespace n ON n.oid = t.relnamespace
+WHERE n.nspname = 'tenant_demo_business'
+  AND t.relname = 'calendar_allocations'
+  AND c.conname = 'calendar_allocations_no_active_exclusive_overlap';
+```
+
+To verify overlap rejection in a test or staging tenant without leaving rows behind:
+
+```sql
+BEGIN;
+
+INSERT INTO tenant_demo_business.calendar_allocations (
+  source_type, source_id, resource_type, resource_id, status,
+  display_start_at, display_end_at, occupied_start_at, occupied_end_at
+) VALUES (
+  'verification', '00000000-0000-0000-0000-000000000001',
+  'staff', '11111111-1111-1111-1111-111111111111', 'booked',
+  '2099-01-01T09:00:00Z', '2099-01-01T10:00:00Z',
+  '2099-01-01T09:00:00Z', '2099-01-01T10:00:00Z'
+);
+
+INSERT INTO tenant_demo_business.calendar_allocations (
+  source_type, source_id, resource_type, resource_id, status,
+  display_start_at, display_end_at, occupied_start_at, occupied_end_at
+) VALUES (
+  'verification', '00000000-0000-0000-0000-000000000002',
+  'staff', '11111111-1111-1111-1111-111111111111', 'booked',
+  '2099-01-01T09:30:00Z', '2099-01-01T10:30:00Z',
+  '2099-01-01T09:30:00Z', '2099-01-01T10:30:00Z'
+);
+
+ROLLBACK;
+```
+
+The second insert should fail on `calendar_allocations_no_active_exclusive_overlap`. Existing appointments are intentionally not backfilled by this upgrade. If a future backfill tries to insert already-overlapping legacy appointments as active exclusive allocations, the exclusion constraint will reject the conflicting rows; the backfill phase must validate/report legacy overlaps before it becomes authoritative.
 
 ### Current Test Baseline
 
@@ -1218,6 +1278,7 @@ Feature flag: Backend write paths continue to use existing behavior until alloca
 Implemented May 15 foundation slice:
 
 - Added tenant-local `calendar_allocations` plus resource/source/status indexes and active-exclusive GiST overlap protection.
+- Added startup compatibility so already-existing tenant schemas receive the allocation infrastructure on backend boot instead of depending only on fresh bootstrap SQL or first use of the waitlist placement endpoint.
 - Moved standard waitlist placement onto appointment + allocation writes inside the existing tenant transaction.
 - Added buffer-aware occupied intervals and transition-safe legacy appointment checks.
 - Deferred destructive backfill, staff-exception allocation projection, generic create/reschedule migration, and `group_session` modeling. Backfill remains required before allocation-only enforcement can become global.

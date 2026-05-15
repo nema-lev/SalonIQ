@@ -229,6 +229,8 @@ pm2 logs saloniq-backend
 curl http://localhost:3001/api/health
 ```
 
+> `001_init.sql` е bootstrap файл. Промяна в него не обновява автоматично вече съществуващите tenant схеми в работеща база. След текущия Calendar V2 hardening backend startup проверява всички вече налични tenant схеми и идемпотентно добавя липсващите `calendar_allocations`, индекси и exclusion constraint без destructive backfill на съществуващите appointments.
+
 ---
 
 ## 6. Frontend

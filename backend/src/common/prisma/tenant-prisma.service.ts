@@ -34,6 +34,7 @@ export class TenantPrismaService extends PrismaClient implements OnModuleInit, O
   async onModuleInit() {
     await this.$connect();
     await this.ensurePlatformCompatibility();
+    await this.ensureExistingTenantCalendarAllocations();
     this.logger.log('Prisma connected to PostgreSQL');
   }
 
@@ -110,6 +111,25 @@ export class TenantPrismaService extends PrismaClient implements OnModuleInit, O
     );
   }
 
+  async ensureExistingTenantCalendarAllocations(): Promise<void> {
+    const tenantSchemas = await this.$queryRawUnsafe<{ schema_name: string }[]>(
+      `
+      SELECT t.schema_name
+      FROM public.tenants t
+      JOIN information_schema.schemata s ON s.schema_name = t.schema_name
+      ORDER BY t.schema_name ASC
+      `,
+    );
+
+    for (const tenantSchema of tenantSchemas) {
+      await this.ensureCalendarAllocationsTable(tenantSchema.schema_name);
+    }
+
+    this.logger.log(
+      `Calendar allocation infrastructure ensured for ${tenantSchemas.length} existing tenant schema(s)`,
+    );
+  }
+
   async ensureServiceGroupColumns(schemaName: string): Promise<void> {
     if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(schemaName)) {
       throw new Error(`Invalid schema name: ${schemaName}`);
@@ -173,6 +193,7 @@ export class TenantPrismaService extends PrismaClient implements OnModuleInit, O
 
     const normalizedSchemaName = schemaName.replace('.', '_');
 
+    await this.$executeRawUnsafe(`CREATE EXTENSION IF NOT EXISTS btree_gist`);
     await this.$executeRawUnsafe(
       `CREATE TABLE IF NOT EXISTS "${schemaName}".calendar_allocations (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

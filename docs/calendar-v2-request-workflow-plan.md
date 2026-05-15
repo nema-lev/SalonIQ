@@ -34,6 +34,8 @@ May 9 frontend flag note: Calendar V2 placement preview remains local-only by de
 
 May 15 backend allocation-foundation note: standard waitlist placement now writes one booked staff `calendar_allocations` row in the same tenant transaction as appointment creation and waitlist booking. The allocation stores the visible display interval separately from the buffer-expanded occupied interval, uses half-open overlap semantics, and is protected by a tenant-local active-exclusive PostgreSQL exclusion constraint. Existing appointments are not backfilled in this step, so the placement flow also keeps a buffer-aware legacy appointment conflict query during the transition. Group waitlist placement remains on its existing capacity path until the future single `group_session` allocation model is implemented.
 
+May 15 deployment hardening note: changing `001_init.sql` alone is not enough for tenant schemas that already exist in a deployed database. Backend startup now enumerates existing tenant schemas and runs the idempotent allocation ensure path for each one, so existing tenants receive `btree_gist`, `calendar_allocations`, its indexes, and the active-exclusive exclusion constraint on the next backend boot without a destructive appointment backfill.
+
 ## 2. Current Code Inventory
 
 ### Calendar V2 route and read-only contract
@@ -203,10 +205,12 @@ Current backend service behavior:
 - `notifications_log` includes `appointment_id`, `client_id`, `channel`, `type`, `status`, `external_id`, `error_message`, `sent_at`, and `delivered_at` at lines 267-280.
 - `backend/prisma/migrations/001_init.sql:286` creates tenant `waitlist`.
 - The migration waitlist fields are `id`, `client_id`, `service_id`, `staff_id`, `desired_date`, `desired_from`, `desired_to`, `status`, `notified_at`, `expires_at`, and `created_at`.
-- `backend/src/common/prisma/tenant-prisma.service.ts:133` defines `ensureWaitlistTable`.
-- `ensureWaitlistTable` creates waitlist if missing and adds compatibility columns `notes`, `last_notified_slot_start_at`, `booked_appointment_id`, and `updated_at` at lines 153-163.
-- `TenantPrismaService.ensureCalendarAllocationsTable(...)` creates the tenant-local allocation table for existing schemas, adds resource/occupied/source/status indexes, and installs the active-exclusive exclusion constraint after ensuring `btree_gist`.
+- `backend/src/common/prisma/tenant-prisma.service.ts:155` defines `ensureWaitlistTable`.
+- `ensureWaitlistTable` creates waitlist if missing and adds compatibility columns `notes`, `last_notified_slot_start_at`, `booked_appointment_id`, and `updated_at` at lines 175-185.
+- `TenantPrismaService.ensureCalendarAllocationsTable(...)` starts at line 189, creates the tenant-local allocation table for existing schemas, adds resource/occupied/source/status indexes, and installs the active-exclusive exclusion constraint after ensuring `btree_gist`.
+- `TenantPrismaService.ensureExistingTenantCalendarAllocations(...)` starts at line 114, runs at backend startup, discovers schemas present in both `public.tenants` and `information_schema.schemata`, and applies the idempotent allocation ensure helper to each already-existing tenant schema.
 - New tenant schemas also receive `calendar_allocations` from `backend/prisma/migrations/001_init.sql`.
+- Existing appointments are still not backfilled; this hardening step upgrades schema only, while the placement flow keeps the legacy appointment conflict query until a validated backfill phase exists.
 - `TenantPrismaService.queryInSchema` wraps each raw SQL query in its own transaction at `backend/src/common/prisma/tenant-prisma.service.ts:59`.
 - A future placement endpoint must use a single multi-step transaction, not separate `queryInSchema` calls for create and waitlist update.
 

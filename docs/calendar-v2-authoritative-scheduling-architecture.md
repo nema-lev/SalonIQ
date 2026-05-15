@@ -72,6 +72,9 @@ The production rule is:
 - It inserts the appointment and then updates the waitlist row to `booked` with `booked_appointment_id`.
 - It returns appointment data, waitlist data, notification metadata, and the submitted idempotency key.
 - It does not call the notification queue or processor; `notifications.sent` is returned as `false`.
+- May 15 foundation step: standard waitlist placement now also calls `ensureCalendarAllocationsTable(...)`, validates active staff allocation overlap by occupied interval, inserts the appointment, inserts one booked staff `calendar_allocations` row, and then marks the waitlist row booked in the same tenant transaction.
+- Standard placement now calculates `display_start_at` / `display_end_at` from the chosen appointment time and `occupied_start_at` / `occupied_end_at` from service buffers. Nullable or invalid buffer values normalize to `0`.
+- During the transition before backfill, standard placement still checks existing active appointments directly with buffer-aware occupied-interval math so old rows without allocations cannot be missed.
 
 ### Existing Conflict Checks
 
@@ -89,13 +92,15 @@ The production rule is:
 - The migration creates `idx_<schema>_appointments_start` and `idx_<schema>_appointments_staff_time`.
 - `staff_exceptions` has `staff_id`, `type`, `start_at`, and `end_at`.
 - `waitlist` has desired date/time fields, status, and later compatibility columns added by `TenantPrismaService.ensureWaitlistTable(...)`.
-- A repository search found no existing `calendar_allocations`, `scheduling_commands`, `scheduling_events`, `scheduling_outbox`, `slot_holds`, `SchedulingEngine`, `EXCLUDE`, `btree_gist`, `tstzrange`, or durable idempotency storage.
-- The current schema therefore has no verified database-level interval exclusion constraint for active staff allocations.
+- May 15 foundation step adds tenant-local `calendar_allocations` through both the tenant bootstrap migration and `TenantPrismaService.ensureCalendarAllocationsTable(...)` for existing schemas.
+- The table stores source/resource identity, display interval, occupied interval, buffers, status, exclusivity, metadata, and timestamps. It adds indexes for resource lookup, occupied interval lookup, source lookup, and status.
+- The migration now installs `btree_gist` and adds `calendar_allocations_no_active_exclusive_overlap`, a GiST exclusion constraint over active exclusive allocations using half-open `tstzrange(..., '[)')`.
+- There is still no backfill in this step, no durable idempotency storage, and no allocation-only authority for legacy appointments until existing appointment rows are backfilled.
 
 ### Current Test Baseline
 
-- `backend/test/appointments.service.waitlist-placement.spec.ts` covers successful waitlist placement, already handled request, missing waitlist, missing service, inactive/missing staff, appointment conflict, staff blocked interval, outside working hours, insert failure before waitlist update, notification not called, and DTO validation.
-- There are no verified backend tests for real concurrent same-slot races, durable idempotent retry, stale entity versions, outbox emission, allocation-table exclusion, buffer overlap, or group capacity race.
+- `backend/test/appointments.service.waitlist-placement.spec.ts` covers successful waitlist placement, booked allocation insertion, buffer-expanded occupied intervals, allocation conflict rejection, legacy-appointment transition conflict rejection, adjacent half-open intervals, buffer-only overlap rejection, already handled request, missing waitlist, missing service, inactive/missing staff, staff blocked interval, outside working hours, insert failure before waitlist update, conditional waitlist-update double-placement protection, DB exclusion-conflict mapping, notification not called, and DTO validation.
+- There are still no verified integration tests for real concurrent same-slot races against a live PostgreSQL exclusion constraint, durable idempotent retry, stale entity versions, outbox emission, full backfill validation, or group capacity race.
 - `backend/test/appointments.service.visit-progress.spec.ts` exists for visit-progress behavior, which is explicitly not a production Calendar V2 editing feature.
 
 ### Current Limitations
@@ -103,10 +108,12 @@ The production rule is:
 - Visible slots and Calendar V2 blocks are projections, not authority.
 - The current placement endpoint is isolated to waitlist placement; it is not a reusable scheduling command service.
 - Existing appointment creation and reschedule paths still use check-then-write patterns without a shared transaction lifecycle and without database overlap protection.
-- Service buffers exist in service data but are not yet represented as authoritative occupied intervals.
+- Standard waitlist placement now represents service buffers as authoritative occupied intervals, but generic create/reschedule paths and legacy appointments are not yet fully moved onto allocations.
 - The submitted `idempotencyKey` in waitlist placement is stored in appointment `intake_data.waitlistPlacement`, but no command ledger or uniqueness guarantee exists.
 - Calendar V2 frontend command types include versions and optimistic metadata, but current real-data projections do not populate an authoritative entity version for scheduling writes.
 - Local UI preview is correctly not committed state and must remain that way.
+- Existing appointments and staff exceptions are not backfilled yet. New allocation writes are protected against each other by the DB constraint, while transition safety against older appointments still depends on the retained legacy appointment query.
+- Group waitlist placement remains on the existing group-capacity flow in this step; it does not yet create the future single authoritative `group_session` allocation model.
 
 ## 3. Target Domain Model
 
@@ -1207,6 +1214,13 @@ Tests: Backfill tests, overlap exclusion tests, adjacent interval tests, buffer 
 Rollback: Deploy table/backfill first without validated constraint; only validate constraint after data report is clean.
 
 Feature flag: Backend write paths continue to use existing behavior until allocation write flag is enabled.
+
+Implemented May 15 foundation slice:
+
+- Added tenant-local `calendar_allocations` plus resource/source/status indexes and active-exclusive GiST overlap protection.
+- Moved standard waitlist placement onto appointment + allocation writes inside the existing tenant transaction.
+- Added buffer-aware occupied intervals and transition-safe legacy appointment checks.
+- Deferred destructive backfill, staff-exception allocation projection, generic create/reschedule migration, and `group_session` modeling. Backfill remains required before allocation-only enforcement can become global.
 
 ### Phase 2: Move Waitlist Placement Onto SchedulingEngine
 

@@ -4,6 +4,7 @@
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 DO $$
 BEGIN
@@ -246,6 +247,75 @@ BEGIN
     ON %I.appointments(staff_id, start_at, end_at)
     WHERE status NOT IN (''cancelled'', ''no_show'')',
     replace(schema_name, '.', '_'), schema_name);
+
+  -- ─── CALENDAR ALLOCATIONS ────────────────────────────
+  -- Авторитетни заети интервали за scheduling ресурси.
+  EXECUTE format('
+    CREATE TABLE IF NOT EXISTS %I.calendar_allocations (
+      id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      source_type        VARCHAR(40) NOT NULL,
+      source_id          UUID NOT NULL,
+      resource_type      VARCHAR(40) NOT NULL,
+      resource_id        UUID NOT NULL,
+      status             VARCHAR(20) NOT NULL,
+      display_start_at   TIMESTAMPTZ NOT NULL,
+      display_end_at     TIMESTAMPTZ NOT NULL,
+      occupied_start_at  TIMESTAMPTZ NOT NULL,
+      occupied_end_at    TIMESTAMPTZ NOT NULL,
+      buffer_before_min  INTEGER NOT NULL DEFAULT 0,
+      buffer_after_min   INTEGER NOT NULL DEFAULT 0,
+      exclusive          BOOLEAN NOT NULL DEFAULT true,
+      metadata           JSONB NOT NULL DEFAULT ''{}''::jsonb,
+      created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CONSTRAINT calendar_allocations_display_interval_valid
+        CHECK (display_start_at < display_end_at),
+      CONSTRAINT calendar_allocations_occupied_interval_valid
+        CHECK (occupied_start_at < occupied_end_at),
+      CONSTRAINT calendar_allocations_buffers_non_negative
+        CHECK (buffer_before_min >= 0 AND buffer_after_min >= 0)
+    )', schema_name);
+
+  EXECUTE format('
+    CREATE INDEX IF NOT EXISTS idx_%s_calendar_allocations_resource
+    ON %I.calendar_allocations(resource_type, resource_id)',
+    replace(schema_name, '.', '_'), schema_name);
+
+  EXECUTE format('
+    CREATE INDEX IF NOT EXISTS idx_%s_calendar_allocations_occupied_interval
+    ON %I.calendar_allocations(occupied_start_at, occupied_end_at)',
+    replace(schema_name, '.', '_'), schema_name);
+
+  EXECUTE format('
+    CREATE INDEX IF NOT EXISTS idx_%s_calendar_allocations_source
+    ON %I.calendar_allocations(source_type, source_id)',
+    replace(schema_name, '.', '_'), schema_name);
+
+  EXECUTE format('
+    CREATE INDEX IF NOT EXISTS idx_%s_calendar_allocations_status
+    ON %I.calendar_allocations(status)',
+    replace(schema_name, '.', '_'), schema_name);
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    WHERE n.nspname = schema_name
+      AND t.relname = 'calendar_allocations'
+      AND c.conname = 'calendar_allocations_no_active_exclusive_overlap'
+  ) THEN
+    EXECUTE format('
+      ALTER TABLE %I.calendar_allocations
+      ADD CONSTRAINT calendar_allocations_no_active_exclusive_overlap
+      EXCLUDE USING gist (
+        resource_type WITH =,
+        resource_id WITH =,
+        tstzrange(occupied_start_at, occupied_end_at, ''[)'') WITH &&
+      )
+      WHERE (exclusive = true AND status IN (''booked'', ''held'', ''blocked''))',
+      schema_name);
+  END IF;
 
   -- ─── STAFF EXCEPTIONS ─────────────────────────────────
   -- Отпуски, болнични, блокирани часове

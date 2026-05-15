@@ -36,3 +36,4 @@ This folder contains renderer-independent contracts for a future admin Calendar 
 - Untimed demand belongs in demand/request/waitlist projections, not in scheduled calendar blocks.
 - Future write interactions should go through typed commands before they are wired to API calls.
 - Calendar V2 can save request placement only in real-data mode when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"`.
+- Backend note: standard saved request placement now creates a booked staff `calendar_allocations` row with separate display and buffer-expanded occupied intervals; this changes scheduling authority only, not Calendar V2 UI behavior.

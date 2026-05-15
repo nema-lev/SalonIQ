@@ -17,7 +17,7 @@ import { CreateBookingRequestDto } from './dto/create-booking-request.dto';
 import { PlaceWaitlistEntryDto } from './dto/place-waitlist-entry.dto';
 import { AppointmentStatus, NotificationJobType, VisitProgress } from '../../common/types/enums';
 import { buildBulgarianPhoneVariants, normalizeBulgarianPhone } from '../../common/utils/phone';
-import type { Tenant } from '@prisma/client';
+import type { PrismaClient, Tenant } from '@prisma/client';
 import { NotificationProcessor } from '../notifications/notification.processor';
 
 const TIMEZONE = 'Europe/Sofia';
@@ -116,6 +116,8 @@ interface PlacementServiceRow {
   price: unknown;
   currency: string | null;
   duration_minutes: number;
+  buffer_before_min: number | null;
+  buffer_after_min: number | null;
   requires_confirmation: boolean;
   booking_mode: string;
   slot_capacity: number;
@@ -128,6 +130,15 @@ interface PlacementStaffRow {
   name: string;
   color: string | null;
   working_hours: StaffWorkingHours | null;
+}
+
+interface AppointmentAllocationInterval {
+  displayStartAt: Date;
+  displayEndAt: Date;
+  occupiedStartAt: Date;
+  occupiedEndAt: Date;
+  bufferBeforeMinutes: number;
+  bufferAfterMinutes: number;
 }
 
 type OwnerStateKind =
@@ -1501,6 +1512,7 @@ export class AppointmentsService {
   ) {
     await this.prisma.ensureWaitlistTable(tenant.schemaName);
     await this.prisma.ensureServiceGroupColumns(tenant.schemaName);
+    await this.prisma.ensureCalendarAllocationsTable(tenant.schemaName);
 
     const startAt = new Date(dto.startAt);
     if (Number.isNaN(startAt.getTime())) {
@@ -1559,6 +1571,8 @@ export class AppointmentsService {
           price,
           currency,
           duration_minutes,
+          buffer_before_min,
+          buffer_after_min,
           requires_confirmation,
           booking_mode,
           slot_capacity,
@@ -1606,7 +1620,13 @@ export class AppointmentsService {
         throw new BadRequestException('Продължителността трябва да съвпада с услугата.');
       }
 
-      const endAt = addMinutes(startAt, serviceDurationMinutes);
+      const allocationInterval = this.calculateAppointmentAllocationInterval(
+        startAt,
+        serviceDurationMinutes,
+        service.buffer_before_min,
+        service.buffer_after_min,
+      );
+      const endAt = allocationInterval.displayEndAt;
       if (!isBefore(startAt, endAt)) {
         throw new BadRequestException('Краят трябва да е след началото.');
       }
@@ -1623,8 +1643,8 @@ export class AppointmentsService {
         LIMIT 1
         `,
         staff.id,
-        startAt.toISOString(),
-        endAt.toISOString(),
+        allocationInterval.occupiedStartAt.toISOString(),
+        allocationInterval.occupiedEndAt.toISOString(),
       );
 
       if (exceptionConflicts.length) {
@@ -1685,23 +1705,7 @@ export class AppointmentsService {
           throw new ConflictException('Няма свободни места за тази групова услуга.');
         }
       } else {
-        const appointmentConflicts = await tx.$queryRawUnsafe<{ id: string }[]>(
-          `
-          SELECT id::text
-          FROM appointments
-          WHERE staff_id = $1::uuid
-            AND status NOT IN ('cancelled', 'no_show')
-            AND (start_at, end_at) OVERLAPS ($2::timestamptz, $3::timestamptz)
-          LIMIT 1
-          `,
-          staff.id,
-          startAt.toISOString(),
-          endAt.toISOString(),
-        );
-
-        if (appointmentConflicts.length) {
-          throw new ConflictException('Избраният час вече е зает. Моля, изберете друг.');
-        }
+        await this.validateAppointmentAllocationAvailable(tx, staff.id, allocationInterval);
       }
 
       const notifyClientRequested = Boolean(dto.notifyClient);
@@ -1764,6 +1768,16 @@ export class AppointmentsService {
         waitlist.notes?.trim() || null,
         JSON.stringify(intakeData),
       );
+
+      if (service.booking_mode !== 'group') {
+        await this.createAppointmentAllocation(
+          tx,
+          appointment.id,
+          staff.id,
+          allocationInterval,
+          waitlist.id,
+        );
+      }
 
       const [updatedWaitlist] = await tx.$queryRawUnsafe<
         { id: string; status: WaitlistStatus; booked_appointment_id: string }[]
@@ -2680,6 +2694,172 @@ export class AppointmentsService {
     if (conflicts.length > 0) {
       throw new ConflictException('Избраният час вече е зает. Моля, изберете друг.');
     }
+  }
+
+  private calculateAppointmentAllocationInterval(
+    displayStartAt: Date,
+    durationMinutes: number,
+    bufferBeforeMinutes: number | null,
+    bufferAfterMinutes: number | null,
+  ): AppointmentAllocationInterval {
+    const normalizedBufferBeforeMinutes = this.normalizeBufferMinutes(bufferBeforeMinutes);
+    const normalizedBufferAfterMinutes = this.normalizeBufferMinutes(bufferAfterMinutes);
+    const displayEndAt = addMinutes(displayStartAt, durationMinutes);
+
+    return {
+      displayStartAt,
+      displayEndAt,
+      occupiedStartAt: addMinutes(displayStartAt, -normalizedBufferBeforeMinutes),
+      occupiedEndAt: addMinutes(displayEndAt, normalizedBufferAfterMinutes),
+      bufferBeforeMinutes: normalizedBufferBeforeMinutes,
+      bufferAfterMinutes: normalizedBufferAfterMinutes,
+    };
+  }
+
+  private normalizeBufferMinutes(value: number | null): number {
+    const normalized = Number(value ?? 0);
+    if (!Number.isFinite(normalized) || normalized <= 0) {
+      return 0;
+    }
+
+    return Math.floor(normalized);
+  }
+
+  private async validateAppointmentAllocationAvailable(
+    tx: Pick<PrismaClient, '$queryRawUnsafe'>,
+    staffId: string,
+    interval: AppointmentAllocationInterval,
+  ) {
+    const allocationConflicts = await tx.$queryRawUnsafe<{ id: string }[]>(
+      `
+      SELECT id::text
+      FROM calendar_allocations
+      WHERE resource_type = 'staff'
+        AND resource_id = $1::uuid
+        AND exclusive = true
+        AND status IN ('booked', 'held', 'blocked')
+        AND occupied_start_at < $3::timestamptz
+        AND occupied_end_at > $2::timestamptz
+      LIMIT 1
+      `,
+      staffId,
+      interval.occupiedStartAt.toISOString(),
+      interval.occupiedEndAt.toISOString(),
+    );
+
+    if (allocationConflicts.length) {
+      throw new ConflictException('Избраният час вече е зает. Моля, изберете друг.');
+    }
+
+    // Transitional fallback: older appointments may not have allocations yet.
+    const legacyAppointmentConflicts = await tx.$queryRawUnsafe<{ id: string }[]>(
+      `
+      SELECT a.id::text
+      FROM appointments a
+      JOIN services sv ON sv.id = a.service_id
+      WHERE a.staff_id = $1::uuid
+        AND a.status NOT IN ('cancelled', 'no_show')
+        AND (
+          a.start_at - (COALESCE(sv.buffer_before_min, 0) * INTERVAL '1 minute')
+        ) < $3::timestamptz
+        AND (
+          a.end_at + (COALESCE(sv.buffer_after_min, 0) * INTERVAL '1 minute')
+        ) > $2::timestamptz
+      LIMIT 1
+      `,
+      staffId,
+      interval.occupiedStartAt.toISOString(),
+      interval.occupiedEndAt.toISOString(),
+    );
+
+    if (legacyAppointmentConflicts.length) {
+      throw new ConflictException('Избраният час вече е зает. Моля, изберете друг.');
+    }
+  }
+
+  private async createAppointmentAllocation(
+    tx: Pick<PrismaClient, '$queryRawUnsafe'>,
+    appointmentId: string,
+    staffId: string,
+    interval: AppointmentAllocationInterval,
+    waitlistId: string,
+  ) {
+    try {
+      const [allocation] = await tx.$queryRawUnsafe<{ id: string }[]>(
+        `
+        INSERT INTO calendar_allocations (
+          source_type,
+          source_id,
+          resource_type,
+          resource_id,
+          status,
+          display_start_at,
+          display_end_at,
+          occupied_start_at,
+          occupied_end_at,
+          buffer_before_min,
+          buffer_after_min,
+          exclusive,
+          metadata
+        )
+        VALUES (
+          'appointment',
+          $1::uuid,
+          'staff',
+          $2::uuid,
+          'booked',
+          $3::timestamptz,
+          $4::timestamptz,
+          $5::timestamptz,
+          $6::timestamptz,
+          $7::integer,
+          $8::integer,
+          true,
+          $9::jsonb
+        )
+        RETURNING id::text
+        `,
+        appointmentId,
+        staffId,
+        interval.displayStartAt.toISOString(),
+        interval.displayEndAt.toISOString(),
+        interval.occupiedStartAt.toISOString(),
+        interval.occupiedEndAt.toISOString(),
+        interval.bufferBeforeMinutes,
+        interval.bufferAfterMinutes,
+        JSON.stringify({ waitlistId }),
+      );
+
+      return allocation;
+    } catch (error) {
+      if (this.isCalendarAllocationExclusionConflict(error)) {
+        throw new ConflictException('Избраният час вече е зает. Моля, изберете друг.');
+      }
+
+      throw error;
+    }
+  }
+
+  private isCalendarAllocationExclusionConflict(error: unknown): boolean {
+    const candidates = [
+      error,
+      typeof error === 'object' && error !== null ? (error as { cause?: unknown }).cause : null,
+      typeof error === 'object' && error !== null ? (error as { meta?: unknown }).meta : null,
+    ];
+
+    return candidates.some((candidate) => {
+      if (!candidate || typeof candidate !== 'object') {
+        return false;
+      }
+
+      const record = candidate as Record<string, unknown>;
+      if (record.code === '23P01') {
+        return true;
+      }
+
+      const message = typeof record.message === 'string' ? record.message : '';
+      return message.includes('calendar_allocations_no_active_exclusive_overlap');
+    });
   }
 
   private validateStatusTransition(current: AppointmentStatus, next: AppointmentStatus) {

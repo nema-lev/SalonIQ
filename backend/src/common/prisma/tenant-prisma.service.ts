@@ -97,12 +97,14 @@ export class TenantPrismaService extends PrismaClient implements OnModuleInit, O
     await this.$executeRawUnsafe(`SELECT create_tenant_schema('${schemaName}')`);
     await this.ensureServiceGroupColumns(schemaName);
     await this.ensureWaitlistTable(schemaName);
+    await this.ensureCalendarAllocationsTable(schemaName);
 
     this.schemaCache.set(schemaName, true);
     this.logger.log(`Tenant schema ${schemaName} created successfully`);
   }
 
   async ensurePlatformCompatibility(): Promise<void> {
+    await this.$executeRawUnsafe(`CREATE EXTENSION IF NOT EXISTS btree_gist`);
     await this.$executeRawUnsafe(
       `ALTER TYPE public.business_type ADD VALUE IF NOT EXISTS 'GROUP_TRAINING'`,
     );
@@ -161,6 +163,82 @@ export class TenantPrismaService extends PrismaClient implements OnModuleInit, O
     );
     await this.$executeRawUnsafe(
       `ALTER TABLE "${schemaName}".waitlist ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+    );
+  }
+
+  async ensureCalendarAllocationsTable(schemaName: string): Promise<void> {
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(schemaName)) {
+      throw new Error(`Invalid schema name: ${schemaName}`);
+    }
+
+    const normalizedSchemaName = schemaName.replace('.', '_');
+
+    await this.$executeRawUnsafe(
+      `CREATE TABLE IF NOT EXISTS "${schemaName}".calendar_allocations (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        source_type VARCHAR(40) NOT NULL,
+        source_id UUID NOT NULL,
+        resource_type VARCHAR(40) NOT NULL,
+        resource_id UUID NOT NULL,
+        status VARCHAR(20) NOT NULL,
+        display_start_at TIMESTAMPTZ NOT NULL,
+        display_end_at TIMESTAMPTZ NOT NULL,
+        occupied_start_at TIMESTAMPTZ NOT NULL,
+        occupied_end_at TIMESTAMPTZ NOT NULL,
+        buffer_before_min INTEGER NOT NULL DEFAULT 0,
+        buffer_after_min INTEGER NOT NULL DEFAULT 0,
+        exclusive BOOLEAN NOT NULL DEFAULT true,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT calendar_allocations_display_interval_valid
+          CHECK (display_start_at < display_end_at),
+        CONSTRAINT calendar_allocations_occupied_interval_valid
+          CHECK (occupied_start_at < occupied_end_at),
+        CONSTRAINT calendar_allocations_buffers_non_negative
+          CHECK (buffer_before_min >= 0 AND buffer_after_min >= 0)
+      )`,
+    );
+
+    await this.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS "idx_${normalizedSchemaName}_calendar_allocations_resource"
+       ON "${schemaName}".calendar_allocations(resource_type, resource_id)`,
+    );
+    await this.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS "idx_${normalizedSchemaName}_calendar_allocations_occupied_interval"
+       ON "${schemaName}".calendar_allocations(occupied_start_at, occupied_end_at)`,
+    );
+    await this.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS "idx_${normalizedSchemaName}_calendar_allocations_source"
+       ON "${schemaName}".calendar_allocations(source_type, source_id)`,
+    );
+    await this.$executeRawUnsafe(
+      `CREATE INDEX IF NOT EXISTS "idx_${normalizedSchemaName}_calendar_allocations_status"
+       ON "${schemaName}".calendar_allocations(status)`,
+    );
+    await this.$executeRawUnsafe(
+      `DO $$
+       BEGIN
+         IF NOT EXISTS (
+           SELECT 1
+           FROM pg_constraint c
+           JOIN pg_class t ON t.oid = c.conrelid
+           JOIN pg_namespace n ON n.oid = t.relnamespace
+           WHERE n.nspname = '${schemaName}'
+             AND t.relname = 'calendar_allocations'
+             AND c.conname = 'calendar_allocations_no_active_exclusive_overlap'
+         ) THEN
+           ALTER TABLE "${schemaName}".calendar_allocations
+           ADD CONSTRAINT calendar_allocations_no_active_exclusive_overlap
+           EXCLUDE USING gist (
+             resource_type WITH =,
+             resource_id WITH =,
+             tstzrange(occupied_start_at, occupied_end_at, '[)') WITH &&
+           )
+           WHERE (exclusive = true AND status IN ('booked', 'held', 'blocked'));
+         END IF;
+       END
+       $$;`,
     );
   }
 

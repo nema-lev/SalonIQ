@@ -32,6 +32,8 @@ May 8 backend foundation note: `POST /api/v1/appointments/waitlist/:waitlistId/p
 
 May 9 frontend flag note: Calendar V2 placement preview remains local-only by default. The preview save button is enabled only when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"` and the page is using real data. Sample mode remains non-writing and shows `Sample режимът не записва часове.` The save call sends `notifyClient: false`, refreshes backend-backed calendar and waitlist data after success, and does not call appointment create/status/cancel/reschedule or notification endpoints.
 
+May 15 backend allocation-foundation note: standard waitlist placement now writes one booked staff `calendar_allocations` row in the same tenant transaction as appointment creation and waitlist booking. The allocation stores the visible display interval separately from the buffer-expanded occupied interval, uses half-open overlap semantics, and is protected by a tenant-local active-exclusive PostgreSQL exclusion constraint. Existing appointments are not backfilled in this step, so the placement flow also keeps a buffer-aware legacy appointment conflict query during the transition. Group waitlist placement remains on its existing capacity path until the future single `group_session` allocation model is implemented.
+
 ## 2. Current Code Inventory
 
 ### Calendar V2 route and read-only contract
@@ -180,6 +182,7 @@ Current backend service behavior:
 - `backend/src/modules/appointments/appointments.service.ts:1342` defines `createWaitlistEntry`, which inserts a waitlist row with status `waiting`.
 - `backend/src/modules/appointments/appointments.service.ts:1410` defines `updateWaitlistStatus`, which updates waitlist status and `booked_appointment_id`.
 - `backend/src/modules/appointments/appointments.service.ts` defines `placeWaitlistEntry`, which locks an open waitlist row, validates service/staff/time/conflicts/blocked intervals, inserts a confirmed owner-booked appointment, and marks the waitlist row `booked` in the same tenant transaction.
+- For standard services, `placeWaitlistEntry` now also validates occupied-interval conflicts against `calendar_allocations`, checks legacy appointments with buffer-aware occupied intervals while backfill is pending, inserts a booked staff allocation, and maps DB exclusion conflicts to the same user-safe conflict class.
 - `backend/src/modules/appointments/appointments.service.ts:1453` defines `notifyWaitlistEntry`, which sends `WAITLIST_AVAILABLE`, then marks the waitlist row `notified` with `last_notified_slot_start_at`.
 - `backend/src/modules/appointments/appointments.service.ts:1534` throws `ConflictException` when waitlist notification sending fails.
 - `backend/src/modules/appointments/appointments.service.ts:1623` defines `rescheduleAppointment`, which validates appointment state, blocks group-service drag/drop moves, validates staff, staff working hours, staff exceptions, and conflicts, then updates the appointment.
@@ -202,6 +205,8 @@ Current backend service behavior:
 - The migration waitlist fields are `id`, `client_id`, `service_id`, `staff_id`, `desired_date`, `desired_from`, `desired_to`, `status`, `notified_at`, `expires_at`, and `created_at`.
 - `backend/src/common/prisma/tenant-prisma.service.ts:133` defines `ensureWaitlistTable`.
 - `ensureWaitlistTable` creates waitlist if missing and adds compatibility columns `notes`, `last_notified_slot_start_at`, `booked_appointment_id`, and `updated_at` at lines 153-163.
+- `TenantPrismaService.ensureCalendarAllocationsTable(...)` creates the tenant-local allocation table for existing schemas, adds resource/occupied/source/status indexes, and installs the active-exclusive exclusion constraint after ensuring `btree_gist`.
+- New tenant schemas also receive `calendar_allocations` from `backend/prisma/migrations/001_init.sql`.
 - `TenantPrismaService.queryInSchema` wraps each raw SQL query in its own transaction at `backend/src/common/prisma/tenant-prisma.service.ts:59`.
 - A future placement endpoint must use a single multi-step transaction, not separate `queryInSchema` calls for create and waitlist update.
 

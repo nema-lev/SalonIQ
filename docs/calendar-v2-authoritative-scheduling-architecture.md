@@ -80,9 +80,11 @@ The production rule is:
 
 - `getAvailableSlots(...)` reads service buffer columns but computes slot duration from `service.duration_minutes`.
 - `getAvailableSlots(...)` checks staff working hours, staff exceptions, min/max advance booking, appointment overlaps, and group capacity.
-- `create(...)` checks overlaps before inserting into `appointments`, but the conflict check and insert are separate `queryInSchema(...)` calls. `queryInSchema(...)` wraps each individual SQL call in its own transaction.
+- May 15 lifecycle-parity step: for standard exact-time services, `create(...)` now writes the appointment and matching staff `calendar_allocations` row in one tenant transaction. Pending appointments create active `held` allocations; confirmed appointments create active `booked` allocations.
+- Standard `create(...)` now validates both active allocation conflicts and the retained buffer-aware legacy appointment fallback before inserting. Group-service create stays on its existing capacity flow and does not create a standard exclusive allocation.
 - `create(...)` calls `scheduleNotifications(...)` after appointment insert.
-- `rescheduleAppointment(...)` checks working hours, staff exceptions, and appointment overlap before updating the appointment, but uses separate `queryInSchema(...)` calls rather than one scheduling-core transaction.
+- For standard services, `updateStatus(...)` now keeps existing appointment allocations aligned with lifecycle state: pending/proposal-pending confirmation promotes `held` to `booked`, while cancelled/completed/no-show states make the allocation non-active by setting the matching terminal status.
+- For standard services, `rescheduleAppointment(...)` now updates the appointment and matching staff allocation atomically in one tenant transaction, revalidates active allocations plus the retained legacy fallback, updates resource/display/occupied intervals, and creates a replacement allocation during safe legacy reschedules when none exists yet.
 - Private `assertNoConflict(...)` exists and checks appointment overlap with PostgreSQL `OVERLAPS`, but it is not a unified scheduling engine.
 
 ### Schema And Migration Facts
@@ -167,13 +169,14 @@ The second insert should fail on `calendar_allocations_no_active_exclusive_overl
 
 - Visible slots and Calendar V2 blocks are projections, not authority.
 - The current placement endpoint is isolated to waitlist placement; it is not a reusable scheduling command service.
-- Existing appointment creation and reschedule paths still use check-then-write patterns without a shared transaction lifecycle and without database overlap protection.
-- Standard waitlist placement now represents service buffers as authoritative occupied intervals, but generic create/reschedule paths and legacy appointments are not yet fully moved onto allocations.
+- Standard waitlist placement and standard exact-time create/status/reschedule now maintain appointment allocations, but this remains a transition state rather than allocation-only authority.
+- Legacy appointments are not backfilled yet. Standard reschedule can materialize a missing allocation when it safely moves one legacy row, while retained legacy appointment conflict checks still protect rows that have not been migrated.
 - The submitted `idempotencyKey` in waitlist placement is stored in appointment `intake_data.waitlistPlacement`, but no command ledger or uniqueness guarantee exists.
 - Calendar V2 frontend command types include versions and optimistic metadata, but current real-data projections do not populate an authoritative entity version for scheduling writes.
 - Local UI preview is correctly not committed state and must remain that way.
-- Existing appointments and staff exceptions are not backfilled yet. New allocation writes are protected against each other by the DB constraint, while transition safety against older appointments still depends on the retained legacy appointment query.
+- Existing appointments and staff exceptions are not backfilled yet. New standard allocation writes are protected against each other by the DB constraint, while transition safety against older appointments still depends on the retained legacy appointment query.
 - Group waitlist placement remains on the existing group-capacity flow in this step; it does not yet create the future single authoritative `group_session` allocation model.
+- The next backend decision after this lifecycle-parity slice should be whether to retire the old two-call `/admin` request placement path first or plan the validated legacy backfill first; allocation-only authority should wait until one of those transition steps is intentionally completed.
 
 ## 3. Target Domain Model
 

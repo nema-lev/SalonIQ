@@ -177,13 +177,14 @@ describe('AppointmentsService.placeWaitlistEntry', () => {
     expect(allocationInsertCall).toBeDefined();
     expect(allocationInsertCall?.[1]).toBe(APPOINTMENT_ID);
     expect(allocationInsertCall?.[2]).toBe(STAFF_ID);
-    expect(allocationInsertCall?.[3]).toBe(START_AT_UTC);
-    expect(allocationInsertCall?.[4]).toBe(END_AT_UTC);
-    expect(allocationInsertCall?.[5]).toBe(START_AT_UTC);
-    expect(allocationInsertCall?.[6]).toBe(END_AT_UTC);
-    expect(allocationInsertCall?.[7]).toBe(0);
+    expect(allocationInsertCall?.[3]).toBe('booked');
+    expect(allocationInsertCall?.[4]).toBe(START_AT_UTC);
+    expect(allocationInsertCall?.[5]).toBe(END_AT_UTC);
+    expect(allocationInsertCall?.[6]).toBe(START_AT_UTC);
+    expect(allocationInsertCall?.[7]).toBe(END_AT_UTC);
     expect(allocationInsertCall?.[8]).toBe(0);
-    expect(JSON.parse(String(allocationInsertCall?.[9]))).toEqual({ waitlistId: WAITLIST_ID });
+    expect(allocationInsertCall?.[9]).toBe(0);
+    expect(JSON.parse(String(allocationInsertCall?.[10]))).toEqual({ waitlistId: WAITLIST_ID });
   });
 
   it('stores occupied interval boundaries expanded by service buffers', async () => {
@@ -228,12 +229,12 @@ describe('AppointmentsService.placeWaitlistEntry', () => {
     const allocationInsertCall = tx.$queryRawUnsafe.mock.calls.find((call) =>
       String(call[0]).includes('INSERT INTO calendar_allocations'),
     );
-    expect(allocationInsertCall?.[3]).toBe(START_AT_UTC);
-    expect(allocationInsertCall?.[4]).toBe(END_AT_UTC);
-    expect(allocationInsertCall?.[5]).toBe('2026-05-11T06:45:00.000Z');
-    expect(allocationInsertCall?.[6]).toBe('2026-05-11T08:10:00.000Z');
-    expect(allocationInsertCall?.[7]).toBe(15);
-    expect(allocationInsertCall?.[8]).toBe(10);
+    expect(allocationInsertCall?.[4]).toBe(START_AT_UTC);
+    expect(allocationInsertCall?.[5]).toBe(END_AT_UTC);
+    expect(allocationInsertCall?.[6]).toBe('2026-05-11T06:45:00.000Z');
+    expect(allocationInsertCall?.[7]).toBe('2026-05-11T08:10:00.000Z');
+    expect(allocationInsertCall?.[8]).toBe(15);
+    expect(allocationInsertCall?.[9]).toBe(10);
   });
 
   it('returns not found when the waitlist request does not exist', async () => {

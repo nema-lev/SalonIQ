@@ -926,7 +926,7 @@ export class AppointmentsService {
     // 3. Провери/създай клиент
     const clientId = await this.findOrCreateClient(tenant.schemaName, dto);
 
-    // 4. Провери конфликти (atomic check)
+    // 4. Провери конфликти
     if (service.booking_mode === 'group') {
       const dayOfWeek = format(toZonedTime(startAt, TIMEZONE), 'EEE').toLowerCase();
       const allowedDays = service.group_days || [];
@@ -973,21 +973,6 @@ export class AppointmentsService {
       if (sameSessionBookings.length >= capacity) {
         throw new ConflictException('Няма свободни места за тази тренировка.');
       }
-    } else {
-      const conflicts = await this.prisma.queryInSchema<unknown[]>(
-        tenant.schemaName,
-        `
-        SELECT id FROM appointments
-        WHERE staff_id = $1::uuid
-          AND status NOT IN ('cancelled', 'no_show')
-          AND (start_at, end_at) OVERLAPS ($2::timestamptz, $3::timestamptz)
-        `,
-        [dto.staffId, startAt.toISOString(), endAt.toISOString()],
-      );
-
-      if (conflicts.length > 0) {
-        throw new ConflictException('Избраният час вече е зает. Моля, изберете друг.');
-      }
     }
 
     // 5. Провери напред/назад лимити
@@ -1017,33 +1002,81 @@ export class AppointmentsService {
     };
 
     // 7. Създай резервацията
-    const rows = await this.prisma.queryInSchema<{ id: string }[]>(
-      tenant.schemaName,
-      `
-      INSERT INTO appointments (
-        client_id, staff_id, service_id,
-        start_at, end_at, status,
-        price, currency, booked_by,
-        client_notes, intake_data
-      ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11::jsonb)
-      RETURNING id
-      `,
-      [
-        clientId,
-        dto.staffId,
-        dto.serviceId,
-        startAt.toISOString(),
-        endAt.toISOString(),
-        status,
-        service.price,
-        'EUR',
-        options.bookedBy ?? 'client',
-        dto.notes || null,
-        JSON.stringify(intakeData),
-      ],
-    );
+    let appointmentId: string;
+    if (service.booking_mode === 'group') {
+      const rows = await this.prisma.queryInSchema<{ id: string }[]>(
+        tenant.schemaName,
+        `
+        INSERT INTO appointments (
+          client_id, staff_id, service_id,
+          start_at, end_at, status,
+          price, currency, booked_by,
+          client_notes, intake_data
+        ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11::jsonb)
+        RETURNING id
+        `,
+        [
+          clientId,
+          dto.staffId,
+          dto.serviceId,
+          startAt.toISOString(),
+          endAt.toISOString(),
+          status,
+          service.price,
+          'EUR',
+          options.bookedBy ?? 'client',
+          dto.notes || null,
+          JSON.stringify(intakeData),
+        ],
+      );
+      appointmentId = rows[0].id;
+    } else {
+      await this.prisma.ensureCalendarAllocationsTable(tenant.schemaName);
+      const allocationInterval = this.calculateAppointmentAllocationInterval(
+        startAt,
+        service.duration_minutes,
+        service.buffer_before_min,
+        service.buffer_after_min,
+      );
 
-    const appointmentId = rows[0].id;
+      appointmentId = await this.prisma.withTenantSchema(tenant.schemaName, async (tx) => {
+        await this.validateAppointmentAllocationAvailable(tx, dto.staffId, allocationInterval);
+
+        const [appointment] = await tx.$queryRawUnsafe<{ id: string }[]>(
+          `
+          INSERT INTO appointments (
+            client_id, staff_id, service_id,
+            start_at, end_at, status,
+            price, currency, booked_by,
+            client_notes, intake_data
+          ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::timestamptz, $5::timestamptz, $6, $7, $8, $9, $10, $11::jsonb)
+          RETURNING id::text
+          `,
+          clientId,
+          dto.staffId,
+          dto.serviceId,
+          allocationInterval.displayStartAt.toISOString(),
+          allocationInterval.displayEndAt.toISOString(),
+          status,
+          service.price,
+          'EUR',
+          options.bookedBy ?? 'client',
+          dto.notes || null,
+          JSON.stringify(intakeData),
+        );
+
+        await this.createAppointmentAllocation(
+          tx,
+          appointment.id,
+          dto.staffId,
+          allocationInterval,
+          status,
+          {},
+        );
+
+        return appointment.id;
+      });
+    }
 
     // 8. Постави в notification queue
     await this.scheduleNotifications(tenant, appointmentId, clientId, status, startAt);
@@ -1122,64 +1155,90 @@ export class AppointmentsService {
     reason?: string,
     cancelledBy?: 'client' | 'owner',
   ) {
-    const appointments = await this.prisma.queryInSchema<{ id: string; client_id: string; status: string; start_at: Date; intake_data: unknown }[]>(
-      tenant.schemaName,
-      `SELECT id, client_id, status, start_at, intake_data FROM appointments WHERE id = $1::uuid`,
-      [appointmentId],
-    );
+    await this.prisma.ensureCalendarAllocationsTable(tenant.schemaName);
 
-    if (!appointments.length) throw new NotFoundException('Резервацията не е намерена');
-    const appointment = appointments[0];
-
-    // Валидации на state machine
-    this.validateStatusTransition(appointment.status as AppointmentStatus, newStatus);
-
-    const updateFields: Record<string, unknown> = { status: newStatus, updated_at: 'NOW()' };
-
-    if (newStatus === AppointmentStatus.CANCELLED) {
-      updateFields.cancellation_reason = reason;
-      updateFields.cancelled_by = cancelledBy || 'owner';
-      updateFields.cancelled_at = new Date().toISOString();
-    }
-
-    if (newStatus === AppointmentStatus.NO_SHOW) {
-      // Увеличи no_show_count на клиента
-      await this.prisma.queryInSchema(
-        tenant.schemaName,
-        `UPDATE clients SET no_show_count = no_show_count + 1 WHERE id = $1::uuid`,
-        [appointment.client_id],
+    const appointment = await this.prisma.withTenantSchema(tenant.schemaName, async (tx) => {
+      const [currentAppointment] = await tx.$queryRawUnsafe<
+        {
+          id: string;
+          client_id: string;
+          status: string;
+          start_at: Date;
+          intake_data: unknown;
+          booking_mode: string;
+        }[]
+      >(
+        `
+        SELECT
+          a.id::text,
+          a.client_id::text,
+          a.status,
+          a.start_at,
+          a.intake_data,
+          sv.booking_mode
+        FROM appointments a
+        JOIN services sv ON sv.id = a.service_id
+        WHERE a.id = $1::uuid
+        LIMIT 1
+        FOR UPDATE OF a
+        `,
+        appointmentId,
       );
-    }
 
-    const intakeData = this.parseIntakeData(appointment.intake_data);
-    const nextIntakeData =
-      newStatus === AppointmentStatus.CANCELLED && cancelledBy === 'client'
-        ? { ...intakeData, ownerActionAlert: 'client_cancelled' as const }
-        : { ...intakeData, ownerActionAlert: '' as const };
-    const transitionKind = this.resolveOwnerStateKind(
-      appointment.status as AppointmentStatus,
-      newStatus,
-      cancelledBy,
-    );
-    const resolvedIntakeData = {
-      ...nextIntakeData,
-      stateMeta: this.buildOwnerStateMeta(appointment.status, newStatus, transitionKind),
-    };
+      if (!currentAppointment) throw new NotFoundException('Резервацията не е намерена');
 
-    await this.prisma.queryInSchema(
-      tenant.schemaName,
-      `UPDATE appointments SET status = $1, cancellation_reason = $2, 
-       cancelled_by = $3, cancelled_at = $4::timestamptz, intake_data = $5::jsonb, updated_at = NOW()
-       WHERE id = $6::uuid`,
-      [
+      // Валидации на state machine
+      this.validateStatusTransition(currentAppointment.status as AppointmentStatus, newStatus);
+
+      const updateFields: Record<string, unknown> = { status: newStatus, updated_at: 'NOW()' };
+
+      if (newStatus === AppointmentStatus.CANCELLED) {
+        updateFields.cancellation_reason = reason;
+        updateFields.cancelled_by = cancelledBy || 'owner';
+        updateFields.cancelled_at = new Date().toISOString();
+      }
+
+      if (newStatus === AppointmentStatus.NO_SHOW) {
+        // Увеличи no_show_count на клиента
+        await tx.$queryRawUnsafe(
+          `UPDATE clients SET no_show_count = no_show_count + 1 WHERE id = $1::uuid`,
+          currentAppointment.client_id,
+        );
+      }
+
+      const intakeData = this.parseIntakeData(currentAppointment.intake_data);
+      const nextIntakeData =
+        newStatus === AppointmentStatus.CANCELLED && cancelledBy === 'client'
+          ? { ...intakeData, ownerActionAlert: 'client_cancelled' as const }
+          : { ...intakeData, ownerActionAlert: '' as const };
+      const transitionKind = this.resolveOwnerStateKind(
+        currentAppointment.status as AppointmentStatus,
+        newStatus,
+        cancelledBy,
+      );
+      const resolvedIntakeData = {
+        ...nextIntakeData,
+        stateMeta: this.buildOwnerStateMeta(currentAppointment.status, newStatus, transitionKind),
+      };
+
+      await tx.$queryRawUnsafe(
+        `UPDATE appointments SET status = $1, cancellation_reason = $2,
+         cancelled_by = $3, cancelled_at = $4::timestamptz, intake_data = $5::jsonb, updated_at = NOW()
+         WHERE id = $6::uuid`,
         newStatus,
         updateFields.cancellation_reason || null,
         updateFields.cancelled_by || null,
         updateFields.cancelled_at || null,
         JSON.stringify(resolvedIntakeData),
         appointmentId,
-      ],
-    );
+      );
+
+      if (currentAppointment.booking_mode !== 'group') {
+        await this.updateAppointmentAllocationStatus(tx, appointmentId, newStatus);
+      }
+
+      return currentAppointment;
+    });
 
     // Изпрати известие за промяната
     await this.processNotificationNow(
@@ -1775,7 +1834,8 @@ export class AppointmentsService {
           appointment.id,
           staff.id,
           allocationInterval,
-          waitlist.id,
+          AppointmentStatus.CONFIRMED,
+          { waitlistId: waitlist.id },
         );
       }
 
@@ -2008,163 +2068,143 @@ export class AppointmentsService {
     staffId?: string,
   ) {
     await this.prisma.ensureServiceGroupColumns(tenant.schemaName);
+    await this.prisma.ensureCalendarAllocationsTable(tenant.schemaName);
 
-    const [appointment] = await this.prisma.queryInSchema<any[]>(
-      tenant.schemaName,
-      `
-      SELECT
-        a.id,
-        a.client_id,
-        a.staff_id,
-        a.service_id,
-        a.status,
-        a.intake_data,
-        sv.duration_minutes,
-        sv.buffer_before_min,
-        sv.buffer_after_min,
-        sv.booking_mode
-      FROM appointments a
-      JOIN services sv ON sv.id = a.service_id
-      WHERE a.id = $1::uuid
-      LIMIT 1
-      `,
-      [appointmentId],
-    );
+    return this.prisma.withTenantSchema(tenant.schemaName, async (tx) => {
+      const [appointment] = await tx.$queryRawUnsafe<any[]>(
+        `
+        SELECT
+          a.id::text,
+          a.client_id::text,
+          a.staff_id::text,
+          a.service_id::text,
+          a.status,
+          a.intake_data,
+          sv.duration_minutes,
+          sv.buffer_before_min,
+          sv.buffer_after_min,
+          sv.booking_mode
+        FROM appointments a
+        JOIN services sv ON sv.id = a.service_id
+        WHERE a.id = $1::uuid
+        LIMIT 1
+        FOR UPDATE OF a
+        `,
+        appointmentId,
+      );
 
-    if (!appointment) {
-      throw new NotFoundException('Резервацията не е намерена.');
-    }
+      if (!appointment) {
+        throw new NotFoundException('Резервацията не е намерена.');
+      }
 
-    if (
-      [AppointmentStatus.CANCELLED, AppointmentStatus.COMPLETED, AppointmentStatus.NO_SHOW].includes(
-        appointment.status,
-      )
-    ) {
-      throw new BadRequestException('Този запис не може да бъде преместен.');
-    }
+      if (
+        [AppointmentStatus.CANCELLED, AppointmentStatus.COMPLETED, AppointmentStatus.NO_SHOW].includes(
+          appointment.status,
+        )
+      ) {
+        throw new BadRequestException('Този запис не може да бъде преместен.');
+      }
 
-    if (appointment.booking_mode === 'group') {
-      throw new BadRequestException('Груповите сесии не могат да се местят с drag/drop.');
-    }
+      if (appointment.booking_mode === 'group') {
+        throw new BadRequestException('Груповите сесии не могат да се местят с drag/drop.');
+      }
 
-    const nextStaffId = staffId || appointment.staff_id;
-    const nextStartAt = new Date(startAtIso);
-    if (Number.isNaN(nextStartAt.getTime())) {
-      throw new BadRequestException('Невалиден нов час.');
-    }
+      const nextStaffId = staffId || appointment.staff_id;
+      const nextStartAt = new Date(startAtIso);
+      if (Number.isNaN(nextStartAt.getTime())) {
+        throw new BadRequestException('Невалиден нов час.');
+      }
 
-    const totalDuration = Number(appointment.duration_minutes || 0);
-    const nextEndAt = addMinutes(nextStartAt, totalDuration);
+      const allocationInterval = this.calculateAppointmentAllocationInterval(
+        nextStartAt,
+        Number(appointment.duration_minutes || 0),
+        appointment.buffer_before_min,
+        appointment.buffer_after_min,
+      );
+      const nextEndAt = allocationInterval.displayEndAt;
 
-    const dayOfWeek = format(toZonedTime(nextStartAt, TIMEZONE), 'EEE').toLowerCase();
-    const [staffRow] = await this.prisma.queryInSchema<
-      { working_hours: Record<string, { open: string; close: string; isOpen: boolean }> }[]
-    >(
-      tenant.schemaName,
-      `SELECT working_hours FROM staff WHERE id = $1::uuid AND is_active = true LIMIT 1`,
-      [nextStaffId],
-    );
-
-    if (!staffRow) {
-      throw new NotFoundException('Специалистът не е намерен.');
-    }
-
-    const daySchedule = staffRow.working_hours?.[dayOfWeek];
-    if (!daySchedule?.isOpen) {
-      throw new ConflictException('Специалистът не работи в този ден.');
-    }
-
-    const [openHour, openMin] = daySchedule.open.split(':').map(Number);
-    const [closeHour, closeMin] = daySchedule.close.split(':').map(Number);
-    const workStart = fromZonedTime(
-      new Date(toZonedTime(nextStartAt, TIMEZONE).setHours(openHour, openMin, 0, 0)),
-      TIMEZONE,
-    );
-    const workEnd = fromZonedTime(
-      new Date(toZonedTime(nextStartAt, TIMEZONE).setHours(closeHour, closeMin, 0, 0)),
-      TIMEZONE,
-    );
-
-    if (
-      (isBefore(nextStartAt, workStart) && nextStartAt.getTime() !== workStart.getTime()) ||
-      (isAfter(nextEndAt, workEnd) && nextEndAt.getTime() !== workEnd.getTime())
-    ) {
-      throw new ConflictException('Новият час е извън работното време на специалиста.');
-    }
-
-    const exceptionConflicts = await this.prisma.queryInSchema<any[]>(
-      tenant.schemaName,
-      `
-      SELECT id
-      FROM staff_exceptions
-      WHERE staff_id = $1::uuid
-        AND start_at < $3::timestamptz
-        AND end_at > $2::timestamptz
-      LIMIT 1
-      `,
-      [nextStaffId, nextStartAt.toISOString(), nextEndAt.toISOString()],
-    );
-
-    if (exceptionConflicts.length) {
-      throw new ConflictException('Новият час попада в блокиран интервал.');
-    }
-
-    const appointmentConflicts = await this.prisma.queryInSchema<any[]>(
-      tenant.schemaName,
-      `
-      SELECT id
-      FROM appointments
-      WHERE id <> $1::uuid
-        AND staff_id = $2::uuid
-        AND status NOT IN ('cancelled', 'no_show')
-        AND (start_at, end_at) OVERLAPS ($3::timestamptz, $4::timestamptz)
-      LIMIT 1
-      `,
-      [appointmentId, nextStaffId, nextStartAt.toISOString(), nextEndAt.toISOString()],
-    );
-
-    if (appointmentConflicts.length) {
-      throw new ConflictException('Специалистът вече е зает в този интервал.');
-    }
-
-    const intakeData = this.parseIntakeData(appointment.intake_data);
-    const unchangedState =
-      appointment.status === AppointmentStatus.PROPOSAL_PENDING
-        ? 'proposal_sent'
-        : appointment.status === AppointmentStatus.PENDING
-          ? 'requested'
-          : 'approved';
-
-    await this.prisma.queryInSchema(
-      tenant.schemaName,
-      `
-      UPDATE appointments
-      SET staff_id = $1::uuid,
-          start_at = $2::timestamptz,
-          end_at = $3::timestamptz,
-          intake_data = $4::jsonb,
-          updated_at = NOW()
-      WHERE id = $5::uuid
-      `,
-      [
+      const [staffRow] = await tx.$queryRawUnsafe<
+        { working_hours: Record<string, { open: string; close: string; isOpen: boolean }> }[]
+      >(
+        `SELECT working_hours FROM staff WHERE id = $1::uuid AND is_active = true LIMIT 1`,
         nextStaffId,
-        nextStartAt.toISOString(),
-        nextEndAt.toISOString(),
+      );
+
+      if (!staffRow) {
+        throw new NotFoundException('Специалистът не е намерен.');
+      }
+
+      this.assertWithinStaffWorkingHours(staffRow.working_hours, nextStartAt, nextEndAt);
+
+      const exceptionConflicts = await tx.$queryRawUnsafe<any[]>(
+        `
+        SELECT id
+        FROM staff_exceptions
+        WHERE staff_id = $1::uuid
+          AND start_at < $3::timestamptz
+          AND end_at > $2::timestamptz
+        LIMIT 1
+        `,
+        nextStaffId,
+        allocationInterval.occupiedStartAt.toISOString(),
+        allocationInterval.occupiedEndAt.toISOString(),
+      );
+
+      if (exceptionConflicts.length) {
+        throw new ConflictException('Новият час попада в блокиран интервал.');
+      }
+
+      await this.validateAppointmentAllocationAvailable(
+        tx,
+        nextStaffId,
+        allocationInterval,
+        appointmentId,
+      );
+
+      const intakeData = this.parseIntakeData(appointment.intake_data);
+      const unchangedState =
+        appointment.status === AppointmentStatus.PROPOSAL_PENDING
+          ? 'proposal_sent'
+          : appointment.status === AppointmentStatus.PENDING
+            ? 'requested'
+            : 'approved';
+
+      await tx.$queryRawUnsafe(
+        `
+        UPDATE appointments
+        SET staff_id = $1::uuid,
+            start_at = $2::timestamptz,
+            end_at = $3::timestamptz,
+            intake_data = $4::jsonb,
+            updated_at = NOW()
+        WHERE id = $5::uuid
+        `,
+        nextStaffId,
+        allocationInterval.displayStartAt.toISOString(),
+        allocationInterval.displayEndAt.toISOString(),
         JSON.stringify({
           ...intakeData,
           stateMeta: this.buildOwnerStateMeta(appointment.status, appointment.status, unchangedState),
         }),
         appointmentId,
-      ],
-    );
+      );
 
-    return {
-      id: appointmentId,
-      staffId: nextStaffId,
-      startAt: nextStartAt,
-      endAt: nextEndAt,
-      status: appointment.status,
-    };
+      await this.updateAppointmentAllocationForReschedule(
+        tx,
+        appointmentId,
+        nextStaffId,
+        allocationInterval,
+        appointment.status as AppointmentStatus,
+      );
+
+      return {
+        id: appointmentId,
+        staffId: nextStaffId,
+        startAt: nextStartAt,
+        endAt: nextEndAt,
+        status: appointment.status,
+      };
+    });
   }
 
   // ─── Private helpers ──────────────────────────────────────────────────
@@ -2729,6 +2769,7 @@ export class AppointmentsService {
     tx: Pick<PrismaClient, '$queryRawUnsafe'>,
     staffId: string,
     interval: AppointmentAllocationInterval,
+    excludeAppointmentId?: string,
   ) {
     const allocationConflicts = await tx.$queryRawUnsafe<{ id: string }[]>(
       `
@@ -2740,11 +2781,13 @@ export class AppointmentsService {
         AND status IN ('booked', 'held', 'blocked')
         AND occupied_start_at < $3::timestamptz
         AND occupied_end_at > $2::timestamptz
+        AND ($4::uuid IS NULL OR NOT (source_type = 'appointment' AND source_id = $4::uuid))
       LIMIT 1
       `,
       staffId,
       interval.occupiedStartAt.toISOString(),
       interval.occupiedEndAt.toISOString(),
+      excludeAppointmentId || null,
     );
 
     if (allocationConflicts.length) {
@@ -2759,6 +2802,7 @@ export class AppointmentsService {
       JOIN services sv ON sv.id = a.service_id
       WHERE a.staff_id = $1::uuid
         AND a.status NOT IN ('cancelled', 'no_show')
+        AND ($4::uuid IS NULL OR a.id <> $4::uuid)
         AND (
           a.start_at - (COALESCE(sv.buffer_before_min, 0) * INTERVAL '1 minute')
         ) < $3::timestamptz
@@ -2770,6 +2814,7 @@ export class AppointmentsService {
       staffId,
       interval.occupiedStartAt.toISOString(),
       interval.occupiedEndAt.toISOString(),
+      excludeAppointmentId || null,
     );
 
     if (legacyAppointmentConflicts.length) {
@@ -2782,7 +2827,8 @@ export class AppointmentsService {
     appointmentId: string,
     staffId: string,
     interval: AppointmentAllocationInterval,
-    waitlistId: string,
+    appointmentStatus: AppointmentStatus,
+    metadata: Record<string, unknown>,
   ) {
     try {
       const [allocation] = await tx.$queryRawUnsafe<{ id: string }[]>(
@@ -2807,30 +2853,121 @@ export class AppointmentsService {
           $1::uuid,
           'staff',
           $2::uuid,
-          'booked',
-          $3::timestamptz,
+          $3,
           $4::timestamptz,
           $5::timestamptz,
           $6::timestamptz,
-          $7::integer,
+          $7::timestamptz,
           $8::integer,
+          $9::integer,
           true,
-          $9::jsonb
+          $10::jsonb
         )
         RETURNING id::text
         `,
         appointmentId,
         staffId,
+        this.allocationStatusForAppointmentStatus(appointmentStatus),
         interval.displayStartAt.toISOString(),
         interval.displayEndAt.toISOString(),
         interval.occupiedStartAt.toISOString(),
         interval.occupiedEndAt.toISOString(),
         interval.bufferBeforeMinutes,
         interval.bufferAfterMinutes,
-        JSON.stringify({ waitlistId }),
+        JSON.stringify(metadata),
       );
 
       return allocation;
+    } catch (error) {
+      if (this.isCalendarAllocationExclusionConflict(error)) {
+        throw new ConflictException('Избраният час вече е зает. Моля, изберете друг.');
+      }
+
+      throw error;
+    }
+  }
+
+  private allocationStatusForAppointmentStatus(status: AppointmentStatus) {
+    switch (status) {
+      case AppointmentStatus.PENDING:
+      case AppointmentStatus.PROPOSAL_PENDING:
+        return 'held';
+      case AppointmentStatus.CONFIRMED:
+        return 'booked';
+      case AppointmentStatus.CANCELLED:
+        return 'cancelled';
+      case AppointmentStatus.COMPLETED:
+        return 'completed';
+      case AppointmentStatus.NO_SHOW:
+        return 'no_show';
+    }
+  }
+
+  private async updateAppointmentAllocationStatus(
+    tx: Pick<PrismaClient, '$queryRawUnsafe'>,
+    appointmentId: string,
+    appointmentStatus: AppointmentStatus,
+  ) {
+    await tx.$queryRawUnsafe(
+      `
+      UPDATE calendar_allocations
+      SET status = $2,
+          updated_at = NOW()
+      WHERE source_type = 'appointment'
+        AND source_id = $1::uuid
+        AND resource_type = 'staff'
+      `,
+      appointmentId,
+      this.allocationStatusForAppointmentStatus(appointmentStatus),
+    );
+  }
+
+  private async updateAppointmentAllocationForReschedule(
+    tx: Pick<PrismaClient, '$queryRawUnsafe'>,
+    appointmentId: string,
+    staffId: string,
+    interval: AppointmentAllocationInterval,
+    appointmentStatus: AppointmentStatus,
+  ) {
+    try {
+      const updated = await tx.$queryRawUnsafe<{ id: string }[]>(
+        `
+        UPDATE calendar_allocations
+        SET resource_id = $2::uuid,
+            status = $3,
+            display_start_at = $4::timestamptz,
+            display_end_at = $5::timestamptz,
+            occupied_start_at = $6::timestamptz,
+            occupied_end_at = $7::timestamptz,
+            buffer_before_min = $8::integer,
+            buffer_after_min = $9::integer,
+            updated_at = NOW()
+        WHERE source_type = 'appointment'
+          AND source_id = $1::uuid
+          AND resource_type = 'staff'
+        RETURNING id::text
+        `,
+        appointmentId,
+        staffId,
+        this.allocationStatusForAppointmentStatus(appointmentStatus),
+        interval.displayStartAt.toISOString(),
+        interval.displayEndAt.toISOString(),
+        interval.occupiedStartAt.toISOString(),
+        interval.occupiedEndAt.toISOString(),
+        interval.bufferBeforeMinutes,
+        interval.bufferAfterMinutes,
+      );
+
+      if (!updated.length) {
+        await this.createAppointmentAllocation(
+          tx,
+          appointmentId,
+          staffId,
+          interval,
+          appointmentStatus,
+          { legacyRecoveredDuringReschedule: true },
+        );
+      }
     } catch (error) {
       if (this.isCalendarAllocationExclusionConflict(error)) {
         throw new ConflictException('Избраният час вече е зает. Моля, изберете друг.');

@@ -36,6 +36,8 @@ May 15 backend allocation-foundation note: standard waitlist placement now write
 
 May 15 deployment hardening note: changing `001_init.sql` alone is not enough for tenant schemas that already exist in a deployed database. Backend startup now enumerates existing tenant schemas and runs the idempotent allocation ensure path for each one, so existing tenants receive `btree_gist`, `calendar_allocations`, its indexes, and the active-exclusive exclusion constraint on the next backend boot without a destructive appointment backfill.
 
+May 15 standard-lifecycle parity note: standard exact-time `POST /appointments` and `POST /appointments/admin` now create appointment + staff allocation together in one tenant transaction, using `held` for pending appointments and `booked` for confirmed appointments. Standard status transitions now promote held allocations on confirmation and make cancelled/completed/no-show allocations non-active. Standard reschedule now updates appointment + allocation atomically, keeps the legacy fallback check during transition, and creates a missing allocation when a legacy appointment is safely rescheduled. Group-service behavior remains unchanged and no standard exclusive participant allocation is created for group services.
+
 ## 2. Current Code Inventory
 
 ### Calendar V2 route and read-only contract
@@ -176,8 +178,9 @@ Current backend service behavior:
 - `backend/src/modules/appointments/appointments.service.ts:831` defines generic `create`.
 - `create` validates service existence at line 847, calculates `endAt` from service duration at line 868, finds or creates the client at line 872, checks appointment conflicts at lines 875-936, checks minimum advance booking at lines 938-944, inserts into `appointments` at lines 964-989, and schedules notifications at line 994.
 - The generic `create` path does not check staff working hours or staff exceptions. Those checks exist in `getAvailableSlots` and `rescheduleAppointment`, not in `create`.
+- For standard exact-time services, generic `create` now validates active allocation conflicts plus the retained buffer-aware legacy appointment fallback, then inserts the appointment and matching staff allocation in one tenant transaction. Pending creates produce `held`; confirmed creates produce `booked`.
 - `backend/src/modules/appointments/appointments.service.ts:1063` defines `updateStatus`.
-- `updateStatus` validates appointment status transitions and sends an immediate status/cancellation notification at lines 1129-1151.
+- `updateStatus` validates appointment status transitions, keeps standard appointment allocations aligned with confirmed/cancelled/completed/no-show lifecycle state, and sends the existing immediate status/cancellation notification.
 - `backend/src/modules/appointments/appointments.service.ts:1262` defines `listWaitlist`.
 - `backend/src/modules/appointments/appointments.service.ts:1314` defines `createBookingRequest`.
 - `createBookingRequest` maps `desiredTimePeriod` to `desiredFrom` and `desiredTo`, calls `createWaitlistEntry`, and returns `{ id, status: 'pending' }` even though the stored waitlist status is `waiting`.
@@ -188,6 +191,7 @@ Current backend service behavior:
 - `backend/src/modules/appointments/appointments.service.ts:1453` defines `notifyWaitlistEntry`, which sends `WAITLIST_AVAILABLE`, then marks the waitlist row `notified` with `last_notified_slot_start_at`.
 - `backend/src/modules/appointments/appointments.service.ts:1534` throws `ConflictException` when waitlist notification sending fails.
 - `backend/src/modules/appointments/appointments.service.ts:1623` defines `rescheduleAppointment`, which validates appointment state, blocks group-service drag/drop moves, validates staff, staff working hours, staff exceptions, and conflicts, then updates the appointment.
+- For standard services, `rescheduleAppointment` now updates appointment + allocation in one tenant transaction, refreshes staff/display/occupied interval fields, keeps the retained legacy fallback query, and materializes a missing allocation during a safe legacy reschedule.
 - `rescheduleAppointment` does not send a notification in the inspected code.
 - `backend/src/modules/appointments/appointments.service.ts:1949` defines `scheduleNotifications`, which sends immediate booking confirmation and queues reminders.
 - `backend/src/modules/appointments/appointments.service.ts:2060` defines `processNotificationNow`, which returns `false` on processor failure instead of throwing to callers.
@@ -210,7 +214,7 @@ Current backend service behavior:
 - `TenantPrismaService.ensureCalendarAllocationsTable(...)` starts at line 189, creates the tenant-local allocation table for existing schemas, adds resource/occupied/source/status indexes, and installs the active-exclusive exclusion constraint after ensuring `btree_gist`.
 - `TenantPrismaService.ensureExistingTenantCalendarAllocations(...)` starts at line 114, runs at backend startup, discovers schemas present in both `public.tenants` and `information_schema.schemata`, and applies the idempotent allocation ensure helper to each already-existing tenant schema.
 - New tenant schemas also receive `calendar_allocations` from `backend/prisma/migrations/001_init.sql`.
-- Existing appointments are still not backfilled; this hardening step upgrades schema only, while the placement flow keeps the legacy appointment conflict query until a validated backfill phase exists.
+- Existing appointments are still not backfilled; this hardening step upgrades schema only, while standard placement/create/reschedule keep the legacy appointment conflict query until a validated backfill phase exists.
 - `TenantPrismaService.queryInSchema` wraps each raw SQL query in its own transaction at `backend/src/common/prisma/tenant-prisma.service.ts:59`.
 - A future placement endpoint must use a single multi-step transaction, not separate `queryInSchema` calls for create and waitlist update.
 
@@ -363,6 +367,8 @@ The current admin flow creates an appointment through `POST /appointments/admin`
 The generic appointment create endpoint also does not perform all placement validations visible in other backend paths. In the inspected code, generic `create` checks appointment conflicts and minimum advance time, but staff working hours and staff exceptions are enforced by `getAvailableSlots` and `rescheduleAppointment`, not by generic `create`.
 
 Implemented backend foundation: add a dedicated placement endpoint and keep it unused by Calendar V2 until frontend integration is intentionally enabled behind a feature flag.
+
+After this lifecycle-parity slice, the next backend decision should be whether to clean up the old two-call `/admin` request placement route first or plan the validated legacy allocation backfill first. Existing appointments are still not backfilled, so allocation-only authority remains intentionally deferred.
 
 Endpoint:
 

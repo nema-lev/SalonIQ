@@ -10,6 +10,8 @@ import { apiClient } from '@/lib/api-client';
 
 const PAGE_TITLES: Record<string, string> = {
   '/admin': 'Календар',
+  '/admin/calendar-v2': 'Календар',
+  '/admin/calendar-legacy': 'Календар',
   '/admin/clients': 'Клиенти',
   '/admin/staff': 'Персонал',
   '/admin/services': 'Услуги & Цени',

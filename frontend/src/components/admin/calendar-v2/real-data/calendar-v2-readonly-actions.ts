@@ -1,7 +1,7 @@
 import type { CalendarV2CommandType } from '../commands';
 
 export const CALENDAR_V2_READONLY_NOTICE =
-  'Calendar V2 Preview · Read-only';
+  'Calendar V2 · Read-only';
 
 export type CalendarV2ReadOnlyAction =
   | Extract<CalendarV2CommandType, 'moveAppointment' | 'placeRequest' | 'confirmRequest' | 'declineRequest' | 'cancelAppointment'>
@@ -9,13 +9,13 @@ export type CalendarV2ReadOnlyAction =
   | 'waitlistPlacement';
 
 const READONLY_ACTION_MESSAGES: Record<CalendarV2ReadOnlyAction, string> = {
-  moveAppointment: 'Appointment movement is disabled in the read-only Calendar V2 preview.',
-  placeRequest: 'Request placement is disabled in the read-only Calendar V2 preview.',
-  confirmRequest: 'Request confirmation is disabled in the read-only Calendar V2 preview.',
-  declineRequest: 'Request decline is disabled in the read-only Calendar V2 preview.',
-  cancelAppointment: 'Appointment cancellation is disabled in the read-only Calendar V2 preview.',
-  createAppointment: 'Appointment creation is disabled in the read-only Calendar V2 preview.',
-  waitlistPlacement: 'Waitlist placement is disabled in the read-only Calendar V2 preview.',
+  moveAppointment: 'Appointment movement is disabled in read-only Calendar V2.',
+  placeRequest: 'Request placement is disabled in read-only Calendar V2.',
+  confirmRequest: 'Request confirmation is disabled in read-only Calendar V2.',
+  declineRequest: 'Request decline is disabled in read-only Calendar V2.',
+  cancelAppointment: 'Appointment cancellation is disabled in read-only Calendar V2.',
+  createAppointment: 'Appointment creation is disabled in read-only Calendar V2.',
+  waitlistPlacement: 'Waitlist placement is disabled in read-only Calendar V2.',
 };
 
 export function getCalendarV2ReadOnlyActionMessage(action: CalendarV2ReadOnlyAction) {

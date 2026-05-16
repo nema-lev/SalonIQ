@@ -13,6 +13,13 @@ Verified scope of this document:
 
 Calendar V2 must treat visible slots as projections only. The scheduler grid, Action Inbox, selected slot, hover preview, and local placement outline are client projections of backend state. They are not scheduling authority.
 
+As of 2026-05-16, Calendar V2 is also the primary admin calendar direction in the frontend:
+
+- `/admin` renders Calendar V2 in real-data mode by default.
+- `/admin/calendar-v2` remains an alias route.
+- `/admin/calendar-legacy` preserves the old calendar only as a temporary fallback for emergency comparison/debugging.
+- This route promotion does not change scheduling authority, backend endpoints, schema, or Calendar V2 write capability.
+
 The backend scheduling engine must be the only authority for committed scheduling state. Every future write action must go through one unified scheduling command path:
 
 - place request
@@ -37,7 +44,9 @@ The production rule is:
 
 ### Calendar V2 Frontend
 
-- `frontend/src/app/(tenant)/admin/calendar-v2/page.tsx` renders `CalendarV2RealDataAdapter` and can disable the preview route with `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW === 'true'`.
+- `frontend/src/app/(tenant)/admin/page.tsx` renders `CalendarV2RealDataAdapter` as the primary admin calendar route.
+- `frontend/src/app/(tenant)/admin/calendar-v2/page.tsx` renders `CalendarV2RealDataAdapter` as an alias route and can disable that alias with `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW === 'true'`.
+- `frontend/src/app/(tenant)/admin/calendar-legacy/page.tsx` preserves `AdminCalendarWorkspace` as a temporary fallback route.
 - `frontend/src/components/admin/calendar-v2/real-data/CalendarV2RealDataAdapter.tsx` defines `ENABLE_CALENDAR_V2_PLACEMENT_SAVE` from `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === 'true'`.
 - `CalendarV2RealDataAdapter` sets `canSavePlacement` only when the placement-save flag is true and `sample=1` is not active.
 - Placement save calls one path through `apiClient.post(request.path, request.payload)`, then refetches or invalidates `appointments-calendar-board`, `appointments-waitlist`, and `appointment-context`.
@@ -55,11 +64,17 @@ The production rule is:
 
 ### Current Admin Calendar Baseline
 
-- `frontend/src/components/admin/admin-calendar-workspace.tsx` keeps the current production admin calendar UI, but request placement now calls the dedicated transactional waitlist placement endpoint.
+- `frontend/src/components/admin/admin-calendar-workspace.tsx` keeps the legacy admin calendar UI for `/admin/calendar-legacy`, but request placement now calls the dedicated transactional waitlist placement endpoint.
 - `placeRequestMutation` calls `POST /appointments/waitlist/:waitlistId/place` with `{ staffId, startAt, durationMinutes, idempotencyKey, notifyClient: false }`.
 - The old placement-only two-call sequence of `POST /appointments/admin` followed by `PATCH /appointments/waitlist/:id/status` has been removed from the current `/admin` request placement flow; the endpoint now creates the appointment and books the waitlist row together.
 - `resolvePlacement(...)` still performs frontend checks for staff working hours, staff exceptions, and appointment overlap before the current admin drag placement.
-- Existing `/admin` remains default. Calendar V2 is a direct preview route.
+- `/admin` now renders Calendar V2 by default. The legacy calendar is fallback-only at `/admin/calendar-legacy`.
+
+### Current Frontend Limitations And Recommended Next Work
+
+- Still disabled in Calendar V2: persisted drag-to-move, resize, recurring bookings, notifications, realtime collaboration, and full phone placement flow.
+- The currently enabled write surface remains only explicit waitlist/request placement when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"` and sample mode is off.
+- Recommended next tasks: complete the phone-specific calendar flow, then add move/resize persistence only after the shared scheduling command path, conflict handling, and rollback/reconciliation behavior are ready.
 
 ### Backend Endpoint And Transaction Behavior
 

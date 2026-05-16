@@ -20,8 +20,8 @@ import { buildCalendarV2SampleDayProjection } from './calendar-v2-sample-day';
 
 const ENABLE_CALENDAR_V2_PLACEMENT_SAVE =
   process.env.NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === 'true';
-const CALENDAR_V2_READONLY_NOTICE = 'Calendar V2 Preview · Read-only';
-const CALENDAR_V2_PLACEMENT_SAVE_NOTICE = 'Calendar V2 Preview · Request placement enabled';
+const CALENDAR_V2_READONLY_NOTICE = 'Calendar V2 · Read-only';
+const CALENDAR_V2_PLACEMENT_SAVE_NOTICE = 'Calendar V2 · Request placement enabled';
 
 type PlaceWaitlistEntryResponse = {
   id?: string;
@@ -169,8 +169,7 @@ export function CalendarV2RealDataAdapter() {
           <p className="text-xs font-black uppercase text-slate-500">{modeNotice}</p>
           <h2 className="mt-2 text-xl font-black text-slate-950">Calendar data is unavailable.</h2>
           <p className="mt-2 max-w-2xl font-semibold leading-6 text-slate-600">
-            The current admin calendar read did not complete. Fixture data is not shown on this production
-            preview route.
+            The current admin calendar read did not complete. Fixture data is not shown on the Calendar V2 route.
           </p>
           <p className="mt-3 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">
             {getApiErrorMessage(error, 'The existing calendar read endpoint returned an unknown error.')}
@@ -195,7 +194,7 @@ export function CalendarV2RealDataAdapter() {
               Show sample day
             </button>
             <span className="text-xs font-bold text-slate-500">
-              The current /admin calendar remains the default calendar.
+              Calendar V2 is the primary admin calendar.
             </span>
           </div>
         </div>
@@ -217,7 +216,7 @@ export function CalendarV2RealDataAdapter() {
     ? 'Reading from the current admin calendar.'
     : isFetching
       ? 'Refreshing current calendar reads.'
-      : 'The current /admin calendar remains default.';
+      : 'Calendar V2 is the primary admin calendar.';
   const toolbarNote = isSampleMode ? (
     <>
       <span>Sample day · Read-only</span>
@@ -246,7 +245,7 @@ export function CalendarV2RealDataAdapter() {
       enableLocalPlacementPreview
       readOnlyNotice={modeNotice}
       schedulerNotice={schedulerNotice}
-      toolbarEyebrow="Calendar V2 Preview"
+      toolbarEyebrow="Calendar V2"
       toolbarNote={toolbarNote}
       toolbarControls={headerControls}
       actionInboxSubtitle={actionInboxSubtitle}

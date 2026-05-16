@@ -512,7 +512,7 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
         const placementPreviewSource = readSource(sourceDir, 'NativeSchedulerPlacementPreview.tsx');
 
         assert(
-          adapterSource.includes('Calendar V2 Preview · Request placement enabled') &&
+          adapterSource.includes('Calendar V2 · Request placement enabled') &&
             adapterSource.includes('const modeNotice = canSavePlacement'),
           'real-data placement-save mode should use an enabled placement label instead of read-only copy',
         );

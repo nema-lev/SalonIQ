@@ -1,12 +1,12 @@
 # Calendar V2 foundation
 
-This folder contains renderer-independent contracts for a future admin Calendar V2.
+This folder contains the renderer-independent contracts and current admin Calendar V2 implementation.
 
-- This is a foundation only. It does not change the current admin calendar route or UI.
-- The Calendar V2 preview is available on `main` at `/admin/calendar-v2` for direct Oracle testing.
+- Calendar V2 is now the primary admin calendar direction and renders by default at `/admin`.
+- `/admin/calendar-v2` remains available as an alias route for direct access and sample-mode review.
+- The legacy admin calendar is preserved only as an emergency fallback at `/admin/calendar-legacy`; it is no longer the main operational route.
 - An explicit read-only sample scenario is available at `/admin/calendar-v2?sample=1` for visual review when the current tenant has no bookings.
-- The preview route is enabled by default and can be disabled with `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW=true`.
-- The current `/admin` calendar remains the default production calendar.
+- The `/admin/calendar-v2` alias route is enabled by default and can be disabled with `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW=true`.
 - Calendar V2 write actions are disabled by default. With `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"`, real-data mode can save only waitlist/request placement through the dedicated placement endpoint.
 - Calendar V2 now supports a local-only Action Inbox request placement preview: choose an untimed demand item, click a staff/time slot, and review the proposed placement without saving.
 - Placement preview UI is customer-facing Bulgarian copy only: command ids, local idempotency keys, ISO timestamps, and internal command names are not rendered.
@@ -19,8 +19,8 @@ This folder contains renderer-independent contracts for a future admin Calendar 
 - Sample mode remains visual-only and read-only; it does not call read or write APIs.
 - Request placement persistence remains disabled unless `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"` and sample mode is off. The preview command remains typed as `placeRequest` with `localOnly: true`; the explicit save action sends the dedicated waitlist placement call with `notifyClient: false`.
 - Move, create, cancel, confirmed placement, no-show, completed, and in-service actions remain disabled in Calendar V2.
-- The preview UI is desktop-first: the scheduler is the hero, the right rail stays lightweight, and the header keeps only date controls plus one subtle capability indicator.
-- The production preview renders available staff/resources even when names look like sample/demo labels, with a quiet toolbar note when that happens.
+- The current Calendar V2 UI is desktop-first: the scheduler is the hero, the right rail stays lightweight, and the header keeps only date controls plus one subtle capability indicator.
+- The primary Calendar V2 route renders available staff/resources even when names look like sample/demo labels, with a quiet toolbar note when that happens.
 - Real data mode remains the default. Empty real-data days keep staff columns visible and offer a compact `Show sample day` action instead of injecting fake production data.
 - Sample mode uses clearly labeled Bulgarian salon sample data, shows `Sample day · Read-only`, and provides `Back to real data`.
 - Sample mode supports the same local-only request placement preview and remains non-writing.
@@ -37,3 +37,10 @@ This folder contains renderer-independent contracts for a future admin Calendar 
 - Future write interactions should go through typed commands before they are wired to API calls.
 - Calendar V2 can save request placement only in real-data mode when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"`.
 - Backend note: standard saved request placement now creates a booked staff `calendar_allocations` row with separate display and buffer-expanded occupied intervals; this changes scheduling authority only, not Calendar V2 UI behavior.
+
+## Known limitations and next recommended tasks
+
+- Calendar V2 still does not persist drag-to-move, resize, recurring bookings, notifications, or realtime collaboration.
+- The phone-width experience is still intentionally incomplete and uses the separate agenda notice instead of a full placement flow.
+- Existing disabled/coming-next states should remain honest until the backend scheduling path supports the corresponding write.
+- Recommended next work: finish the phone-specific calendar flow, then add persisted move/resize only after the shared scheduling engine and reconciliation path are ready.

@@ -2,9 +2,11 @@
 
 ## Scope
 
-- Route: `/admin/calendar-v2`
-- Gate: enabled by default unless `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW === "true"`.
-- Visibility: direct URL only and unlinked from admin navigation.
+- Primary route: `/admin`
+- Alias route: `/admin/calendar-v2`
+- Legacy fallback route: `/admin/calendar-legacy`
+- Alias gate: `/admin/calendar-v2` is enabled by default unless `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW === "true"`.
+- Visibility: the alias and legacy fallback remain unlinked from admin navigation.
 - Default route data: real data through the current admin calendar board, waitlist, and services read endpoints.
 - Fixture data is preserved for isolated native scheduler component work only. The deployed `/admin/calendar-v2` real-data preview no longer links to fixture data after a read error.
 
@@ -17,7 +19,7 @@
 
 ## What Works
 
-- Hidden route renders the native scheduler from real appointments, staff, services, waitlist entries, and staff exceptions when the feature flag is enabled and current admin auth/tenant context can read the existing calendar data.
+- The primary route renders the native scheduler from real appointments, staff, services, waitlist entries, and staff exceptions when current admin auth/tenant context can read the existing calendar data.
 - Real-data route keeps appointment drag handles and waitlist drag-to-place controls disabled.
 - Real-data and sample routes now allow a click-to-place preview for Action Inbox waitlist/demand items. The owner selects `Постави в графика`, clicks a staff/time slot, and sees a lightweight placement preview.
 - Real-data route can save only that waitlist/request placement when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"`. Sample mode and flag-off real mode remain non-writing.
@@ -71,7 +73,8 @@ In the real-data route, appointment move handles are disabled.
 
 - Date of pass: 2026-05-05.
 - Added `frontend/src/components/admin/use-admin-calendar-board-data.ts` to share the existing current-calendar read path without changing query keys, endpoints, refetch intervals, or current calendar mutations.
-- Direct route `/admin/calendar-v2` now renders `CalendarV2RealDataAdapter` unless `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW === "true"`.
+- Primary route `/admin` now renders `CalendarV2RealDataAdapter`.
+- Alias route `/admin/calendar-v2` also renders `CalendarV2RealDataAdapter` unless `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW === "true"`.
 - The adapter reads `GET /appointments/calendar-board`, `GET /appointments/waitlist`, and `GET /services/admin` through the existing `apiClient`.
 - Appointments for the selected day are projected to `CalendarV2Appointment` and `CalendarV2CalendarBlock` with `buildCalendarV2Projection(...)`.
 - Staff is mapped to native scheduler resources.
@@ -94,6 +97,17 @@ In the real-data route, appointment move handles are disabled.
 - Calendar V2 is not linked from admin navigation.
 - Calendar V2 write actions remain intentionally disabled: no appointment creation, no persisted appointment move, no waitlist placement, no status transition, no optimistic persistence, and no write API call from the preview route.
 - User-facing route language now says `Calendar V2 Preview` and `Read-only` instead of `spike`.
+
+## Primary-route promotion
+
+- Date of promotion: 2026-05-16.
+- Primary route: `/admin`.
+- Alias route: `/admin/calendar-v2`.
+- Legacy fallback route: `/admin/calendar-legacy`.
+- Calendar V2 is now the main admin calendar direction; the legacy calendar remains only for emergency comparison/debugging.
+- User-facing route language now says `Calendar V2`, `Request placement enabled`, or `Read-only` when applicable rather than presenting the main route as a preview.
+- Existing limitations remain intentional: no persisted drag-to-move, no resize, no recurring bookings, no notifications, no realtime collaboration, and no complete phone placement flow.
+- Recommended next work: complete the phone-specific flow, then add persisted move/resize only after the shared scheduling command path and reconciliation behavior are ready.
 
 ## Current Calendar Parity QA
 
@@ -147,7 +161,7 @@ In the real-data route, appointment move handles are disabled.
 - Sample Action Inbox includes read-only examples for an untimed request, pending approval, cancellation recovery, and a client message needing response.
 - Booking Detail shows selected sample appointment time, service, staff, status/progress, message cue, and notes without enabling edits.
 - Calendar V2 remains read-only: no appointment creation, move persistence, waitlist placement persistence, status changes, or write API calls from sample mode.
-- Current `/admin` remains the default production calendar and is not replaced by Calendar V2.
+- `/admin` now renders Calendar V2; `/admin/calendar-legacy` preserves the old calendar only as fallback.
 - Screenshots captured under `screenshots/`: `calendar-v2-sample-day-real-1440x900.png`, `calendar-v2-sample-day-1440x900.png`, `calendar-v2-sample-day-1366x768.png`, and `calendar-v2-sample-day-390x844.png`.
 - Visual QA result from `/private/tmp/saloniq-calendar-v2-sample-day-qa-results.json`: real empty state kept the grid and `Show sample day` action visible, sample mode rendered staff/appointments/Action Inbox/Booking Detail, phone fallback remained visible, appointment drag grip count was `0`, waitlist placement button count was `0`, and `writesAfterV2` was empty.
 
@@ -161,7 +175,7 @@ In the real-data route, appointment move handles are disabled.
 - Action Inbox cards now have stronger hierarchy, quieter read-only tags, and compact scrolling that avoids cutting visible cards at the checked desktop sizes.
 - Booking Detail now starts with a selected-booking summary card for client, service, time, and staff, followed by status/message/note cues in a less table-like layout.
 - Calendar V2 remains read-only: no appointment creation, persisted moves, waitlist placement, status changes, drag grips, placement controls, or write API calls are enabled in real or sample mode.
-- Current `/admin` remains the default production calendar and is not replaced by Calendar V2.
+- `/admin` now renders Calendar V2; `/admin/calendar-legacy` preserves the old calendar only as fallback.
 - Screenshots captured under `screenshots/`: `calendar-v2-visual-refine-sample-1440x900.png`, `calendar-v2-visual-refine-sample-1366x768.png`, `calendar-v2-visual-refine-real-1440x900.png`, and `calendar-v2-visual-refine-sample-390x844.png`.
 - Visual QA result from `/private/tmp/saloniq-calendar-v2-visual-refine-qa-results.json`: sample badge, selected Booking Detail, non-blocking real empty state, and phone fallback were visible; appointment drag grip count was `0`, waitlist placement button count was `0`, and `writesAfterV2` was empty.
 - Remaining UX limitations: phone still intentionally shows the separate agenda-renderer notice, tablet portrait remains out of scope, and Booking Detail can still scroll when selected notes are longer than the available rail height.
@@ -174,7 +188,7 @@ In the real-data route, appointment move handles are disabled.
 - Read-only resource columns now shrink within a safe minimum so common four-staff sample layouts avoid a horizontal scheduler scrollbar at 1366x768.
 - The right rail now uses explicit stacked grid rows: Action Inbox gets more room for visible queue cards, Booking Detail stays usable below it, and each panel scrolls internally only when its own content exceeds the available height.
 - Calendar V2 remains read-only: no appointment creation, persisted moves, waitlist placement, status changes, drag grips, placement controls, or write API calls are enabled in real or sample mode.
-- Current `/admin` remains the default production calendar and is not replaced by Calendar V2.
+- `/admin` now renders Calendar V2; `/admin/calendar-legacy` preserves the old calendar only as fallback.
 - Screenshots captured under `screenshots/`: `calendar-v2-layout-hardening-sample-1440x900.png`, `calendar-v2-layout-hardening-sample-1366x768.png`, `calendar-v2-layout-hardening-real-1440x900.png`, and `calendar-v2-layout-hardening-sample-390x844.png`.
 - Visual QA result from `/private/tmp/saloniq-calendar-v2-layout-hardening-qa-results.json`: outer admin/page scroll overflow was `0` at the checked desktop sizes, the scheduler grid retained vertical scroll, the phone fallback remained visible, appointment drag grip count was `0`, waitlist placement button count was `0`, and `writesAfterV2` was empty.
 - Remaining UX limitations: phone still intentionally shows the separate agenda-renderer notice, tablet portrait remains out of scope, and long selected-booking notes can still scroll inside Booking Detail.
@@ -193,7 +207,7 @@ In the real-data route, appointment move handles are disabled.
 - Confirm/save, appointment creation, waitlist placement persistence, waitlist status changes, appointment status changes, cancellation, notifications, and reschedule APIs remain disabled.
 - Sample mode supports placement preview and remains non-writing.
 - Real-data mode supports placement preview when waitlist/demand items are returned by the read endpoints.
-- Current `/admin` remains the default production calendar and is not replaced by Calendar V2.
+- `/admin` now renders Calendar V2; `/admin/calendar-legacy` preserves the old calendar only as fallback.
 - Screenshots captured under `screenshots/`: `calendar-v2-local-placement-sample-active-1440x900.png`, `calendar-v2-local-placement-sample-preview-1440x900.png`, `calendar-v2-local-placement-sample-1366x768.png`, `calendar-v2-local-placement-real-1440x900.png`, and `calendar-v2-local-placement-sample-390x844.png`.
 - Visual/network QA result from `/private/tmp/saloniq-calendar-v2-local-placement-qa-results.json`: sample placement preview visible, real placement preview visible with mock demand, phone fallback visible, and `writesAfterPlacementPreview` was empty.
 - Remaining UX limitations: phone still intentionally shows the separate agenda-renderer notice, the future backend placement endpoint is not implemented, and backend conflict/working-hours validation is still required before persistence.
@@ -206,7 +220,7 @@ In the real-data route, appointment move handles are disabled.
 - The right rail now switches to placement context as soon as placement mode starts, keeps that context after slot selection, and no longer shows unrelated selected booking details during the active placement flow.
 - Sample/status copy no longer surfaces checked-in wording in the main Calendar V2 card/detail UI; salon-facing labels use calmer Bulgarian status copy such as `потвърден`, `насрочен`, and `очакван` where applicable.
 - Save/confirm placement remains disabled. Calendar V2 still calls no appointment creation, waitlist placement, waitlist status, appointment status, notification, cancel, or reschedule write API from this flow.
-- Sample mode and real-data mode remain non-writing; current `/admin` remains the default production calendar.
+- Sample mode and real-data mode remain non-writing; `/admin` now renders Calendar V2 and `/admin/calendar-legacy` preserves the old calendar only as fallback.
 - A future dedicated backend placement endpoint is still required before Calendar V2 can persist request placement.
 - Screenshots captured under `screenshots/`: `calendar-v2-placement-polish-sample-active-1440x900.png`, `calendar-v2-placement-polish-sample-preview-1440x900.png`, `calendar-v2-placement-polish-sample-preview-1366x768.png`, `calendar-v2-placement-polish-real-1440x900.png`, and `calendar-v2-placement-polish-sample-390x844.png`.
 

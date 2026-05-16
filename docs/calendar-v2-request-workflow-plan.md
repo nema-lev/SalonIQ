@@ -1,6 +1,6 @@
 # Calendar V2 Request Workflow Implementation Plan
 
-This document is a living implementation blueprint. It records the current repo behavior and the staged Calendar V2 request workflow. As of the frontend placement-save step, the server has a dedicated waitlist placement endpoint and Calendar V2 can call it only when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"` in real-data mode. The current `/admin` calendar remains the default.
+This document is a living implementation blueprint. It records the current repo behavior and the staged Calendar V2 request workflow. As of the frontend placement-save step, the server has a dedicated waitlist placement endpoint and Calendar V2 can call it only when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"` in real-data mode. As of 2026-05-16, `/admin` renders Calendar V2 by default and the legacy calendar is fallback-only at `/admin/calendar-legacy`.
 
 ## 1. Executive Decision
 
@@ -40,12 +40,24 @@ May 15 standard-lifecycle parity note: standard exact-time `POST /appointments` 
 
 May 15 current-calendar routing note: the production `/admin` request placement flow now calls `POST /appointments/waitlist/:waitlistId/place` with `notifyClient: false` instead of performing a separate appointment create followed by a separate waitlist-booked patch. The dedicated endpoint remains silent, backfill is still pending, and allocation-only authority is still deferred.
 
+May 16 primary-route note: Calendar V2 is now the primary admin calendar direction. `/admin` renders Calendar V2 in real-data mode, `/admin/calendar-v2` remains an alias, and `/admin/calendar-legacy` preserves the old calendar only for emergency comparison/debugging. This promotion does not add new writes, does not change request placement save behavior, and does not alter backend/schema/deployment state.
+
+Current intentional limitations remain: no persisted drag-to-move, no resize, no full mobile placement flow, no notifications, no recurring appointments, and no advanced realtime collaboration.
+
+Recommended next tasks after this promotion:
+
+1. Finish the phone-specific Calendar V2 flow instead of expanding the legacy UI.
+2. Add persisted move/resize only after the shared scheduling command path and rollback/reconciliation behavior are ready.
+3. Keep disabled/coming-next UI states honest until each write has backend support.
+
 ## 2. Current Code Inventory
 
 ### Calendar V2 route and read-only contract
 
-- `frontend/src/app/(tenant)/admin/calendar-v2/page.tsx:9` renders `AdminCalendarV2PreviewPage`.
-- `frontend/src/app/(tenant)/admin/calendar-v2/page.tsx:10` disables the preview route when `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW === 'true'`.
+- `frontend/src/app/(tenant)/admin/page.tsx` renders `CalendarV2RealDataAdapter` as the primary admin calendar route.
+- `frontend/src/app/(tenant)/admin/calendar-v2/page.tsx` renders `CalendarV2RealDataAdapter` as an alias route.
+- `frontend/src/app/(tenant)/admin/calendar-v2/page.tsx` disables only the alias route when `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW === 'true'`.
+- `frontend/src/app/(tenant)/admin/calendar-legacy/page.tsx` preserves `AdminCalendarWorkspace` as the legacy fallback route.
 - `frontend/src/components/admin/calendar-v2/real-data/CalendarV2RealDataAdapter.tsx:15` defines `CalendarV2RealDataAdapter`.
 - `CalendarV2RealDataAdapter` reads current admin calendar data through `useAdminCalendarBoardData(...)` at `frontend/src/components/admin/calendar-v2/real-data/CalendarV2RealDataAdapter.tsx:26`.
 - `CalendarV2RealDataAdapter` passes `readOnly` to `NativeSchedulerV2Spike` at `frontend/src/components/admin/calendar-v2/real-data/CalendarV2RealDataAdapter.tsx:170`.
@@ -114,7 +126,7 @@ May 15 current-calendar routing note: the production `/admin` request placement 
 - `frontend/src/components/admin/admin-calendar-workspace.tsx:321` defines `invalidateCalendar`, which refetches the board and invalidates `appointments-calendar-board`, `appointments-waitlist`, and `appointment-context`.
 - `frontend/src/components/admin/admin-calendar-workspace.tsx:328` patches `/appointments/:id/status`.
 - `frontend/src/components/admin/admin-calendar-workspace.tsx:341` patches `/appointments/:id/reschedule`.
-- `frontend/src/components/admin/admin-calendar-workspace.tsx` still patches `/appointments/waitlist/:id/status` for archive/cancel handling only.
+- `frontend/src/components/admin/admin-calendar-workspace.tsx` remains available through `/admin/calendar-legacy` and still patches `/appointments/waitlist/:id/status` for archive/cancel handling only.
 - `frontend/src/components/admin/admin-calendar-workspace.tsx` places a waitlist request by calling `POST /appointments/waitlist/:waitlistId/place` with `staffId`, `startAt`, `durationMinutes`, `idempotencyKey`, and `notifyClient: false`.
 - The old current-calendar placement-only sequence of `POST /appointments/admin` followed by `PATCH /appointments/waitlist/:id/status` has been removed; appointment creation and waitlist booking now happen in one backend transaction.
 - `frontend/src/components/admin/admin-calendar-workspace.tsx:401` performs client-side placement checks for staff working hours, blocked time, and appointment overlap.
@@ -944,7 +956,7 @@ Implementation note, 2026-05-08:
 - With the flag on in real-data mode, explicit save calls `POST /appointments/waitlist/:waitlistId/place` with `notifyClient: false`, then backend refresh wins.
 - With the flag off, placement remains local-only and no write API is called.
 - In sample mode, save remains disabled and no write API is called.
-- The current `/admin` calendar remains the default production calendar.
+- As of 2026-05-16, `/admin` renders Calendar V2 and `/admin/calendar-legacy` preserves the old calendar only as fallback.
 - A dedicated backend placement endpoint now exists and is wired only behind the frontend feature flag.
 
 Risks:

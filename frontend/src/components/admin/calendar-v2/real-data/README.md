@@ -1,17 +1,17 @@
 # Calendar V2 Real-Data Adapter
 
-This folder connects the direct `/admin/calendar-v2` preview route to the existing admin calendar read path.
+This folder connects the primary Calendar V2 admin route to the existing admin calendar read path.
 
-## Main Preview Route
+## Main Route
 
-- Calendar V2 preview is deployed on `main` for hands-on Oracle testing.
-- Route: `/admin/calendar-v2`.
+- Calendar V2 is the primary admin calendar direction on `main`.
+- Primary route: `/admin`.
+- Alias route: `/admin/calendar-v2`.
 - Explicit sample route: `/admin/calendar-v2?sample=1`.
-- The current `/admin` calendar remains the default and production calendar.
-- The preview route is available by default.
-- To disable the preview route in an environment, set `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW=true`.
-- The route is intentionally not added to admin navigation.
-- The production preview route does not expose the fixture scheduler after read errors.
+- Legacy fallback route: `/admin/calendar-legacy`.
+- The legacy fallback is intentionally not added to admin navigation.
+- To disable only the `/admin/calendar-v2` alias route in an environment, set `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW=true`.
+- The Calendar V2 route does not expose the fixture scheduler after read errors.
 
 ## Data Source
 
@@ -35,15 +35,15 @@ This folder connects the direct `/admin/calendar-v2` preview route to the existi
 - Demo/sample-labeled staff/resource values are still rendered when they come from the current read path. The UI adds a quiet toolbar note instead of blocking the scheduler.
 - When `sample=1` is present, the adapter swaps in a clearly labeled read-only Bulgarian salon sample day with staff, appointments, blocked time, and Action Inbox examples.
 
-## Preview UX States
+## UX States
 
-- Header: date navigation, date picker, Today, and one subtle mode indicator. Sample mode and flag-off real mode show `Calendar V2 Preview · Read-only`; flag-on real mode shows `Calendar V2 Preview · Request placement enabled`.
+- Header: date navigation, date picker, Today, and one subtle mode indicator. Sample mode and flag-off real mode show `Calendar V2 · Read-only`; flag-on real mode shows `Calendar V2 · Request placement enabled`.
 - Scheduler: fills the desktop calendar canvas and shows compact, non-blocking notices for loading, no staff resources, and no scheduled appointments.
 - Action Inbox: shows request/recovery items when present and a compact empty state when there is nothing to act on.
 - Booking Detail: shows selected booking facts or a compact no-selection state.
 - Real empty day: keeps staff columns visible and offers a compact `Show sample day` action.
 - Sample mode: shows `Sample day · Read-only` plus `Back to real data`.
-- Read error: shows retry and `Show sample day` actions while stating that fixture data is not shown on the production preview route.
+- Read error: shows retry and `Show sample day` actions while stating that fixture data is not shown on the Calendar V2 route.
 
 ## Limited Write Contract
 
@@ -54,7 +54,7 @@ This folder connects the direct `/admin/calendar-v2` preview route to the existi
 - No optimistic persistence.
 - No notifications from Calendar V2 placement save.
 
-The native scheduler receives `readOnly` props on the hidden real-data route. Appointment drag handles and demand drag-to-place controls are disabled there.
+The native scheduler receives `readOnly` props in the current real-data route. Appointment drag handles and demand drag-to-place controls are disabled there.
 
 ## Visit Progress Direction
 
@@ -67,7 +67,7 @@ The native scheduler receives `readOnly` props on the hidden real-data route. Ap
 ## What Not To Do Here
 
 - Do not add backend APIs or change tenant resolution.
-- Do not change the current `/admin` calendar route behavior.
+- Do not re-promote the legacy calendar as the default route from this layer.
 - Do not move renderer-specific behavior into domain projections.
 - Do not persist Calendar V2 commands from this layer.
 - Do not place untimed waitlist/request demand as scheduled calendar blocks.
@@ -78,4 +78,4 @@ The native scheduler receives `readOnly` props on the hidden real-data route. Ap
 - Phone width still shows the separate-agenda notice.
 - Global notification/FYI items are not fetched here because the current calendar has no shared global notification feed for this view.
 - Drag/drop is disabled for real data in this pass instead of showing a local read-only preview command.
-- The isolated fixture scheduler still exists for local component work, but the deployed real-data preview route no longer links to it after a read error.
+- The isolated fixture scheduler still exists for local component work, but the deployed real-data route no longer links to it after a read error.

@@ -33,7 +33,12 @@ import {
 import {
   NativeSchedulerPreviewPanel,
   type NativeSchedulerPlacementPanelContext,
+  type NativeSchedulerReschedulePanelContext,
 } from './NativeSchedulerPreviewPanel';
+import {
+  NativeSchedulerReschedulePreview,
+  type NativeSchedulerReschedulePreviewState,
+} from './NativeSchedulerReschedulePreview';
 import {
   nativeSchedulerActionInboxItems,
   nativeSchedulerCalendarBlocks,
@@ -63,6 +68,10 @@ import {
   usesFallbackPlacementDuration,
   type NativeSchedulerDragOverlay,
 } from './native-scheduler-drag';
+import {
+  buildAppointmentRescheduleSaveRequestIfValid,
+  type AppointmentRescheduleSaveRequest,
+} from './native-scheduler-reschedule-booking';
 import styles from './native-scheduler.module.css';
 
 type ActiveDragOperation =
@@ -110,6 +119,7 @@ type NativeSchedulerV2SpikeProps = {
   manualBooking?: NativeSchedulerManualBookingOptions;
   confirmBooking?: NativeSchedulerConfirmBookingOptions;
   cancelBooking?: NativeSchedulerCancelBookingOptions;
+  rescheduleBooking?: NativeSchedulerRescheduleBookingOptions;
 };
 
 export type NativeSchedulerPlacementSaveResult = {
@@ -139,11 +149,20 @@ export type NativeSchedulerConfirmBookingOptions = {
   onConfirm?: (appointmentId: string) => Promise<NativeSchedulerConfirmBookingResult | void>;
 };
 
+export type NativeSchedulerRescheduleBookingOptions = {
+  enabled: boolean;
+  onSave?: (request: AppointmentRescheduleSaveRequest) => Promise<NativeSchedulerRescheduleBookingResult | void>;
+};
+
 export type NativeSchedulerCancelBookingResult = {
   appointmentVisibleAfterRefresh?: boolean;
 };
 
 export type NativeSchedulerConfirmBookingResult = {
+  appointmentVisibleAfterRefresh?: boolean;
+};
+
+export type NativeSchedulerRescheduleBookingResult = {
   appointmentVisibleAfterRefresh?: boolean;
 };
 
@@ -174,6 +193,7 @@ export function NativeSchedulerV2Spike({
   manualBooking,
   confirmBooking,
   cancelBooking,
+  rescheduleBooking,
 }: NativeSchedulerV2SpikeProps = {}) {
   const sourceBlocks = calendarBlocks ?? nativeSchedulerCalendarBlocks;
   const schedulerDate = date ?? nativeSchedulerDate;
@@ -192,6 +212,14 @@ export function NativeSchedulerV2Spike({
   const [placementTarget, setPlacementTarget] = useState<NativeSchedulerGridDropPreview | null>(null);
   const [placementMessage, setPlacementMessage] = useState<string | null>(null);
   const [placementSaveStatus, setPlacementSaveStatus] = useState<PlacementSaveStatus>({
+    state: 'idle',
+    message: null,
+  });
+  const [rescheduleSourceBlock, setRescheduleSourceBlock] = useState<CalendarV2CalendarBlock | null>(null);
+  const [rescheduleTarget, setRescheduleTarget] = useState<NativeSchedulerGridDropPreview | null>(null);
+  const [reschedulePreview, setReschedulePreview] = useState<NativeSchedulerReschedulePreviewState | null>(null);
+  const [rescheduleMessage, setRescheduleMessage] = useState<string | null>(null);
+  const [rescheduleSaveStatus, setRescheduleSaveStatus] = useState<PlacementSaveStatus>({
     state: 'idle',
     message: null,
   });
@@ -224,9 +252,18 @@ export function NativeSchedulerV2Spike({
     setDropPreview(null);
     setLastCommand(null);
   }, []);
+  const clearRescheduleMode = useCallback(() => {
+    setRescheduleSourceBlock(null);
+    setRescheduleTarget(null);
+    setReschedulePreview(null);
+    setRescheduleMessage(null);
+    setRescheduleSaveStatus({ state: 'idle', message: null });
+    setDropPreview(null);
+  }, []);
   const placementModeActive = enableLocalPlacementPreview && Boolean(placementDemandItem);
+  const rescheduleModeActive = Boolean(rescheduleSourceBlock);
   const manualBookingEnabled = Boolean(manualBooking?.enabled && manualBooking.onOpen);
-  const visibleDropPreview = placementTarget ?? dropPreview;
+  const visibleDropPreview = rescheduleTarget ?? placementTarget ?? dropPreview;
   const selectedPlacementIsPast = placementPreview
     ? isPastPlacementStart(placementPreview.command.target.startAt, currentTime)
     : false;
@@ -260,6 +297,30 @@ export function NativeSchedulerV2Spike({
       onCancel: clearPlacementMode,
     };
   }, [clearPlacementMode, placementContextDemandItem, placementPreview, placementTarget]);
+  const reschedulePanelContext = useMemo<NativeSchedulerReschedulePanelContext | null>(() => {
+    if (!rescheduleSourceBlock) return null;
+
+    const target = reschedulePreview
+      ? {
+          staffName: reschedulePreview.target.staffName,
+          timeLabel: formatTargetTime(reschedulePreview.target),
+          startAt: reschedulePreview.target.startAt,
+        }
+      : rescheduleTarget
+        ? {
+            staffName: rescheduleTarget.staffName,
+            timeLabel: formatTargetTime(rescheduleTarget),
+            startAt: rescheduleTarget.startAt,
+          }
+        : null;
+
+    return {
+      sourceBlock: rescheduleSourceBlock,
+      target,
+      hasConflict: Boolean(reschedulePreview?.target.hasConflict ?? rescheduleTarget?.hasConflict),
+      onCancel: clearRescheduleMode,
+    };
+  }, [clearRescheduleMode, reschedulePreview, rescheduleSourceBlock, rescheduleTarget]);
 
   useEffect(() => {
     setBlocks(sourceBlocks);
@@ -296,6 +357,16 @@ export function NativeSchedulerV2Spike({
 
     clearPlacementMode();
   }, [clearPlacementMode, demandItems, placementDemandItem]);
+
+  useEffect(() => {
+    if (!rescheduleSourceBlock) return;
+
+    setRescheduleTarget(null);
+    setReschedulePreview(null);
+    setRescheduleMessage('Изберете нов свободен час в календара.');
+    setRescheduleSaveStatus({ state: 'idle', message: null });
+    setDropPreview(null);
+  }, [rescheduleSourceBlock, schedulerDate]);
 
   const resolveDropTarget = useCallback(
     ({
@@ -534,6 +605,7 @@ export function NativeSchedulerV2Spike({
     (demandItem: CalendarV2DemandItem) => {
       if (!enableLocalPlacementPreview) return;
 
+      clearRescheduleMode();
       activeDragRef.current = null;
       setDragActive(false);
       setDraggingBlockId(null);
@@ -547,7 +619,7 @@ export function NativeSchedulerV2Spike({
       setPlacementDemandItem(demandItem);
       setPlacementMessage('Изберете свободен час в календара.');
     },
-    [enableLocalPlacementPreview],
+    [clearRescheduleMode, enableLocalPlacementPreview],
   );
 
   const handleStartAppointmentDrag = useCallback(
@@ -598,6 +670,7 @@ export function NativeSchedulerV2Spike({
     setPlacementMessage(null);
     setPlacementSaveStatus({ state: 'idle', message: null });
     setLastCommand(null);
+    clearRescheduleMode();
   };
 
   const handlePlacementPointerMove = useCallback(
@@ -708,7 +781,7 @@ export function NativeSchedulerV2Spike({
       const intent = buildManualBookingIntent({
         target,
         enabled: manualBookingEnabled,
-        placementModeActive,
+        placementModeActive: placementModeActive || rescheduleModeActive,
         now: currentTime,
       });
 
@@ -726,7 +799,89 @@ export function NativeSchedulerV2Spike({
         manualBooking?.onUnavailable?.();
       }
     },
-    [currentTime, manualBooking, manualBookingEnabled, placementModeActive, resolveDropTarget],
+    [currentTime, manualBooking, manualBookingEnabled, placementModeActive, resolveDropTarget, rescheduleModeActive],
+  );
+
+  const handleStartRescheduleMode = useCallback(
+    (block: CalendarV2CalendarBlock) => {
+      if (!rescheduleBooking?.enabled || !rescheduleBooking.onSave) return;
+
+      clearPlacementMode();
+      setRescheduleSourceBlock(block);
+      setRescheduleTarget(null);
+      setReschedulePreview(null);
+      setRescheduleMessage('Изберете нов свободен час в календара.');
+      setRescheduleSaveStatus({ state: 'idle', message: null });
+      setDropPreview(null);
+      setSelectedBlockId(block.id);
+    },
+    [clearPlacementMode, rescheduleBooking?.enabled, rescheduleBooking?.onSave],
+  );
+
+  const handleReschedulePointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (!rescheduleSourceBlock || dragActive || rescheduleTarget) return;
+
+      const target = resolveDropTarget({
+        clientX: event.clientX,
+        clientY: event.clientY,
+        durationMinutes: getDurationMinutes(rescheduleSourceBlock.startAt, rescheduleSourceBlock.endAt),
+        kind: 'appointment',
+        ignoredBlockId: rescheduleSourceBlock.id,
+      });
+
+      setDropPreview(target);
+    },
+    [dragActive, rescheduleSourceBlock, rescheduleTarget, resolveDropTarget],
+  );
+
+  const handleReschedulePointerLeave = useCallback(() => {
+    if (!rescheduleSourceBlock || reschedulePreview || rescheduleTarget) return;
+
+    setDropPreview(null);
+  }, [reschedulePreview, rescheduleSourceBlock, rescheduleTarget]);
+
+  const handleRescheduleSlotClick = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      if (!rescheduleSourceBlock) return;
+
+      const target = resolveDropTarget({
+        clientX: event.clientX,
+        clientY: event.clientY,
+        durationMinutes: getDurationMinutes(rescheduleSourceBlock.startAt, rescheduleSourceBlock.endAt),
+        kind: 'appointment',
+        ignoredBlockId: rescheduleSourceBlock.id,
+      });
+
+      if (!target) {
+        setRescheduleTarget(null);
+        setDropPreview(null);
+        setReschedulePreview(null);
+        setRescheduleSaveStatus({ state: 'idle', message: null });
+        setRescheduleMessage('Изберете слот в колона на специалист.');
+        return;
+      }
+
+      setRescheduleTarget(target);
+      setDropPreview(target);
+      setReschedulePreview({
+        sourceBlock: rescheduleSourceBlock,
+        target,
+      });
+      setRescheduleSaveStatus({ state: 'idle', message: null });
+
+      if (target.isPast) {
+        setRescheduleMessage('Не може да преместите час в миналото.');
+        return;
+      }
+
+      setRescheduleMessage(
+        target.hasConflict
+          ? 'Този час вече е зает.'
+          : 'Прегледът е готов. Часът още не е преместен.',
+      );
+    },
+    [rescheduleSourceBlock, resolveDropTarget],
   );
 
   const handleSavePlacementPreview = useCallback(async () => {
@@ -768,6 +923,57 @@ export function NativeSchedulerV2Spike({
       setPlacementMessage(message);
     }
   }, [clearPlacementMode, currentTime, placementPreview, placementSave]);
+
+  const handleSaveReschedulePreview = useCallback(async () => {
+    if (
+      !rescheduleSourceBlock?.appointment ||
+      !reschedulePreview ||
+      !rescheduleBooking?.enabled ||
+      !rescheduleBooking.onSave
+    ) {
+      return;
+    }
+
+    const request = buildAppointmentRescheduleSaveRequestIfValid({
+      appointmentId: rescheduleSourceBlock.appointment.id,
+      target: reschedulePreview.target,
+    });
+
+    if (!request) {
+      const message = reschedulePreview.target.isPast
+        ? 'Не може да преместите час в миналото.'
+        : reschedulePreview.target.hasConflict
+          ? 'Този час вече е зает.'
+          : 'Този час не е наличен.';
+      setRescheduleSaveStatus({ state: 'error', message });
+      setRescheduleMessage(message);
+      return;
+    }
+
+    setRescheduleSaveStatus({ state: 'saving', message: null });
+
+    try {
+      const result = await rescheduleBooking.onSave(request);
+      setRescheduleSaveStatus({ state: 'success', message: 'Часът е преместен.' });
+      setRescheduleMessage('Часът е преместен.');
+
+      if (result?.appointmentVisibleAfterRefresh === false) {
+        setSelectedBlockId(null);
+      } else {
+        setSelectedBlockId(rescheduleSourceBlock.appointment.id);
+      }
+
+      window.setTimeout(() => {
+        clearRescheduleMode();
+      }, 900);
+    } catch (error) {
+      const message = error instanceof Error
+        ? error.message
+        : 'Не успяхме да преместим часа. Опитайте отново.';
+      setRescheduleSaveStatus({ state: 'error', message });
+      setRescheduleMessage(message);
+    }
+  }, [clearRescheduleMode, rescheduleBooking, reschedulePreview, rescheduleSourceBlock]);
 
   const handleCancelBooking = useCallback(
     async (appointmentId: string) => {
@@ -852,6 +1058,10 @@ export function NativeSchedulerV2Spike({
                 onPlacementPointerMove={handlePlacementPointerMove}
                 onPlacementPointerLeave={handlePlacementPointerLeave}
                 onPlacementSlotClick={handlePlacementSlotClick}
+                rescheduleModeActive={rescheduleModeActive}
+                onReschedulePointerMove={handleReschedulePointerMove}
+                onReschedulePointerLeave={handleReschedulePointerLeave}
+                onRescheduleSlotClick={handleRescheduleSlotClick}
                 manualBookingEnabled={manualBookingEnabled}
                 onManualBookingSlotClick={handleManualBookingSlotClick}
               />
@@ -895,6 +1105,36 @@ export function NativeSchedulerV2Spike({
                   }
                 />
               )}
+
+              {rescheduleSourceBlock && (
+                <div className={`${styles.placementModeBanner} ${styles.rescheduleModeBanner}`}>
+                  <div className={styles.placementModeText}>
+                    <p className={styles.placementModeTitle}>Преместване на час</p>
+                    <p className={styles.placementModeSubtitle}>Изберете нов свободен час в календара.</p>
+                    {rescheduleMessage && <p className={styles.placementModeMessage}>{rescheduleMessage}</p>}
+                  </div>
+                  <button type="button" className={styles.placementModeCancel} onClick={clearRescheduleMode}>
+                    Отказ
+                  </button>
+                </div>
+              )}
+
+              {reschedulePreview && (
+                <NativeSchedulerReschedulePreview
+                  preview={reschedulePreview}
+                  onClose={clearRescheduleMode}
+                  onSave={handleSaveReschedulePreview}
+                  canSave={!reschedulePreview.target.isPast && !reschedulePreview.target.hasConflict}
+                  isSaving={rescheduleSaveStatus.state === 'saving'}
+                  saveFeedback={
+                    rescheduleSaveStatus.state === 'success'
+                      ? { tone: 'success', message: rescheduleSaveStatus.message }
+                      : rescheduleSaveStatus.state === 'error'
+                        ? { tone: 'error', message: rescheduleSaveStatus.message }
+                        : null
+                  }
+                />
+              )}
             </div>
 
             <aside className={styles.rightRail}>
@@ -909,9 +1149,10 @@ export function NativeSchedulerV2Spike({
                 readOnly={readOnly}
               />
               <NativeSchedulerPreviewPanel
-                selectedBlock={placementPanelContext ? null : selectedBlock}
-                lastCommand={placementPanelContext ? null : lastCommand}
+                selectedBlock={placementPanelContext || reschedulePanelContext ? null : selectedBlock}
+                lastCommand={placementPanelContext || reschedulePanelContext ? null : lastCommand}
                 placementContext={placementPanelContext}
+                rescheduleContext={reschedulePanelContext}
                 readOnly={readOnly}
                 confirmBooking={{
                   enabled: Boolean(confirmBooking?.enabled && confirmBooking.onConfirm),
@@ -920,6 +1161,10 @@ export function NativeSchedulerV2Spike({
                 cancelBooking={{
                   enabled: Boolean(cancelBooking?.enabled && cancelBooking.onCancel),
                   onCancel: handleCancelBooking,
+                }}
+                rescheduleBooking={{
+                  enabled: Boolean(rescheduleBooking?.enabled && rescheduleBooking.onSave),
+                  onStart: handleStartRescheduleMode,
                 }}
               />
             </aside>

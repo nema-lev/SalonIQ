@@ -42,6 +42,10 @@ import {
 import { getNativeSchedulerCancelBookingIntent } from './native-scheduler-cancel-booking';
 import { getNativeSchedulerConfirmBookingIntent } from './native-scheduler-confirm-booking';
 import { buildManualBookingIntent } from './native-scheduler-manual-booking';
+import {
+  buildAppointmentRescheduleSaveRequestIfValid,
+  getNativeSchedulerRescheduleBookingIntent,
+} from './native-scheduler-reschedule-booking';
 
 export type NativeSchedulerRegressionCheckResult = {
   name: string;
@@ -633,10 +637,10 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
         const placementPreviewSource = readSource(sourceDir, 'NativeSchedulerPlacementPreview.tsx');
 
         assert(
-          adapterSource.includes('Calendar V2 · Manual booking + confirm + cancel') &&
-            adapterSource.includes('Calendar V2 · Manual booking + request placement + confirm + cancel') &&
+          adapterSource.includes('Calendar V2 · Manual booking + reschedule + confirm + cancel') &&
+            adapterSource.includes('Calendar V2 · Manual booking + request placement + reschedule + confirm + cancel') &&
             adapterSource.includes('const modeNotice = isSampleMode'),
-          'real-data mode should describe manual booking, request-placement, confirm, and cancel capability honestly',
+          'real-data mode should describe manual booking, request-placement, reschedule, confirm, and cancel capability honestly',
         );
         assert(
           adapterSource.includes('Поставяне на заявки в графика') &&
@@ -680,7 +684,8 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
           'scheduler should turn ordinary slot clicks into explicit manual booking intent',
         );
         assert(
-          gridSource.includes('const handleGridClick = placementModeActive') &&
+          gridSource.includes('const handleGridClick = rescheduleModeActive') &&
+            gridSource.includes(': placementModeActive') &&
             gridSource.includes('manualBookingEnabled'),
           'request placement mode should keep priority over manual booking grid clicks',
         );
@@ -702,15 +707,196 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
         );
         assert(
           !adapterSource.includes('/appointments/admin') &&
-            !adapterSource.includes('/appointments/:id/reschedule') &&
             !adapterSource.includes('/notifications') &&
             !adapterSource.includes('/notify'),
-          'Calendar V2 placement save should not call appointment create/reschedule or notification endpoints',
+          'Calendar V2 placement save should not call appointment create or notification endpoints',
         );
         assert(
           !adapterSource.includes('apiClient.delete') &&
             adapterSource.includes('apiClient.post<PlaceWaitlistEntryResponse>(request.path, request.payload)'),
           'Calendar V2 placement save should have one explicit POST write path',
+        );
+      },
+    },
+    {
+      name: 'reschedule booking intent is eligible real-data only and yields to other modes',
+      run: () => {
+        const pendingBlock = calendarBlock('pending-booking', 'staff-1', 10 * 60, 11 * 60, {
+          rawStatus: 'pending',
+        });
+        const proposalPendingBlock = calendarBlock('proposal-pending-booking', 'staff-1', 11 * 60, 12 * 60, {
+          rawStatus: 'proposal_pending',
+        });
+        const confirmedBlock = calendarBlock('confirmed-booking', 'staff-1', 12 * 60, 13 * 60, {
+          rawStatus: 'confirmed',
+        });
+        const terminalBlock = calendarBlock('terminal-booking', 'staff-1', 13 * 60, 14 * 60, {
+          rawStatus: 'completed',
+        });
+
+        assertDefined(
+          getNativeSchedulerRescheduleBookingIntent({
+            selectedBlock: pendingBlock,
+            canWrite: true,
+            placementContextActive: false,
+            rescheduleContextActive: false,
+          }),
+          'pending real appointments should expose reschedule intent',
+        );
+        assertDefined(
+          getNativeSchedulerRescheduleBookingIntent({
+            selectedBlock: proposalPendingBlock,
+            canWrite: true,
+            placementContextActive: false,
+            rescheduleContextActive: false,
+          }),
+          'proposal-pending real appointments should expose reschedule intent',
+        );
+        assertDefined(
+          getNativeSchedulerRescheduleBookingIntent({
+            selectedBlock: confirmedBlock,
+            canWrite: true,
+            placementContextActive: false,
+            rescheduleContextActive: false,
+          }),
+          'confirmed real appointments should expose reschedule intent',
+        );
+        assertEqual(
+          getNativeSchedulerRescheduleBookingIntent({
+            selectedBlock: terminalBlock,
+            canWrite: true,
+            placementContextActive: false,
+            rescheduleContextActive: false,
+          }),
+          null,
+          'terminal appointments should not expose reschedule intent',
+        );
+        assertEqual(
+          getNativeSchedulerRescheduleBookingIntent({
+            selectedBlock: confirmedBlock,
+            canWrite: false,
+            placementContextActive: false,
+            rescheduleContextActive: false,
+          }),
+          null,
+          'sample/read-only appointments should not expose reschedule write intent',
+        );
+        assertEqual(
+          getNativeSchedulerRescheduleBookingIntent({
+            selectedBlock: confirmedBlock,
+            canWrite: true,
+            placementContextActive: true,
+            rescheduleContextActive: false,
+          }),
+          null,
+          'request placement mode should suppress reschedule intent',
+        );
+        assertEqual(
+          getNativeSchedulerRescheduleBookingIntent({
+            selectedBlock: confirmedBlock,
+            canWrite: true,
+            placementContextActive: false,
+            rescheduleContextActive: true,
+          }),
+          null,
+          'an active reschedule mode should not expose a duplicate intent',
+        );
+      },
+    },
+    {
+      name: 'reschedule save request exists only for future free targets',
+      run: () => {
+        const futureTarget = {
+          kind: 'appointment' as const,
+          staffId: 'staff-2',
+          staffName: 'Boris',
+          startAt: dateAndMinutesToIso(CHECK_DATE, 13 * 60),
+          endAt: dateAndMinutesToIso(CHECK_DATE, 14 * 60),
+          durationMinutes: 60,
+          hasConflict: false,
+          isPast: false,
+        };
+
+        const request = buildAppointmentRescheduleSaveRequestIfValid({
+          appointmentId: 'appointment-1',
+          target: futureTarget,
+        });
+        assertDefined(request, 'future free target should produce a reschedule payload');
+        assertEqual(
+          request.path,
+          '/appointments/appointment-1/reschedule',
+          'future free target should reuse the existing reschedule endpoint',
+        );
+        assertEqual(
+          request.payload.startAt,
+          futureTarget.startAt,
+          'reschedule payload should carry the target start',
+        );
+        assertEqual(
+          request.payload.staffId,
+          'staff-2',
+          'reschedule payload should carry the target staff',
+        );
+        assertEqual(
+          buildAppointmentRescheduleSaveRequestIfValid({
+            appointmentId: 'appointment-1',
+            target: { ...futureTarget, isPast: true },
+          }),
+          null,
+          'past target should not produce a reschedule payload',
+        );
+        assertEqual(
+          buildAppointmentRescheduleSaveRequestIfValid({
+            appointmentId: 'appointment-1',
+            target: { ...futureTarget, hasConflict: true },
+          }),
+          null,
+          'locally conflicting target should not produce a reschedule payload',
+        );
+      },
+    },
+    {
+      name: 'reschedule mode consumes slot clicks before manual booking',
+      run: () => {
+        const schedulerSource = readSource(sourceDir, 'NativeSchedulerV2Spike.tsx');
+        const gridSource = readSource(sourceDir, 'NativeSchedulerGrid.tsx');
+
+        assert(
+          gridSource.includes('const handleGridClick = rescheduleModeActive') &&
+            gridSource.includes('onRescheduleSlotClick') &&
+            gridSource.includes('manualBookingEnabled'),
+          'reschedule mode should own grid clicks before ordinary manual booking',
+        );
+        assert(
+          schedulerSource.includes('placementModeActive: placementModeActive || rescheduleModeActive'),
+          'manual booking intent should stay disabled while reschedule mode is active',
+        );
+        assert(
+          schedulerSource.includes("setRescheduleMessage('Не може да преместите час в миналото.');") &&
+            schedulerSource.includes('setReschedulePreview({'),
+          'past clicks should be rejected while future clicks can still create a reschedule preview',
+        );
+        assert(
+          schedulerSource.includes('setRescheduleSourceBlock(null);') &&
+            schedulerSource.includes('onClick={clearRescheduleMode}'),
+          'cancel should exit reschedule mode',
+        );
+      },
+    },
+    {
+      name: 'reschedule reuses backend endpoint and backend-truth refresh',
+      run: () => {
+        const adapterSource = readSource(sourceDir, '../real-data/CalendarV2RealDataAdapter.tsx');
+
+        assert(
+          adapterSource.includes('await apiClient.patch(request.path, request.payload);'),
+          'reschedule flow should reuse the existing appointment reschedule PATCH contract',
+        );
+        assert(
+          adapterSource.includes('shouldKeepCalendarV2SelectedBookingAfterRefresh(') &&
+            adapterSource.includes("queryClient.invalidateQueries({ queryKey: ['appointments-calendar-board'] })") &&
+            adapterSource.includes("queryClient.invalidateQueries({ queryKey: ['appointment-context'] })"),
+          'reschedule flow should reconcile from refreshed backend truth and invalidate board/context queries',
         );
       },
     },
@@ -897,9 +1083,9 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
         const schedulerSource = readSource(sourceDir, 'NativeSchedulerV2Spike.tsx');
 
         assert(
-          schedulerSource.includes('const visibleDropPreview = placementTarget ?? dropPreview') &&
+          schedulerSource.includes('const visibleDropPreview = rescheduleTarget ?? placementTarget ?? dropPreview') &&
             schedulerSource.includes('dropPreview={visibleDropPreview}'),
-          'grid preview should prefer the selected placement target over transient hover state',
+          'grid preview should prefer selected mode targets over transient hover state',
         );
         assert(
           schedulerSource.includes('if (!placementDemandItem || dragActive || placementTarget) return;'),
@@ -971,7 +1157,7 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
           'right rail placement context should exist before a target slot is selected',
         );
         assert(
-          schedulerSource.includes('selectedBlock={placementPanelContext ? null : selectedBlock}'),
+          schedulerSource.includes('selectedBlock={placementPanelContext || reschedulePanelContext ? null : selectedBlock}'),
           'selected booking detail should be hidden while placement context is active',
         );
         assert(
@@ -1005,7 +1191,7 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
           'clearPlacementMode should remove placement context',
         );
         assert(
-          previewPanelSource.includes("isPlacementContext ? 'Поставяне на заявка' : 'Детайли за час'"),
+          previewPanelSource.includes("isPlacementContext ? 'Поставяне на заявка' : isRescheduleContext ? 'Преместване на час' : 'Детайли за час'"),
           'preview panel should return to normal booking detail title without placement context',
         );
       },

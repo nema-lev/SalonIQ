@@ -6,6 +6,7 @@ import type { CalendarV2CalendarBlock, CalendarV2Command, CalendarV2DemandItem }
 import { getNativeSchedulerCancelBookingIntent } from './native-scheduler-cancel-booking';
 import { getNativeSchedulerConfirmBookingIntent } from './native-scheduler-confirm-booking';
 import { commandPreviewLabel } from './native-scheduler-drag';
+import { getNativeSchedulerRescheduleBookingIntent } from './native-scheduler-reschedule-booking';
 import styles from './native-scheduler.module.css';
 
 export type NativeSchedulerPlacementPanelContext = {
@@ -21,10 +22,22 @@ export type NativeSchedulerPlacementPanelContext = {
   onCancel: () => void;
 };
 
+export type NativeSchedulerReschedulePanelContext = {
+  sourceBlock: CalendarV2CalendarBlock;
+  target: {
+    staffName: string;
+    timeLabel: string;
+    startAt: string;
+  } | null;
+  hasConflict: boolean;
+  onCancel: () => void;
+};
+
 type NativeSchedulerPreviewPanelProps = {
   selectedBlock: CalendarV2CalendarBlock | null;
   lastCommand: CalendarV2Command | null;
   placementContext?: NativeSchedulerPlacementPanelContext | null;
+  rescheduleContext?: NativeSchedulerReschedulePanelContext | null;
   readOnly?: boolean;
   confirmBooking?: {
     enabled: boolean;
@@ -34,38 +47,61 @@ type NativeSchedulerPreviewPanelProps = {
     enabled: boolean;
     onCancel?: (appointmentId: string) => Promise<void>;
   };
+  rescheduleBooking?: {
+    enabled: boolean;
+    onStart?: (block: CalendarV2CalendarBlock) => void;
+  };
 };
 
 export function NativeSchedulerPreviewPanel({
   selectedBlock,
   lastCommand,
   placementContext = null,
+  rescheduleContext = null,
   readOnly = false,
   confirmBooking,
   cancelBooking,
+  rescheduleBooking,
 }: NativeSchedulerPreviewPanelProps) {
   const appointment = selectedBlock?.appointment;
   const clientName = appointment?.client.name ?? selectedBlock?.title ?? '';
   const serviceName = appointment?.service.name ?? selectedBlock?.subtitle ?? 'Услугата липсва';
   const staffName = appointment?.staff.name ?? selectedBlock?.cardSummary?.staffLabel ?? selectedBlock?.staffId ?? '';
   const isPlacementContext = Boolean(placementContext);
+  const isRescheduleContext = Boolean(rescheduleContext);
   const confirmIntent = useMemo(
     () =>
       getNativeSchedulerConfirmBookingIntent({
         selectedBlock,
         canWrite: Boolean(confirmBooking?.enabled && confirmBooking.onConfirm),
-        placementContextActive: isPlacementContext,
+        placementContextActive: isPlacementContext || isRescheduleContext,
       }),
-    [confirmBooking?.enabled, confirmBooking?.onConfirm, isPlacementContext, selectedBlock],
+    [confirmBooking?.enabled, confirmBooking?.onConfirm, isPlacementContext, isRescheduleContext, selectedBlock],
   );
   const cancelIntent = useMemo(
     () =>
       getNativeSchedulerCancelBookingIntent({
         selectedBlock,
         canWrite: Boolean(cancelBooking?.enabled && cancelBooking.onCancel),
-        placementContextActive: isPlacementContext,
+        placementContextActive: isPlacementContext || isRescheduleContext,
       }),
-    [cancelBooking?.enabled, cancelBooking?.onCancel, isPlacementContext, selectedBlock],
+    [cancelBooking?.enabled, cancelBooking?.onCancel, isPlacementContext, isRescheduleContext, selectedBlock],
+  );
+  const rescheduleIntent = useMemo(
+    () =>
+      getNativeSchedulerRescheduleBookingIntent({
+        selectedBlock,
+        canWrite: Boolean(rescheduleBooking?.enabled && rescheduleBooking.onStart),
+        placementContextActive: isPlacementContext,
+        rescheduleContextActive: isRescheduleContext,
+      }),
+    [
+      isPlacementContext,
+      isRescheduleContext,
+      rescheduleBooking?.enabled,
+      rescheduleBooking?.onStart,
+      selectedBlock,
+    ],
   );
   const [confirmBookingOpen, setConfirmBookingOpen] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
@@ -81,7 +117,7 @@ export function NativeSchedulerPreviewPanel({
     setConfirmCancelOpen(false);
     setIsCancelling(false);
     setCancelError(null);
-  }, [cancelIntent?.appointmentId, confirmIntent?.appointmentId, isPlacementContext]);
+  }, [cancelIntent?.appointmentId, confirmIntent?.appointmentId, isPlacementContext, isRescheduleContext]);
 
   const handleConfirmBooking = async () => {
     if (!confirmIntent || !confirmBooking?.onConfirm) return;
@@ -123,22 +159,28 @@ export function NativeSchedulerPreviewPanel({
     }
   };
   const panelSubtitle =
-    isPlacementContext || (readOnly && !confirmIntent && !cancelIntent) ? 'Само преглед' : 'Детайли и действия';
+    isPlacementContext || isRescheduleContext || (readOnly && !confirmIntent && !cancelIntent && !rescheduleIntent)
+      ? 'Само преглед'
+      : 'Детайли и действия';
 
   return (
-    <section className={`${styles.previewPanel} ${selectedBlock || isPlacementContext ? '' : styles.previewPanelEmpty}`}>
+    <section className={`${styles.previewPanel} ${selectedBlock || isPlacementContext || isRescheduleContext ? '' : styles.previewPanelEmpty}`}>
       <div className={styles.panelHeader}>
         <div className={styles.panelHeaderText}>
-          <p className={styles.panelTitle}>{isPlacementContext ? 'Поставяне на заявка' : 'Детайли за час'}</p>
+          <p className={styles.panelTitle}>
+            {isPlacementContext ? 'Поставяне на заявка' : isRescheduleContext ? 'Преместване на час' : 'Детайли за час'}
+          </p>
           <p className={styles.panelSubtitle}>{panelSubtitle}</p>
         </div>
-        <span className={placementContext?.hasConflict ? styles.panelCountWarning : styles.panelCount}>
-          {getPanelCountLabel({ selectedBlock, placementContext })}
+        <span className={placementContext?.hasConflict || rescheduleContext?.hasConflict ? styles.panelCountWarning : styles.panelCount}>
+          {getPanelCountLabel({ selectedBlock, placementContext, rescheduleContext })}
         </span>
       </div>
       <div className={styles.previewContent}>
         {placementContext ? (
           <PlacementContextView context={placementContext} />
+        ) : rescheduleContext ? (
+          <RescheduleContextView context={rescheduleContext} />
         ) : selectedBlock ? (
           <>
             <div className={styles.previewSummaryCard}>
@@ -177,6 +219,24 @@ export function NativeSchedulerPreviewPanel({
               </p>
             )}
             {appointment?.notes && <p className={styles.previewNote}>{appointment.notes}</p>}
+            {rescheduleIntent && (
+              <div className={styles.rescheduleBookingSection}>
+                <button
+                  type="button"
+                  className={styles.secondaryButton}
+                  onClick={() => {
+                    if (!selectedBlock) return;
+                    rescheduleBooking?.onStart?.(selectedBlock);
+                    setConfirmBookingOpen(false);
+                    setConfirmCancelOpen(false);
+                    setConfirmError(null);
+                    setCancelError(null);
+                  }}
+                >
+                  Премести час
+                </button>
+              </div>
+            )}
             {confirmIntent && (
               <div className={styles.confirmBookingSection}>
                 {!confirmBookingOpen ? (
@@ -288,11 +348,63 @@ export function NativeSchedulerPreviewPanel({
           </div>
         )}
 
-        {lastCommand && !placementContext && (
+        {lastCommand && !placementContext && !rescheduleContext && (
           <div className={styles.commandLine}>{commandPreviewLabel(lastCommand)}</div>
         )}
       </div>
     </section>
+  );
+}
+
+function RescheduleContextView({ context }: { context: NativeSchedulerReschedulePanelContext }) {
+  const appointment = context.sourceBlock.appointment;
+  const clientName = appointment?.client.name ?? context.sourceBlock.title;
+  const serviceName = appointment?.service.name ?? context.sourceBlock.subtitle ?? 'Услугата липсва';
+  const targetDate = context.target ? formatPlacementDate(context.target.startAt) : null;
+
+  return (
+    <div className={styles.placementContext}>
+      <div className={styles.previewSummaryCard}>
+        <span className={styles.previewAvatar}>{getInitials(clientName)}</span>
+        <span className={styles.previewSummaryText}>
+          <span className={styles.previewClientName}>{clientName}</span>
+          <span className={styles.previewServiceLine}>
+            <Scissors size={12} strokeWidth={2.5} />
+            {serviceName}
+          </span>
+        </span>
+      </div>
+
+      {context.target ? (
+        <p className={styles.previewReadOnlyNote}>
+          Нов слот: {targetDate}, {context.target.timeLabel} · {context.target.staffName}.
+        </p>
+      ) : (
+        <div className={styles.previewEmptyState}>
+          <span className={styles.emptyIcon}>
+            <CalendarCheck2 size={17} strokeWidth={2.5} />
+          </span>
+          <div className={styles.emptyText}>
+            <p className={styles.emptyTitle}>Преместване на час</p>
+            <p className={styles.emptyCopy}>Изберете нов свободен час в календара.</p>
+          </div>
+        </div>
+      )}
+
+      {context.hasConflict && (
+        <p className={styles.previewConflictNote}>
+          Този час вече е зает.
+        </p>
+      )}
+
+      <p className={styles.previewReadOnlyNote}>
+        Часът ще се премести само след натискане на „Запази промяната“.
+      </p>
+
+      <button type="button" className={styles.ghostButton} onClick={context.onCancel}>
+        Отказ
+      </button>
+    </div>
   );
 }
 
@@ -392,13 +504,18 @@ function formatState(value: string) {
 function getPanelCountLabel({
   selectedBlock,
   placementContext,
+  rescheduleContext,
 }: {
   selectedBlock: CalendarV2CalendarBlock | null;
   placementContext: NativeSchedulerPlacementPanelContext | null;
+  rescheduleContext: NativeSchedulerReschedulePanelContext | null;
 }) {
   if (placementContext?.hasConflict) return 'Конфликт';
   if (placementContext?.target) return 'Избран слот';
   if (placementContext) return 'Избираме слот';
+  if (rescheduleContext?.hasConflict) return 'Конфликт';
+  if (rescheduleContext?.target) return 'Избран слот';
+  if (rescheduleContext) return 'Избираме слот';
   return selectedBlock ? 'Избран' : 'Няма';
 }
 

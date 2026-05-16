@@ -63,6 +63,10 @@ type NativeSchedulerGridProps = {
   onPlacementPointerMove?: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onPlacementPointerLeave?: () => void;
   onPlacementSlotClick?: (event: ReactMouseEvent<HTMLDivElement>) => void;
+  rescheduleModeActive?: boolean;
+  onReschedulePointerMove?: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  onReschedulePointerLeave?: () => void;
+  onRescheduleSlotClick?: (event: ReactMouseEvent<HTMLDivElement>) => void;
   manualBookingEnabled?: boolean;
   onManualBookingSlotClick?: (event: ReactMouseEvent<HTMLDivElement>) => void;
 };
@@ -89,6 +93,10 @@ export function NativeSchedulerGrid({
   onPlacementPointerMove,
   onPlacementPointerLeave,
   onPlacementSlotClick,
+  rescheduleModeActive = false,
+  onReschedulePointerMove,
+  onReschedulePointerLeave,
+  onRescheduleSlotClick,
   manualBookingEnabled = false,
   onManualBookingSlotClick,
 }: NativeSchedulerGridProps) {
@@ -127,17 +135,29 @@ export function NativeSchedulerGrid({
     now: currentTime,
     config: geometry,
   });
-  const pastPlacementOverlayHeight = placementModeActive
+  const pastPlacementOverlayHeight = placementModeActive || rescheduleModeActive
     ? getPastPlacementOverlayHeight({
         schedulerDate: date,
         now: currentTime,
         config: geometry,
       })
     : 0;
-  const handleGridClick = placementModeActive
-    ? onPlacementSlotClick
-    : manualBookingEnabled
-      ? onManualBookingSlotClick
+  const handleGridClick = rescheduleModeActive
+    ? onRescheduleSlotClick
+    : placementModeActive
+      ? onPlacementSlotClick
+      : manualBookingEnabled
+        ? onManualBookingSlotClick
+        : undefined;
+  const handlePointerMove = rescheduleModeActive
+    ? onReschedulePointerMove
+    : placementModeActive
+      ? onPlacementPointerMove
+      : undefined;
+  const handlePointerLeave = rescheduleModeActive
+    ? onReschedulePointerLeave
+    : placementModeActive
+      ? onPlacementPointerLeave
       : undefined;
 
   useEffect(() => {
@@ -221,14 +241,18 @@ export function NativeSchedulerGrid({
 
           <div
             ref={gridRef}
-            className={`${styles.gridLayer} ${placementModeActive ? styles.gridLayerPlacementMode : ''}`}
+            className={[
+              styles.gridLayer,
+              placementModeActive ? styles.gridLayerPlacementMode : '',
+              rescheduleModeActive ? styles.gridLayerRescheduleMode : '',
+            ].filter(Boolean).join(' ')}
             style={{
               width: columnsWidth,
               height: gridHeight,
               backgroundSize: `${geometry.resourceColumnWidth}px 100%, 100% 30px`,
             }}
-            onPointerMove={placementModeActive ? onPlacementPointerMove : undefined}
-            onPointerLeave={placementModeActive ? onPlacementPointerLeave : undefined}
+            onPointerMove={handlePointerMove}
+            onPointerLeave={handlePointerLeave}
             onClick={handleGridClick}
           >
             {schedulerNotice && (

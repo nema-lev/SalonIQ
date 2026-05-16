@@ -15,10 +15,12 @@ import {
   type NativeSchedulerCancelBookingResult,
   type NativeSchedulerConfirmBookingResult,
   type NativeSchedulerPlacementSaveResult,
+  type NativeSchedulerRescheduleBookingResult,
 } from '../native-scheduler-spike/NativeSchedulerV2Spike';
 import type { NativeSchedulerManualBookingIntent } from '../native-scheduler-spike/native-scheduler-manual-booking';
 import type { NativeSchedulerNotice } from '../native-scheduler-spike/NativeSchedulerGrid';
 import type { WaitlistPlacementSaveRequest } from '../native-scheduler-spike/native-scheduler-drag';
+import type { AppointmentRescheduleSaveRequest } from '../native-scheduler-spike/native-scheduler-reschedule-booking';
 import {
   buildCalendarV2RealDataProjection,
   doesCalendarV2BookingExistAfterRefresh,
@@ -29,8 +31,8 @@ import { buildCalendarV2SampleDayProjection } from './calendar-v2-sample-day';
 const ENABLE_CALENDAR_V2_PLACEMENT_SAVE =
   process.env.NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === 'true';
 const CALENDAR_V2_READONLY_NOTICE = 'Calendar V2 · Read-only';
-const CALENDAR_V2_MANUAL_BOOKING_NOTICE = 'Calendar V2 · Manual booking + confirm + cancel';
-const CALENDAR_V2_OPERATIONS_NOTICE = 'Calendar V2 · Manual booking + request placement + confirm + cancel';
+const CALENDAR_V2_MANUAL_BOOKING_NOTICE = 'Calendar V2 · Manual booking + reschedule + confirm + cancel';
+const CALENDAR_V2_OPERATIONS_NOTICE = 'Calendar V2 · Manual booking + request placement + reschedule + confirm + cancel';
 
 type PlaceWaitlistEntryResponse = {
   id?: string;
@@ -218,6 +220,39 @@ export function CalendarV2RealDataAdapter() {
     [queryClient, refetchCalendarBoard],
   );
 
+  const handleRescheduleBooking = useCallback(
+    async (request: AppointmentRescheduleSaveRequest): Promise<NativeSchedulerRescheduleBookingResult> => {
+      if (isSampleMode) {
+        throw new Error('Sample режимът не записва часове.');
+      }
+
+      try {
+        await apiClient.patch(request.path, request.payload);
+
+        const refreshedBoard = await refetchCalendarBoard();
+
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['appointments-calendar-board'] }),
+          queryClient.invalidateQueries({ queryKey: ['appointment-context'] }),
+        ]);
+
+        toast.success('Часът е преместен.');
+
+        return {
+          appointmentVisibleAfterRefresh: shouldKeepCalendarV2SelectedBookingAfterRefresh(
+            refreshedBoard.data?.appointments,
+            getAppointmentIdFromReschedulePath(request.path),
+          ),
+        };
+      } catch (error) {
+        const message = getRescheduleBookingErrorMessage(error);
+        toast.error(message);
+        throw new Error(message);
+      }
+    },
+    [isSampleMode, queryClient, refetchCalendarBoard],
+  );
+
   const headerControls = (
     <div className="inline-flex min-w-0 items-center gap-2">
       <button
@@ -387,6 +422,14 @@ export function CalendarV2RealDataAdapter() {
                 onCancel: handleCancelBooking,
               }
         }
+        rescheduleBooking={
+          isSampleMode
+            ? undefined
+            : {
+                enabled: true,
+                onSave: handleRescheduleBooking,
+              }
+        }
       />
 
       <AdminBookingModal
@@ -505,6 +548,49 @@ function getConfirmBookingErrorMessage(error: unknown) {
   return fallback;
 }
 
+function getRescheduleBookingErrorMessage(error: unknown) {
+  const fallback = 'Не успяхме да преместим часа. Опитайте отново.';
+
+  if (!axios.isAxiosError(error)) {
+    return fallback;
+  }
+
+  const status = error.response?.status;
+  const message = extractApiMessage(error);
+  const normalizedMessage = message?.toLocaleLowerCase('bg-BG') ?? '';
+
+  if (isPastSchedulingMessage(message)) {
+    return 'Не може да преместите час в миналото.';
+  }
+
+  if (status === 409 && isConflictMessage(message)) {
+    return 'Този час вече е зает.';
+  }
+
+  if (
+    status === 409 &&
+    (normalizedMessage.includes('не работи') ||
+      normalizedMessage.includes('извън работното време') ||
+      normalizedMessage.includes('блокиран интервал'))
+  ) {
+    return 'Този час не е наличен.';
+  }
+
+  if (status === 400 && normalizedMessage.includes('не може да бъде преместен')) {
+    return 'Часът е променен. Обновете календара и опитайте отново.';
+  }
+
+  if (status === 404 && normalizedMessage.includes('специалист')) {
+    return 'Този час не е наличен.';
+  }
+
+  if (status === 404) {
+    return 'Часът е променен. Обновете календара и опитайте отново.';
+  }
+
+  return fallback;
+}
+
 function extractApiMessage(error: unknown) {
   if (!axios.isAxiosError(error)) return null;
 
@@ -528,6 +614,10 @@ function isConflictMessage(message: string | null) {
 
 function isPastSchedulingMessage(message: string | null) {
   return Boolean(message?.toLocaleLowerCase('bg-BG').includes('миналото'));
+}
+
+function getAppointmentIdFromReschedulePath(path: string) {
+  return path.split('/')[2] ?? '';
 }
 
 function getSchedulerNotice({

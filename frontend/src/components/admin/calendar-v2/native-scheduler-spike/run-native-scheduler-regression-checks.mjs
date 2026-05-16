@@ -17,6 +17,7 @@ const files = [
   'native-scheduler-manual-booking.ts',
   'native-scheduler-confirm-booking.ts',
   'native-scheduler-cancel-booking.ts',
+  'native-scheduler-reschedule-booking.ts',
   'native-scheduler-regression-checks.ts',
 ];
 

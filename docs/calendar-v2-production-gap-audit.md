@@ -10,7 +10,7 @@ Calendar V2 is now the correct primary **development direction** for the admin c
 | Readiness level | Verdict | Why |
 | --- | --- | --- |
 | Primary internal development calendar | **Ready** | `/admin` already renders Calendar V2 in real-data mode; the native day grid, staff columns, Action Inbox, Booking Detail panel, selected-slot locking, current-time indicator, no-past guard, and guarded waitlist placement flow are all present. |
-| Beta/admin testing calendar | **Not yet ready for broad beta** | It is suitable for controlled internal testing of viewing, manual booking creation, eligible booking confirmation/cancellation, and request placement, but it still lacks the owner-critical move/reschedule workflow that remains available only in the hidden legacy calendar. Error recovery is also still too shallow for confident multi-admin testing. |
+| Beta/admin testing calendar | **Not yet ready for broad beta** | It is suitable for controlled internal testing of viewing, manual booking creation, eligible booking confirmation/cancellation, explicit click-to-reschedule, and request placement. Error recovery is still too shallow for confident multi-admin testing. |
 | Production calendar for real salons | **Not ready** | Calendar V2 is missing core operating actions, phone use is intentionally incomplete, notification behavior is not wired, and backend scheduling authority is still transitional because real allocation backfill has not happened, allocation-only read authority is not enabled, durable command idempotency is absent, and conflict responses are still mostly string-based rather than structured. |
 
 The honest current positioning is:
@@ -31,7 +31,7 @@ The honest current positioning is:
 | Booking detail view | Yes: drawer with contact/history/actions | Partial: read-only Booking Detail panel with selected-booking facts |
 | Cancel booking | Yes | Yes for eligible real-data `pending`, `proposal_pending`, and `confirmed` bookings from Booking Detail; once cancelled, they are removed from the active Calendar V2 grid projection |
 | Confirm booking | Yes | Yes for eligible real-data `pending` and `proposal_pending` timed bookings from Booking Detail |
-| Reschedule/move booking | Yes: modal and drag flow | **No persisted move** |
+| Reschedule/move booking | Yes: modal and drag flow | Yes: explicit Booking Detail → `Премести час` → future slot → preview → save flow; drag/drop persistence remains disabled |
 | Completed / `no_show` / status workflows | Partial: calendar exposes confirm/cancel only; no completed/`no_show` calendar action in the inspected legacy surfaces | **No** |
 | Mobile usage | Yes: dedicated mobile calendar, booking creation, details, request sheet | **No usable phone calendar yet**; phone width shows only a separate-agenda notice |
 | Tablet usage | Yes: legacy responsive calendar | Partial: desktop-style Calendar V2 works best in landscape; portrait remains cramped/out of scope |
@@ -47,7 +47,6 @@ These are not hypothetical feature ideas. They are workflows the existing legacy
 
 | Missing workflow in Calendar V2 | Why it matters before real use | Priority |
 | --- | --- | --- |
-| Move/reschedule existing booking | The owner cannot repair schedule changes from the primary calendar surface. The legacy calendar can. | **P0** |
 | Readable recovery after placement conflicts/stale state | The write flow exists, but recovery behavior is not yet strong enough for confident repeated use when state changes underneath the user. | **P1** |
 | Phone request-placement flow | Phone users currently do not get a usable Calendar V2 workflow; the UI intentionally shows only a placeholder notice. | **P1** |
 | Better Booking Detail actions and history integration | The read-only panel is informative but not sufficient as an operating panel because it does not expose the actions already available in legacy. | **P1** |
@@ -61,9 +60,9 @@ These are not hypothetical feature ideas. They are workflows the existing legacy
 
 ### Practical owner/admin consequence
 
-Today an owner can **see** the day, inspect bookings, create a direct manual booking on desktop real mode, confirm an eligible pending/proposal timed booking, cancel an eligible real-data booking from Booking Detail, and optionally place an untimed request if the feature flag is enabled. Cancelled bookings no longer remain as active blocking cards in the Calendar V2 grid; they can still surface as non-blocking updates/history items. The same owner still needs the hidden legacy fallback to move an existing booking.
+Today an owner can **see** the day, inspect bookings, create a direct manual booking on desktop real mode, confirm an eligible pending/proposal timed booking, move an eligible real timed booking through an explicit click-to-reschedule flow, cancel an eligible real-data booking from Booking Detail, and optionally place an untimed request if the feature flag is enabled. Cancelled bookings no longer remain as active blocking cards in the Calendar V2 grid; they can still surface as non-blocking updates/history items.
 
-That means Calendar V2 is the primary route, but it is not yet the only calendar surface an operator can rely on.
+That means Calendar V2 is the primary route, but it is not yet the only calendar surface an operator can rely on because phone flow, stronger recovery, and the remaining data-hardening work are still incomplete.
 
 ## 4. Backend Readiness Dependencies
 
@@ -184,9 +183,8 @@ Until those conditions are met, the fallback should remain hidden from normal na
 ### Must do before a real salon pilot
 
 1. Enable the internal diagnostics endpoint only for the review window, then run and review the allocation backfill dry-run report against the production Oracle DB.
-2. Add a non-drag Calendar V2 move/reschedule path.
-3. Fix structured error-state and post-commit refresh/reconciliation behavior for the currently enabled save paths.
-4. Hide or gate sample/demo production wording from ordinary real-mode operator experience.
+2. Fix structured error-state and post-commit refresh/reconciliation behavior for the currently enabled save paths.
+3. Hide or gate sample/demo production wording from ordinary real-mode operator experience.
 
 ### Must do before removing the legacy fallback
 
@@ -241,9 +239,9 @@ This remains the narrowest safe next step with the highest decision value:
 - it reduces the risk of adding more write surfaces on top of unverified legacy data,
 - and it gives the team concrete evidence before any real backfill, authority switch, drag/drop work, or fallback removal discussion.
 
-Calendar V2 now supports confirming eligible `pending` / `proposal_pending` timed bookings and cancelling eligible bookings from Booking Detail by reusing `PATCH /appointments/:id/status`. For standard appointments, the existing backend status lifecycle promotes the matching held `calendar_allocations` row to booked when the booking is confirmed, and deactivates/releases it when terminal statuses are applied. The existing status endpoint still runs its current status-change/cancellation notification behavior; this audit did not add or change notifications. Sample mode remains non-writing. The remaining owner-usability P0 is move/reschedule existing booking.
+Calendar V2 now supports confirming eligible `pending` / `proposal_pending` timed bookings and cancelling eligible bookings from Booking Detail by reusing `PATCH /appointments/:id/status`, plus explicit click-to-reschedule for eligible `pending`, `proposal_pending`, and `confirmed` real timed appointments through the existing `PATCH /appointments/:id/reschedule` endpoint with `{ startAt, staffId }`. For standard appointments, the existing backend status lifecycle promotes the matching held `calendar_allocations` row to booked when the booking is confirmed, deactivates/releases it when terminal statuses are applied, and keeps reschedule updates plus matching allocation changes atomic. The existing status endpoint still runs its current status-change/cancellation notification behavior; the reschedule endpoint does not add a notification path. Sample mode remains non-writing. Drag/drop persistence remains disabled.
 
-The owner-usability P0s remain important, but the data-readiness question is the smallest next move that improves correctness without widening product behavior.
+The next production-hardening work after the owner-usability P0 is mobile flow, structured conflict/recovery, backfill/report execution, and realtime later.
 
 ### Exact Codex implementation prompt for the next task
 

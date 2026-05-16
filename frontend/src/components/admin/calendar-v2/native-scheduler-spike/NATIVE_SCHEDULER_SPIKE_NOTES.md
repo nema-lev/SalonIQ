@@ -111,8 +111,21 @@ In the real-data route, appointment move handles are disabled.
 - Legacy fallback route: `/admin/calendar-legacy`.
 - Calendar V2 is now the main admin calendar direction; the legacy calendar remains only for emergency comparison/debugging.
 - User-facing route language now says `Calendar V2`, `Manual booking enabled`, `Manual booking + request placement`, or `Read-only` when applicable rather than presenting the main route as a preview.
-- Existing limitations remain intentional: no move/reschedule flow, no persisted drag-to-move, no resize, no recurring bookings, no new notification controls, no realtime collaboration, and no complete phone booking/placement flow.
-- Remaining P0 work: add non-drag move/reschedule before later phone and drag/resize work.
+- Existing limitations remain intentional: no persisted drag-to-move, no resize, no recurring bookings, no new notification controls, no realtime collaboration, and no complete phone booking/placement flow.
+- Remaining production hardening after the owner-usability P0: phone flow, structured conflicts/recovery, allocation backfill/report execution, and realtime later.
+
+## Explicit Reschedule Pass
+
+- Date of pass: 2026-05-16.
+- Desktop real-data Calendar V2 now exposes `Премести час` in Booking Detail only for real timed appointments with statuses `pending`, `proposal_pending`, or `confirmed`.
+- The flow is controlled and explicit: `Преместване на час` → choose a future staff slot → `Преглед на преместване` → `Запази промяната`; helper copy states `Часът ще се премести само след натискане на „Запази промяната“.`
+- Request placement and reschedule modes are separate. Entering either mode clears the other, and reschedule mode consumes grid clicks before ordinary manual booking intent.
+- Past targets are blocked with `Не може да преместите час в миналото.`; local conflict preview uses `Този час вече е зает.` when the current projection already shows overlap, while the backend remains final authority.
+- Saving reuses `PATCH /appointments/:id/reschedule` with `{ startAt, staffId }`; no backend endpoint, schema change, migration, drag/drop persistence, resize, realtime, or recurrence behavior was added.
+- After success, Calendar V2 refetches the board, invalidates `appointments-calendar-board` and `appointment-context`, keeps the selected date, and keeps the moved booking selected only when the refreshed board still shows it on that date.
+- Sample mode remains non-writing and does not expose working reschedule intent.
+- The existing backend reschedule path updates the appointment plus matching allocation atomically and still performs backend no-past/allocation/legacy-fallback conflict checks.
+- The current reschedule endpoint does not add notification behavior; this pass does not add or change notifications.
 
 ## Manual New Booking Pass
 

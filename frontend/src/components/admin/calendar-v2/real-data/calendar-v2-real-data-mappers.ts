@@ -18,6 +18,8 @@ import {
   buildCalendarV2Projection,
 } from '..';
 
+const NON_ACTIVE_GRID_APPOINTMENT_STATUSES = new Set(['cancelled']);
+
 export type CalendarV2SchedulerResource = {
   id: string;
   name: string;
@@ -49,12 +51,13 @@ export function buildCalendarV2RealDataProjection({
   const selectedAppointments = (calendarBoard?.appointments ?? []).filter((appointment) =>
     isSameDay(new Date(appointment.start_at), selectedDate),
   );
+  const activeGridAppointments = selectedAppointments.filter(isCalendarV2ActiveGridAppointment);
   const selectedExceptions = (calendarBoard?.exceptions ?? []).filter((exception) =>
     isSameDay(new Date(exception.start_at), selectedDate),
   );
   const projection = buildCalendarV2Projection(
     {
-      appointments: selectedAppointments,
+      appointments: activeGridAppointments,
       waitlist: waitlistEntries,
     },
     { services },
@@ -66,7 +69,7 @@ export function buildCalendarV2RealDataProjection({
   return {
     ...projection,
     calendarBlocks: sortCalendarBlocks([...projection.calendarBlocks, ...blockedBlocks]),
-    resources: mapStaffToCalendarV2Resources(staff, selectedAppointments),
+    resources: mapStaffToCalendarV2Resources(staff, activeGridAppointments),
     actionItems: buildActionInboxItems({
       appointments: selectedAppointments,
       waitlist: waitlistEntries,
@@ -75,6 +78,19 @@ export function buildCalendarV2RealDataProjection({
     sourceWaitlistEntries: waitlistEntries,
     blockedBlocks,
   };
+}
+
+export function isCalendarV2ActiveGridAppointment(appointment: Appointment) {
+  return !NON_ACTIVE_GRID_APPOINTMENT_STATUSES.has(appointment.status);
+}
+
+export function shouldKeepCalendarV2SelectedBookingAfterRefresh(
+  appointments: Appointment[] | undefined,
+  appointmentId: string,
+) {
+  const refreshedAppointment = appointments?.find((appointment) => appointment.id === appointmentId);
+
+  return Boolean(refreshedAppointment && isCalendarV2ActiveGridAppointment(refreshedAppointment));
 }
 
 export function mapStaffToCalendarV2Resources(

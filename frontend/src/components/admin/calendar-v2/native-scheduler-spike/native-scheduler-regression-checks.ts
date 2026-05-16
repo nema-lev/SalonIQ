@@ -761,6 +761,43 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
       },
     },
     {
+      name: 'real-data projection excludes cancelled bookings from active grid blocks',
+      run: () => {
+        const mapperSource = readSource(sourceDir, '../real-data/calendar-v2-real-data-mappers.ts');
+
+        assert(
+          mapperSource.includes("const NON_ACTIVE_GRID_APPOINTMENT_STATUSES = new Set(['cancelled'])"),
+          'cancelled appointments should be explicitly classified as non-active grid rows',
+        );
+        assert(
+          mapperSource.includes('const activeGridAppointments = selectedAppointments.filter(isCalendarV2ActiveGridAppointment);'),
+          'real-data projection should derive active grid appointments separately from same-day appointments',
+        );
+        assert(
+          mapperSource.includes('appointments: activeGridAppointments') &&
+            mapperSource.includes('appointments: selectedAppointments'),
+          'active blocks should use filtered appointments while Action Inbox/history keeps all selected appointments',
+        );
+      },
+    },
+    {
+      name: 'cancel refetch clears selection when refreshed appointment is no longer active',
+      run: () => {
+        const mapperSource = readSource(sourceDir, '../real-data/calendar-v2-real-data-mappers.ts');
+        const adapterSource = readSource(sourceDir, '../real-data/CalendarV2RealDataAdapter.tsx');
+
+        assert(
+          mapperSource.includes('shouldKeepCalendarV2SelectedBookingAfterRefresh') &&
+            mapperSource.includes('refreshedAppointment && isCalendarV2ActiveGridAppointment(refreshedAppointment)'),
+          'selection should survive refresh only while the refreshed appointment is still active in the grid',
+        );
+        assert(
+          adapterSource.includes('appointmentVisibleAfterRefresh: shouldKeepCalendarV2SelectedBookingAfterRefresh('),
+          'cancel flow should reconcile selection from refreshed active-grid visibility rather than raw row existence',
+        );
+      },
+    },
+    {
       name: 'selected placement target stays locked against hover movement',
       run: () => {
         const schedulerSource = readSource(sourceDir, 'NativeSchedulerV2Spike.tsx');

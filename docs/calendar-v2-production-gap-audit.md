@@ -29,7 +29,7 @@ The honest current positioning is:
 | Waitlist placement | Yes: dedicated transactional placement endpoint | Partial: click-to-place preview; real save only behind `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE=true` |
 | Manual new booking | Yes | Yes on desktop real-data mode: `Нов час` plus future empty-slot click reusing the admin-create flow |
 | Booking detail view | Yes: drawer with contact/history/actions | Partial: read-only Booking Detail panel with selected-booking facts |
-| Cancel booking | Yes | Yes for eligible real-data `pending`, `proposal_pending`, and `confirmed` bookings from Booking Detail |
+| Cancel booking | Yes | Yes for eligible real-data `pending`, `proposal_pending`, and `confirmed` bookings from Booking Detail; once cancelled, they are removed from the active Calendar V2 grid projection |
 | Confirm booking | Yes | **No** |
 | Reschedule/move booking | Yes: modal and drag flow | **No persisted move** |
 | Completed / `no_show` / status workflows | Partial: calendar exposes confirm/cancel only; no completed/`no_show` calendar action in the inspected legacy surfaces | **No** |
@@ -62,7 +62,7 @@ These are not hypothetical feature ideas. They are workflows the existing legacy
 
 ### Practical owner/admin consequence
 
-Today an owner can **see** the day, inspect bookings, create a direct manual booking on desktop real mode, cancel an eligible real-data booking from Booking Detail, and optionally place an untimed request if the feature flag is enabled. The same owner still needs the hidden legacy fallback to:
+Today an owner can **see** the day, inspect bookings, create a direct manual booking on desktop real mode, cancel an eligible real-data booking from Booking Detail, and optionally place an untimed request if the feature flag is enabled. Cancelled bookings no longer remain as active blocking cards in the Calendar V2 grid; they can still surface as non-blocking updates/history items. The same owner still needs the hidden legacy fallback to:
 
 1. confirm a pending timed request,
 2. move an existing booking.

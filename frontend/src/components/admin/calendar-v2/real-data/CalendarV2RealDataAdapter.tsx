@@ -18,7 +18,10 @@ import {
 import type { NativeSchedulerManualBookingIntent } from '../native-scheduler-spike/native-scheduler-manual-booking';
 import type { NativeSchedulerNotice } from '../native-scheduler-spike/NativeSchedulerGrid';
 import type { WaitlistPlacementSaveRequest } from '../native-scheduler-spike/native-scheduler-drag';
-import { buildCalendarV2RealDataProjection } from './calendar-v2-real-data-mappers';
+import {
+  buildCalendarV2RealDataProjection,
+  shouldKeepCalendarV2SelectedBookingAfterRefresh,
+} from './calendar-v2-real-data-mappers';
 import { buildCalendarV2SampleDayProjection } from './calendar-v2-sample-day';
 
 const ENABLE_CALENDAR_V2_PLACEMENT_SAVE =
@@ -170,8 +173,9 @@ export function CalendarV2RealDataAdapter() {
         toast.success('Часът е отказан.');
 
         return {
-          appointmentVisibleAfterRefresh: Boolean(
-            refreshedBoard.data?.appointments.some((appointment) => appointment.id === appointmentId),
+          appointmentVisibleAfterRefresh: shouldKeepCalendarV2SelectedBookingAfterRefresh(
+            refreshedBoard.data?.appointments,
+            appointmentId,
           ),
         };
       } catch (error) {

@@ -130,7 +130,8 @@ In the real-data route, appointment move handles are disabled.
 - Desktop real-data Calendar V2 now exposes `Откажи час` in Booking Detail only for real appointments with statuses `pending`, `proposal_pending`, or `confirmed`.
 - The confirmation copy is explicit: `Да откажем ли часа?`, `Часът ще бъде премахнат от графика. Това действие ще освободи слота.`, `Откажи часа`, and `Назад`.
 - The action reuses `PATCH /appointments/:id/status` with `{ status: "cancelled" }`; it adds no backend endpoint, schema change, migration, realtime, drag persistence, resize, or recurrence behavior.
-- After success, Calendar V2 refetches the board, invalidates `appointments-calendar-board` and `appointment-context`, keeps the selected date, and clears the selected booking only if it no longer exists in refreshed board data.
+- After success, Calendar V2 refetches the board, invalidates `appointments-calendar-board` and `appointment-context`, keeps the selected date, and clears the selected booking when the refreshed appointment is missing or is no longer active in the scheduler-grid projection.
+- `cancelled` appointments are removed from the active Calendar V2 grid projection even when the calendar-board endpoint still returns them, so the slot becomes visually free after refresh while cancellation can remain available through non-blocking update/history surfaces.
 - Sample mode remains non-writing; placement preview, empty detail state, terminal bookings, and waitlist/request items do not expose cancel intent.
 - Standard appointment cancellation continues through the existing backend allocation lifecycle, which deactivates/releases the matching `calendar_allocations` row for terminal statuses.
 - The existing backend status endpoint already performs the product's current cancellation notification behavior; this pass does not add or change notification behavior.

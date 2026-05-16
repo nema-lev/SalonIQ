@@ -13,7 +13,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "seed": "node prisma/seed.js"
+    "seed": "node prisma/seed.js",
+    "report:calendar-allocation-backfill": "node scripts/calendar-allocation-backfill-report.js"
   },
   "dependencies": {
     "@nestjs/bullmq": "^10.2.3",

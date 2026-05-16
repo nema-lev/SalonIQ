@@ -179,6 +179,64 @@ ROLLBACK;
 
 The second insert should fail on `calendar_allocations_no_active_exclusive_overlap`. Existing appointments are intentionally not backfilled by this upgrade. If a future backfill tries to insert already-overlapping legacy appointments as active exclusive allocations, the exclusion constraint will reject the conflicting rows; the backfill phase must validate/report legacy overlaps before it becomes authoritative.
 
+#### Allocation Backfill Dry-Run / Integrity Report
+
+Before any real appointment backfill is designed or executed, run the manual backend report:
+
+```bash
+cd backend
+DATABASE_URL="postgresql://..." npm run report:calendar-allocation-backfill
+```
+
+Optional focused run:
+
+```bash
+DATABASE_URL="postgresql://..." npm run report:calendar-allocation-backfill -- --schema=tenant_demo_business
+```
+
+The command is intentionally **not** a backfill. It starts a `BEGIN READ ONLY` transaction, executes inspection queries only, rolls the transaction back, and does not insert/update/delete `appointments` or `calendar_allocations`.
+
+Per tenant schema it reports:
+
+- total active standard appointments (`pending`, `proposal_pending`, `confirmed`)
+- active standard appointments without active appointment allocations
+- active appointment allocations whose `source_id` no longer points to an appointment
+- terminal appointments (`cancelled`, `completed`, `no_show`) that still have active `booked` / `held` allocations
+- duplicate active allocations for the same standard appointment
+- legacy standard appointment overlap pairs using half-open display intervals
+- buffer-only conflict pairs where display intervals do not overlap but buffer-expanded occupied intervals do
+- active exclusive allocation overlap anomalies
+- allocation infrastructure status: table, exclusion constraint, required indexes, and `btree_gist`
+
+Readiness classes:
+
+- `READY_FOR_BACKFILL`: allocation infrastructure is present and no blocking overlaps or manual-review anomalies were found. Existing active appointments may still be listed as missing allocations; that is the future backfill workload, not by itself a blocker.
+- `BLOCKED_BY_OVERLAPS`: legacy display overlaps, buffer-only conflicts, or existing active exclusive allocation overlaps exist and would make a future exclusive-allocation backfill unsafe.
+- `BLOCKED_BY_SCHEMA`: `calendar_allocations`, the exclusion constraint, required indexes, or `btree_gist` is missing.
+- `NEEDS_MANUAL_REVIEW`: source-integrity anomalies exist, such as orphan allocations, terminal appointments with active allocations, or duplicate active allocations.
+
+Real backfill remains deferred because the report is only the validation/readiness step. Any tenant with `BLOCKED_BY_OVERLAPS`, `BLOCKED_BY_SCHEMA`, or `NEEDS_MANUAL_REVIEW` must be corrected before a future mutating backfill can be considered safe.
+
+Example output shape:
+
+```text
+Tenant: tenant_demo_business
+  Total active standard appointments: 12
+  Active appointments missing allocations: 7
+  Terminal appointments with active allocations: 0
+  Orphan active appointment allocations: 0
+  Duplicate active allocations: 0
+  Overlapping legacy appointment pairs: 0
+  Buffer-only conflict pairs: 0
+  Existing active exclusive allocation overlap pairs: 0
+  Allocation infrastructure:
+    calendar_allocations table: yes
+    exclusion constraint: yes
+    btree_gist extension: yes
+    required indexes: ok
+  Readiness: READY_FOR_BACKFILL
+```
+
 ### Current Test Baseline
 
 - `backend/test/appointments.service.waitlist-placement.spec.ts` covers successful waitlist placement, booked allocation insertion, buffer-expanded occupied intervals, allocation conflict rejection, legacy-appointment transition conflict rejection, adjacent half-open intervals, buffer-only overlap rejection, already handled request, missing waitlist, missing service, inactive/missing staff, staff blocked interval, outside working hours, insert failure before waitlist update, conditional waitlist-update double-placement protection, DB exclusion-conflict mapping, notification not called, and DTO validation.
@@ -195,6 +253,7 @@ The second insert should fail on `calendar_allocations_no_active_exclusive_overl
 - Calendar V2 frontend command types include versions and optimistic metadata, but current real-data projections do not populate an authoritative entity version for scheduling writes.
 - Local UI preview is correctly not committed state and must remain that way.
 - Existing appointments and staff exceptions are not backfilled yet. New standard allocation writes are protected against each other by the DB constraint, while transition safety against older appointments still depends on the retained legacy appointment query.
+- A manual read-only allocation backfill dry-run report now exists, but it only diagnoses readiness; it does not create allocations or make legacy rows authoritative.
 - Group waitlist placement remains on the existing group-capacity flow in this step; it does not yet create the future single authoritative `group_session` allocation model.
 - The old two-call `/admin` request placement path has now been retired for current-calendar request placement. Validated legacy backfill is still pending, so allocation-only authority remains intentionally deferred.
 

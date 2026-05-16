@@ -40,6 +40,8 @@ May 15 standard-lifecycle parity note: standard exact-time `POST /appointments` 
 
 May 15 current-calendar routing note: the production `/admin` request placement flow now calls `POST /appointments/waitlist/:waitlistId/place` with `notifyClient: false` instead of performing a separate appointment create followed by a separate waitlist-booked patch. The dedicated endpoint remains silent, backfill is still pending, and allocation-only authority is still deferred.
 
+May 16 backfill-readiness note: `backend/scripts/calendar-allocation-backfill-report.js` now provides a manual **read-only** dry-run report via `npm run report:calendar-allocation-backfill`. It checks tenant allocation coverage, source-integrity anomalies, legacy half-open overlaps, buffer-only conflicts, existing active-exclusive allocation overlap anomalies, and allocation infrastructure readiness. It runs inside `BEGIN READ ONLY` and does not mutate appointments or allocations. A tenant is reported as `READY_FOR_BACKFILL`, `BLOCKED_BY_OVERLAPS`, `BLOCKED_BY_SCHEMA`, or `NEEDS_MANUAL_REVIEW`; this is validation only, not a real backfill.
+
 May 16 primary-route note: Calendar V2 is now the primary admin calendar direction. `/admin` renders Calendar V2 in real-data mode, `/admin/calendar-v2` remains an alias, and `/admin/calendar-legacy` preserves the old calendar only for emergency comparison/debugging. This promotion does not add new writes, does not change request placement save behavior, and does not alter backend/schema/deployment state.
 
 May 16 no-past scheduling note: Calendar V2 now marks elapsed slots on today and all slots on past dates unavailable for new request placement, keeps historical appointments visible, and blocks save with Bulgarian copy when a selected target is historical. The backend is authoritative: public create, admin create, waitlist placement, and reschedule-to-new-time reject a start instant before server time, while historical terminal status transitions remain allowed.
@@ -233,6 +235,7 @@ Current backend service behavior:
 - `TenantPrismaService.ensureExistingTenantCalendarAllocations(...)` starts at line 114, runs at backend startup, discovers schemas present in both `public.tenants` and `information_schema.schemata`, and applies the idempotent allocation ensure helper to each already-existing tenant schema.
 - New tenant schemas also receive `calendar_allocations` from `backend/prisma/migrations/001_init.sql`.
 - Existing appointments are still not backfilled; this hardening step upgrades schema only, while standard placement/create/reschedule keep the legacy appointment conflict query until a validated backfill phase exists.
+- The manual allocation backfill dry-run report can now quantify missing active allocations and detect blockers before a future mutating backfill exists; missing allocations alone are expected backfill workload, while overlaps/schema gaps/source-integrity anomalies must be resolved first.
 - `TenantPrismaService.queryInSchema` wraps each raw SQL query in its own transaction at `backend/src/common/prisma/tenant-prisma.service.ts:59`.
 - A future placement endpoint must use a single multi-step transaction, not separate `queryInSchema` calls for create and waitlist update.
 

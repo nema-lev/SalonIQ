@@ -403,6 +403,65 @@ The Oracle deploy path rebuilds and restarts the backend container; it does not 
 
 Existing appointments are not backfilled during this startup upgrade. The current waitlist placement flow keeps its buffer-aware legacy appointment overlap query until a separate validated backfill phase exists.
 
+Calendar allocation backfill dry-run report
+
+The repo now includes a manual backend integrity report for the future appointment-allocation backfill:
+
+```bash
+cd /opt/saloniq/backend
+docker compose --env-file ../deploy/oracle-dev/.env exec -T backend \
+  npm run report:calendar-allocation-backfill
+```
+
+For one tenant only:
+
+```bash
+docker compose --env-file ../deploy/oracle-dev/.env exec -T backend \
+  npm run report:calendar-allocation-backfill -- --schema=tenant_demo_business
+```
+
+This command is diagnostic only. It opens a `BEGIN READ ONLY` transaction, runs inspection queries, then rolls back. It does **not** insert appointments, create allocations, update allocations, or delete anything.
+
+The report checks:
+
+- active standard appointments without active allocations
+- orphan active appointment allocations
+- terminal appointments that still hold active `booked` / `held` allocations
+- duplicate active allocations for the same appointment
+- legacy half-open appointment overlaps
+- buffer-only conflicts from `buffer_before_min` / `buffer_after_min`
+- existing active exclusive allocation overlap anomalies
+- `calendar_allocations` table, exclusion constraint, required indexes, and `btree_gist`
+
+Readiness meanings:
+
+- `READY_FOR_BACKFILL`: schema is present and no blocking overlap/manual-review anomalies were found. Missing allocations can still appear here because they are the future backfill workload.
+- `BLOCKED_BY_OVERLAPS`: fix legacy overlaps, buffer-only conflicts, or existing allocation overlap anomalies first.
+- `BLOCKED_BY_SCHEMA`: restore the allocation table/constraint/indexes/extension first.
+- `NEEDS_MANUAL_REVIEW`: inspect source-integrity anomalies such as orphan allocations, terminal rows with active allocations, or duplicate active allocations before any real backfill.
+
+Example output shape:
+
+```text
+Tenant: tenant_demo_business
+  Total active standard appointments: 12
+  Active appointments missing allocations: 7
+  Terminal appointments with active allocations: 0
+  Orphan active appointment allocations: 0
+  Duplicate active allocations: 0
+  Overlapping legacy appointment pairs: 0
+  Buffer-only conflict pairs: 0
+  Existing active exclusive allocation overlap pairs: 0
+  Allocation infrastructure:
+    calendar_allocations table: yes
+    exclusion constraint: yes
+    btree_gist extension: yes
+    required indexes: ok
+  Readiness: READY_FOR_BACKFILL
+```
+
+Real backfill is still intentionally not present. Any tenant reported as `BLOCKED_BY_OVERLAPS`, `BLOCKED_BY_SCHEMA`, or `NEEDS_MANUAL_REVIEW` must be corrected before a future mutating backfill can be safely designed or run.
+
 Manual validation commands on the VM
 
 Run these checks on the VM:

@@ -48,6 +48,10 @@ import {
   type NativeSchedulerResource,
 } from './native-scheduler-geometry';
 import {
+  buildManualBookingIntent,
+  type NativeSchedulerManualBookingIntent,
+} from './native-scheduler-manual-booking';
+import {
   buildWaitlistPlacementSaveRequestIfFuture,
   createPlaceRequestCommandPreview,
   detectLocalPlacementConflict,
@@ -103,6 +107,7 @@ type NativeSchedulerV2SpikeProps = {
   enableLocalPlacementPreview?: boolean;
   actionInboxSubtitle?: string;
   placementSave?: NativeSchedulerPlacementSaveOptions;
+  manualBooking?: NativeSchedulerManualBookingOptions;
 };
 
 export type NativeSchedulerPlacementSaveResult = {
@@ -113,6 +118,13 @@ export type NativeSchedulerPlacementSaveOptions = {
   enabled: boolean;
   disabledReason?: string;
   onSave?: (request: NonNullable<ReturnType<typeof buildWaitlistPlacementSaveRequestIfFuture>>) => Promise<NativeSchedulerPlacementSaveResult | void>;
+};
+
+export type NativeSchedulerManualBookingOptions = {
+  enabled: boolean;
+  onOpen?: (intent: NativeSchedulerManualBookingIntent) => void;
+  onBlockedPast?: () => void;
+  onUnavailable?: () => void;
 };
 
 type PlacementSaveStatus =
@@ -139,6 +151,7 @@ export function NativeSchedulerV2Spike({
   enableLocalPlacementPreview = true,
   actionInboxSubtitle,
   placementSave,
+  manualBooking,
 }: NativeSchedulerV2SpikeProps = {}) {
   const sourceBlocks = calendarBlocks ?? nativeSchedulerCalendarBlocks;
   const schedulerDate = date ?? nativeSchedulerDate;
@@ -190,6 +203,7 @@ export function NativeSchedulerV2Spike({
     setLastCommand(null);
   }, []);
   const placementModeActive = enableLocalPlacementPreview && Boolean(placementDemandItem);
+  const manualBookingEnabled = Boolean(manualBooking?.enabled && manualBooking.onOpen);
   const visibleDropPreview = placementTarget ?? dropPreview;
   const selectedPlacementIsPast = placementPreview
     ? isPastPlacementStart(placementPreview.command.target.startAt, currentTime)
@@ -661,6 +675,38 @@ export function NativeSchedulerV2Spike({
     [placementDemandItem, resolveDropTarget],
   );
 
+  const handleManualBookingSlotClick = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      const target = resolveDropTarget({
+        clientX: event.clientX,
+        clientY: event.clientY,
+        durationMinutes: NATIVE_SCHEDULER_GEOMETRY.slotMinutes,
+        kind: 'appointment',
+      });
+      const intent = buildManualBookingIntent({
+        target,
+        enabled: manualBookingEnabled,
+        placementModeActive,
+        now: currentTime,
+      });
+
+      if (intent) {
+        manualBooking?.onOpen?.(intent);
+        return;
+      }
+
+      if (target?.isPast) {
+        manualBooking?.onBlockedPast?.();
+        return;
+      }
+
+      if (target?.hasConflict) {
+        manualBooking?.onUnavailable?.();
+      }
+    },
+    [currentTime, manualBooking, manualBookingEnabled, placementModeActive, resolveDropTarget],
+  );
+
   const handleSavePlacementPreview = useCallback(async () => {
     if (!placementPreview || !placementSave?.enabled || !placementSave.onSave) return;
 
@@ -760,6 +806,8 @@ export function NativeSchedulerV2Spike({
                 onPlacementPointerMove={handlePlacementPointerMove}
                 onPlacementPointerLeave={handlePlacementPointerLeave}
                 onPlacementSlotClick={handlePlacementSlotClick}
+                manualBookingEnabled={manualBookingEnabled}
+                onManualBookingSlotClick={handleManualBookingSlotClick}
               />
 
               {placementDemandItem && (

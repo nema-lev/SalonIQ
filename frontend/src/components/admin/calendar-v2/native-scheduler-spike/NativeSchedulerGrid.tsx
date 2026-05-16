@@ -63,6 +63,8 @@ type NativeSchedulerGridProps = {
   onPlacementPointerMove?: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onPlacementPointerLeave?: () => void;
   onPlacementSlotClick?: (event: ReactMouseEvent<HTMLDivElement>) => void;
+  manualBookingEnabled?: boolean;
+  onManualBookingSlotClick?: (event: ReactMouseEvent<HTMLDivElement>) => void;
 };
 
 const HEADER_HEIGHT = 56;
@@ -87,6 +89,8 @@ export function NativeSchedulerGrid({
   onPlacementPointerMove,
   onPlacementPointerLeave,
   onPlacementSlotClick,
+  manualBookingEnabled = false,
+  onManualBookingSlotClick,
 }: NativeSchedulerGridProps) {
   const containerRef = useRef<HTMLElement | null>(null);
   const [currentTime, setCurrentTime] = useState(() => new Date());
@@ -130,6 +134,11 @@ export function NativeSchedulerGrid({
         config: geometry,
       })
     : 0;
+  const handleGridClick = placementModeActive
+    ? onPlacementSlotClick
+    : manualBookingEnabled
+      ? onManualBookingSlotClick
+      : undefined;
 
   useEffect(() => {
     const node = containerRef.current;
@@ -220,7 +229,7 @@ export function NativeSchedulerGrid({
             }}
             onPointerMove={placementModeActive ? onPlacementPointerMove : undefined}
             onPointerLeave={placementModeActive ? onPlacementPointerLeave : undefined}
-            onClick={placementModeActive ? onPlacementSlotClick : undefined}
+            onClick={handleGridClick}
           >
             {schedulerNotice && (
               <SchedulerNotice notice={schedulerNotice} />

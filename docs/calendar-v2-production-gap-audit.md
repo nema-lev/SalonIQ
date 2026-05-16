@@ -10,7 +10,7 @@ Calendar V2 is now the correct primary **development direction** for the admin c
 | Readiness level | Verdict | Why |
 | --- | --- | --- |
 | Primary internal development calendar | **Ready** | `/admin` already renders Calendar V2 in real-data mode; the native day grid, staff columns, Action Inbox, Booking Detail panel, selected-slot locking, current-time indicator, no-past guard, and guarded waitlist placement flow are all present. |
-| Beta/admin testing calendar | **Not yet ready for broad beta** | It is suitable for controlled internal testing of viewing and request placement, but it still lacks several owner-critical workflows that remain available only in the hidden legacy calendar: manual booking creation, confirm/cancel actions, and move/reschedule actions. Error recovery is also still too shallow for confident multi-admin testing. |
+| Beta/admin testing calendar | **Not yet ready for broad beta** | It is suitable for controlled internal testing of viewing, manual booking creation, and request placement, but it still lacks several owner-critical workflows that remain available only in the hidden legacy calendar: confirm/cancel actions and move/reschedule actions. Error recovery is also still too shallow for confident multi-admin testing. |
 | Production calendar for real salons | **Not ready** | Calendar V2 is missing core operating actions, phone use is intentionally incomplete, notification behavior is not wired, and backend scheduling authority is still transitional because real allocation backfill has not happened, allocation-only read authority is not enabled, durable command idempotency is absent, and conflict responses are still mostly string-based rather than structured. |
 
 The honest current positioning is:
@@ -27,7 +27,7 @@ The honest current positioning is:
 | Staff/resource columns | Yes | Yes |
 | Pending/request handling | Yes: waitlist + pending timed requests, with confirm action | Partial: Action Inbox shows waitlist and pending items, but pending timed-request actions are read-only in Calendar V2 |
 | Waitlist placement | Yes: dedicated transactional placement endpoint | Partial: click-to-place preview; real save only behind `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE=true` |
-| Manual new booking | Yes | **No** |
+| Manual new booking | Yes | Yes on desktop real-data mode: `Нов час` plus future empty-slot click reusing the admin-create flow |
 | Booking detail view | Yes: drawer with contact/history/actions | Partial: read-only Booking Detail panel with selected-booking facts |
 | Cancel booking | Yes | **No** |
 | Confirm booking | Yes | **No** |
@@ -47,7 +47,6 @@ These are not hypothetical feature ideas. They are workflows the existing legacy
 
 | Missing workflow in Calendar V2 | Why it matters before real use | Priority |
 | --- | --- | --- |
-| Manual new booking from the calendar | The owner cannot create a direct booking from the primary calendar surface even though the legacy calendar can. That is a basic daily operation. | **P0** |
 | Cancel booking from Booking Detail | The owner cannot cancel a booking from the primary calendar surface. The legacy drawer can. | **P0** |
 | Confirm pending timed request | Action Inbox can surface the item, but Calendar V2 cannot complete the action. The legacy calendar can confirm it. | **P0** |
 | Move/reschedule existing booking | The owner cannot repair schedule changes from the primary calendar surface. The legacy calendar can. | **P0** |
@@ -64,12 +63,11 @@ These are not hypothetical feature ideas. They are workflows the existing legacy
 
 ### Practical owner/admin consequence
 
-Today an owner can **see** the day, inspect bookings, and optionally place an untimed request if the feature flag is enabled. The same owner still needs the hidden legacy fallback to:
+Today an owner can **see** the day, inspect bookings, create a direct manual booking on desktop real mode, and optionally place an untimed request if the feature flag is enabled. The same owner still needs the hidden legacy fallback to:
 
-1. create a new booking,
-2. confirm a pending timed request,
-3. cancel a booking, and
-4. move an existing booking.
+1. confirm a pending timed request,
+2. cancel a booking, and
+3. move an existing booking.
 
 That means Calendar V2 is the primary route, but it is not yet the only calendar surface an operator can rely on.
 
@@ -117,7 +115,7 @@ Calendar V2 can still add owner actions that reuse already-existing safe backend
 | Area | Current state | Audit |
 | --- | --- | --- |
 | Preview vs committed state | Good in the inspected placement flow: the panel says `Преглед на поставяне · не е записано`, `Часът още не е записан`, and only a deliberate save can commit when enabled. | This is one of the strongest parts of the current Calendar V2 UX. Keep this contract. |
-| No-past placement | Clear in the current flow: past regions are shaded, past clicks show `Изберете бъдещ час.`, and a now-historical selected slot disables save with `Не може да запишете час в миналото.` | Good for the one supported write path. |
+| No-past scheduling | Waitlist placement shades historical regions, manual booking ignores past slot clicks with `Изберете бъдещ час.`, and backend create/placement validation maps to `Не може да запишете час в миналото.` | Good for both currently exposed Calendar V2 write paths; backend authority remains required. |
 | Action Inbox understandability | The grouping is understandable for untimed request placement: `За действие`, `Заявка без точен час`, `Постави в графика`. | Still incomplete as an operating surface because some visible items are informational only and cannot yet be completed from Calendar V2. |
 | Placement flow understandability | The flow is understandable on desktop: select request, select slot, inspect preview, save only if enabled. Selected slot locking avoids hover confusion. | Good foundation, but only for desktop and only for waitlist placement. |
 | Booking Detail panel | Useful for reading selected booking facts, status, message cue, and notes. | Not enough for production operation because it lacks the actions present in the legacy drawer. |
@@ -129,7 +127,7 @@ Calendar V2 can still add owner actions that reuse already-existing safe backend
 
 | Form factor | Current answer |
 | --- | --- |
-| Desktop | **Yes, usable today for viewing and the guarded waitlist-placement workflow.** It is still not a complete production operating calendar because major actions are missing. |
+| Desktop | **Yes, usable today for viewing, manual booking, and the guarded waitlist-placement workflow.** It is still not a complete production operating calendar because major actions are missing. |
 | Tablet landscape | **Partially usable.** The native scheduler is designed for desktop/tablet-landscape and prior QA notes say it can render there. It remains dependent on desktop-style interactions and is not yet a proven full production editing experience. |
 | Tablet portrait | **Not ready.** The project docs explicitly call portrait cramped/out of scope and recommend a phone-like tap-to-assign model. |
 | Phone | **No.** At widths below 768px Calendar V2 hides the desktop scheduler and shows only: `Телефонният Calendar V2 ще използва отделен дневен изглед.` |
@@ -150,7 +148,7 @@ Mobile drag/drop is **not** required before first acceptable mobile use; the exi
 | Scenario | Current observed behavior | Remaining trust gap |
 | --- | --- | --- |
 | Conflict error | Calendar V2 maps conflict-like `409` messages to `Този час вече е зает.` and local preview can show overlap hints. | The frontend still depends on message parsing; there is no mature structured conflict code/recovery contract. |
-| Past-time error | Frontend blocks obvious past slots and backend rejects past scheduling starts; UI maps backend past-time responses to Bulgarian copy. | Good for current placement flow. |
+| Past-time error | Frontend blocks obvious past slots for manual booking and placement; backend rejects past scheduling starts; UI maps backend past-time responses to Bulgarian copy. | Good for the current exposed write paths. |
 | Already-handled request | Backend row-lock path rejects it with conflict; Calendar V2 maps to `Заявката вече е обработена.` | The UI does not yet have a richer “placed elsewhere / open the booked appointment / refresh now” experience. |
 | Backend `400` / `409` / `500` mapping | Placement save maps `400/404/409` into a generic unavailable message unless recognized as handled/past/conflict; all other failures become generic retry copy. | Too coarse for production trust, especially once more write actions exist. |
 | Retry behavior | User may retry manually after an error. | No durable idempotent replay yet; repeated network retries cannot safely return stored success after a lost response. |
@@ -169,7 +167,6 @@ The largest immediate trust issue is not the conflict wording itself; it is the 
 
 Deleting it soon would remove the only inspected admin-calendar path that currently exposes several required owner operations:
 
-- manual booking creation,
 - confirm booking,
 - cancel booking,
 - move/reschedule booking,
@@ -194,11 +191,10 @@ Until those conditions are met, the fallback should remain hidden from normal na
 ### Must do before a real salon pilot
 
 1. Enable the internal diagnostics endpoint only for the review window, then run and review the allocation backfill dry-run report against the production Oracle DB.
-2. Add Calendar V2 manual new booking flow.
-3. Add Calendar V2 confirm and cancel actions from Booking Detail / Action Inbox.
-4. Add a non-drag Calendar V2 move/reschedule path.
-5. Fix structured error-state and post-commit refresh/reconciliation behavior for the currently enabled save paths.
-6. Hide or gate sample/demo production wording from ordinary real-mode operator experience.
+2. Add Calendar V2 confirm and cancel actions from Booking Detail / Action Inbox.
+3. Add a non-drag Calendar V2 move/reschedule path.
+4. Fix structured error-state and post-commit refresh/reconciliation behavior for the currently enabled save paths.
+5. Hide or gate sample/demo production wording from ordinary real-mode operator experience.
 
 ### Must do before removing the legacy fallback
 

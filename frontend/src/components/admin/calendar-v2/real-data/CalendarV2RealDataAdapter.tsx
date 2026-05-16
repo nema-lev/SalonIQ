@@ -4,15 +4,17 @@ import { useCallback, useMemo, useState } from 'react';
 import axios from 'axios';
 import { useQueryClient } from '@tanstack/react-query';
 import { addDays, endOfDay, format, startOfDay } from 'date-fns';
-import { ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, RotateCcw } from 'lucide-react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { apiClient } from '@/lib/api-client';
+import { AdminBookingModal } from '../../admin-booking-modal';
 import { useAdminCalendarBoardData } from '../../use-admin-calendar-board-data';
 import {
   NativeSchedulerV2Spike,
   type NativeSchedulerPlacementSaveResult,
 } from '../native-scheduler-spike/NativeSchedulerV2Spike';
+import type { NativeSchedulerManualBookingIntent } from '../native-scheduler-spike/native-scheduler-manual-booking';
 import type { NativeSchedulerNotice } from '../native-scheduler-spike/NativeSchedulerGrid';
 import type { WaitlistPlacementSaveRequest } from '../native-scheduler-spike/native-scheduler-drag';
 import { buildCalendarV2RealDataProjection } from './calendar-v2-real-data-mappers';
@@ -21,7 +23,8 @@ import { buildCalendarV2SampleDayProjection } from './calendar-v2-sample-day';
 const ENABLE_CALENDAR_V2_PLACEMENT_SAVE =
   process.env.NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === 'true';
 const CALENDAR_V2_READONLY_NOTICE = 'Calendar V2 · Read-only';
-const CALENDAR_V2_PLACEMENT_SAVE_NOTICE = 'Calendar V2 · Request placement enabled';
+const CALENDAR_V2_MANUAL_BOOKING_NOTICE = 'Calendar V2 · Manual booking enabled';
+const CALENDAR_V2_OPERATIONS_NOTICE = 'Calendar V2 · Manual booking + request placement';
 
 type PlaceWaitlistEntryResponse = {
   id?: string;
@@ -32,6 +35,11 @@ type PlaceWaitlistEntryResponse = {
 
 export function CalendarV2RealDataAdapter() {
   const [currentDate, setCurrentDate] = useState(() => startOfDay(new Date()));
+  const [bookingPrefill, setBookingPrefill] = useState<{
+    date: string;
+    staffId: string;
+    preferredSlot: string;
+  } | null>(null);
   const queryClient = useQueryClient();
   const router = useRouter();
   const pathname = usePathname();
@@ -58,13 +66,16 @@ export function CalendarV2RealDataAdapter() {
     enabled: !isSampleMode,
   });
   const canSavePlacement = ENABLE_CALENDAR_V2_PLACEMENT_SAVE && !isSampleMode;
+  const canCreateManualBooking = !isSampleMode;
   const placementSaveDisabledReason =
     ENABLE_CALENDAR_V2_PLACEMENT_SAVE && isSampleMode
       ? 'Sample режимът не записва часове.'
       : 'Записването ще добавим в следващата стъпка';
-  const modeNotice = canSavePlacement
-    ? CALENDAR_V2_PLACEMENT_SAVE_NOTICE
-    : CALENDAR_V2_READONLY_NOTICE;
+  const modeNotice = isSampleMode
+    ? CALENDAR_V2_READONLY_NOTICE
+    : canSavePlacement
+      ? CALENDAR_V2_OPERATIONS_NOTICE
+      : CALENDAR_V2_MANUAL_BOOKING_NOTICE;
   const actionInboxSubtitle = canSavePlacement
     ? 'Поставяне на заявки в графика'
     : isSampleMode
@@ -86,6 +97,7 @@ export function CalendarV2RealDataAdapter() {
     [currentDate],
   );
   const activeProjection = isSampleMode ? sampleProjection : projection;
+  const defaultStaffId = activeProjection.resources[0]?.id ?? '';
 
   const handleSavePlacement = useCallback(
     async (request: WaitlistPlacementSaveRequest): Promise<NativeSchedulerPlacementSaveResult> => {
@@ -124,6 +136,24 @@ export function CalendarV2RealDataAdapter() {
     ],
   );
 
+  const handleOpenManualBooking = useCallback((intent: NativeSchedulerManualBookingIntent) => {
+    setBookingPrefill({
+      date: format(new Date(intent.startAt), 'yyyy-MM-dd'),
+      staffId: intent.staffId,
+      preferredSlot: intent.preferredSlot,
+    });
+  }, []);
+
+  const handleManualBookingCreated = useCallback(async () => {
+    setBookingPrefill(null);
+
+    await Promise.all([
+      refetchCalendarBoard(),
+      queryClient.invalidateQueries({ queryKey: ['appointments-calendar-board'] }),
+      queryClient.invalidateQueries({ queryKey: ['appointment-context'] }),
+    ]);
+  }, [queryClient, refetchCalendarBoard]);
+
   const headerControls = (
     <div className="inline-flex min-w-0 items-center gap-2">
       <button
@@ -159,6 +189,22 @@ export function CalendarV2RealDataAdapter() {
         <RotateCcw className="h-3.5 w-3.5" />
         Today
       </button>
+      {!isSampleMode && (
+        <button
+          type="button"
+          onClick={() =>
+            setBookingPrefill({
+              date: format(currentDate, 'yyyy-MM-dd'),
+              staffId: defaultStaffId,
+              preferredSlot: '',
+            })
+          }
+          className="inline-flex h-10 items-center gap-2 rounded-lg bg-slate-950 px-3 text-xs font-black text-white shadow-sm transition hover:bg-slate-800"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Нов час
+        </button>
+      )}
     </div>
   );
 
@@ -235,26 +281,45 @@ export function CalendarV2RealDataAdapter() {
   );
 
   return (
-    <NativeSchedulerV2Spike
-      date={currentDate}
-      resources={activeProjection.resources}
-      calendarBlocks={activeProjection.calendarBlocks}
-      demandItems={activeProjection.demandItems}
-      actionItems={activeProjection.actionItems}
-      readOnly
-      enableLocalPlacementPreview
-      readOnlyNotice={modeNotice}
-      schedulerNotice={schedulerNotice}
-      toolbarEyebrow="Calendar V2"
-      toolbarNote={toolbarNote}
-      toolbarControls={headerControls}
-      actionInboxSubtitle={actionInboxSubtitle}
-      placementSave={{
-        enabled: canSavePlacement,
-        disabledReason: placementSaveDisabledReason,
-        onSave: handleSavePlacement,
-      }}
-    />
+    <>
+      <NativeSchedulerV2Spike
+        date={currentDate}
+        resources={activeProjection.resources}
+        calendarBlocks={activeProjection.calendarBlocks}
+        demandItems={activeProjection.demandItems}
+        actionItems={activeProjection.actionItems}
+        readOnly
+        enableLocalPlacementPreview
+        readOnlyNotice={modeNotice}
+        schedulerNotice={schedulerNotice}
+        toolbarEyebrow="Calendar V2"
+        toolbarNote={toolbarNote}
+        toolbarControls={headerControls}
+        actionInboxSubtitle={actionInboxSubtitle}
+        placementSave={{
+          enabled: canSavePlacement,
+          disabledReason: placementSaveDisabledReason,
+          onSave: handleSavePlacement,
+        }}
+        manualBooking={{
+          enabled: canCreateManualBooking,
+          onOpen: handleOpenManualBooking,
+          onBlockedPast: () => toast.error('Изберете бъдещ час.'),
+          onUnavailable: () => toast.error('Този час не е наличен.'),
+        }}
+      />
+
+      <AdminBookingModal
+        open={Boolean(bookingPrefill)}
+        defaultDate={bookingPrefill?.date ?? format(currentDate, 'yyyy-MM-dd')}
+        defaultStaffId={bookingPrefill?.staffId ?? defaultStaffId}
+        preferredSlot={bookingPrefill?.preferredSlot ?? ''}
+        onClose={() => setBookingPrefill(null)}
+        onCreated={() => {
+          void handleManualBookingCreated();
+        }}
+      />
+    </>
   );
 }
 

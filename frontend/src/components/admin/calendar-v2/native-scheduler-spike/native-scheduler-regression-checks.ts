@@ -39,6 +39,7 @@ import {
   isPastPlacementStart,
   usesFallbackPlacementDuration,
 } from './native-scheduler-drag';
+import { buildManualBookingIntent } from './native-scheduler-manual-booking';
 
 export type NativeSchedulerRegressionCheckResult = {
   name: string;
@@ -162,6 +163,57 @@ const checks: RegressionCheck[] = [
         getPastPlacementOverlayHeight({ schedulerDate: futureDate, now }),
         0,
         'future dates should not shade unavailable placement time',
+      );
+    },
+  },
+  {
+    name: 'manual booking intent exists only for future open slots outside placement mode',
+    run: () => {
+      const futureTarget = manualBookingTarget({
+        startMinutes: 11 * 60,
+      });
+      const pastTarget = manualBookingTarget({
+        startMinutes: 9 * 60,
+      });
+
+      assertDefined(
+        buildManualBookingIntent({
+          target: futureTarget,
+          enabled: true,
+          placementModeActive: false,
+          now: new Date(2026, 4, 5, 10, 30),
+        }),
+        'future empty slots should produce a manual booking intent',
+      );
+      assertEqual(
+        buildManualBookingIntent({
+          target: pastTarget,
+          enabled: true,
+          placementModeActive: false,
+          now: new Date(2026, 4, 5, 10, 30),
+        }),
+        null,
+        'past slots should not produce a manual booking intent',
+      );
+      assertEqual(
+        buildManualBookingIntent({
+          target: futureTarget,
+          enabled: false,
+          placementModeActive: false,
+          now: new Date(2026, 4, 5, 10, 30),
+        }),
+        null,
+        'sample/read-only mode should not produce a manual booking intent',
+      );
+      assertEqual(
+        buildManualBookingIntent({
+          target: futureTarget,
+          enabled: true,
+          placementModeActive: true,
+          now: new Date(2026, 4, 5, 10, 30),
+        }),
+        null,
+        'request placement mode should take precedence over manual booking clicks',
       );
     },
   },
@@ -579,9 +631,10 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
         const placementPreviewSource = readSource(sourceDir, 'NativeSchedulerPlacementPreview.tsx');
 
         assert(
-          adapterSource.includes('Calendar V2 · Request placement enabled') &&
-            adapterSource.includes('const modeNotice = canSavePlacement'),
-          'real-data placement-save mode should use an enabled placement label instead of read-only copy',
+          adapterSource.includes('Calendar V2 · Manual booking enabled') &&
+            adapterSource.includes('Calendar V2 · Manual booking + request placement') &&
+            adapterSource.includes('const modeNotice = isSampleMode'),
+          'real-data mode should describe manual booking and request-placement capability honestly',
         );
         assert(
           adapterSource.includes('Поставяне на заявки в графика') &&
@@ -602,6 +655,32 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
           placementPreviewSource.includes('Часът ще се запише само след натискане на „Запази час“.') &&
             placementPreviewSource.includes('Това е само преглед. Часът няма да бъде записан.'),
           'placement preview should use save-capable copy only when save is enabled',
+        );
+      },
+    },
+    {
+      name: 'manual booking stays real-data only and coexists with request placement',
+      run: () => {
+        const adapterSource = readSource(sourceDir, '../real-data/CalendarV2RealDataAdapter.tsx');
+        const schedulerSource = readSource(sourceDir, 'NativeSchedulerV2Spike.tsx');
+        const gridSource = readSource(sourceDir, 'NativeSchedulerGrid.tsx');
+
+        assert(
+          adapterSource.includes('const canCreateManualBooking = !isSampleMode') &&
+            adapterSource.includes('Нов час') &&
+            adapterSource.includes('<AdminBookingModal'),
+          'real-data Calendar V2 should expose the manual booking entry point while sample mode stays non-writing',
+        );
+        assert(
+          schedulerSource.includes('buildManualBookingIntent') &&
+            schedulerSource.includes('manualBookingEnabled') &&
+            schedulerSource.includes('onManualBookingSlotClick'),
+          'scheduler should turn ordinary slot clicks into explicit manual booking intent',
+        );
+        assert(
+          gridSource.includes('const handleGridClick = placementModeActive') &&
+            gridSource.includes('manualBookingEnabled'),
+          'request placement mode should keep priority over manual booking grid clicks',
         );
       },
     },
@@ -870,6 +949,25 @@ function demandFixture(
     },
     notes: 'Fixture-only regression guard',
     createdAt: dateAndMinutesToIso(CHECK_DATE, 8 * 60),
+  };
+}
+
+function manualBookingTarget({
+  startMinutes,
+  hasConflict = false,
+}: {
+  startMinutes: number;
+  hasConflict?: boolean;
+}) {
+  return {
+    kind: 'appointment' as const,
+    staffId: 'staff-1',
+    staffName: 'Mira',
+    startAt: dateAndMinutesToIso(CHECK_DATE, startMinutes),
+    endAt: dateAndMinutesToIso(CHECK_DATE, startMinutes + 15),
+    durationMinutes: 15,
+    hasConflict,
+    isPast: false,
   };
 }
 

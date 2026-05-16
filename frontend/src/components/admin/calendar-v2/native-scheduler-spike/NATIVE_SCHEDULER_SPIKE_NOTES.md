@@ -21,6 +21,7 @@
 
 - The primary route renders the native scheduler from real appointments, staff, services, waitlist entries, and staff exceptions when current admin auth/tenant context can read the existing calendar data.
 - Real-data route keeps appointment drag handles and waitlist drag-to-place controls disabled.
+- Desktop real-data route now supports manual new booking with a visible `Нов час` action and future empty-slot click. Slot clicks reuse the existing admin booking modal with staff/date/time prefilled and submit through the existing admin-create path.
 - Real-data and sample routes now allow a click-to-place preview for Action Inbox waitlist/demand items. The owner selects `Постави в графика`, clicks a staff/time slot, and sees a lightweight placement preview.
 - Real-data route can save only that waitlist/request placement when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"`. Sample mode and flag-off real mode remain non-writing.
 - The local preview emits a typed `placeRequest` command-shaped object with the request id, target staff/start/end, source surface, idempotency key, appointment draft details, and `localOnly: true`.
@@ -40,12 +41,13 @@
 
 ## What Does Not Work
 
-- No backend writes from Calendar V2 unless the placement-save flag is enabled and a real-data waitlist/request placement is explicitly saved.
-- No appointment creation from Calendar V2.
+- No backend writes from Calendar V2 in sample mode or phone mode. In desktop real-data mode, the intentional write surfaces are manual booking create plus feature-flagged explicit waitlist/request placement save.
+- No manual booking creation in sample mode or phone mode.
 - No request placement persistence from Calendar V2 unless `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"` in real-data mode.
 - No appointment, waitlist placement, waitlist status, appointment status, notification, or reschedule write API is called by the placement preview.
 - Placement confirm/save remains disabled in sample mode and flag-off real mode.
 - Backend placement validation remains authoritative and rejects past start times even if the UI is bypassed.
+- Backend admin-create validation remains authoritative for manual bookings too; Calendar V2 blocks past slot clicks with `Изберете бъдещ час.` and maps rejected past creates to `Не може да запишете час в миналото.`.
 - No persistence after reset/reload.
 - No resize interaction.
 - No keyboard drag interaction.
@@ -106,9 +108,20 @@ In the real-data route, appointment move handles are disabled.
 - Alias route: `/admin/calendar-v2`.
 - Legacy fallback route: `/admin/calendar-legacy`.
 - Calendar V2 is now the main admin calendar direction; the legacy calendar remains only for emergency comparison/debugging.
-- User-facing route language now says `Calendar V2`, `Request placement enabled`, or `Read-only` when applicable rather than presenting the main route as a preview.
-- Existing limitations remain intentional: no persisted drag-to-move, no resize, no recurring bookings, no notifications, no realtime collaboration, and no complete phone placement flow.
-- Recommended next work: complete the phone-specific flow, then add persisted move/resize only after the shared scheduling command path and reconciliation behavior are ready.
+- User-facing route language now says `Calendar V2`, `Manual booking enabled`, `Manual booking + request placement`, or `Read-only` when applicable rather than presenting the main route as a preview.
+- Existing limitations remain intentional: no cancel, no confirm pending timed request, no move/reschedule flow, no persisted drag-to-move, no resize, no recurring bookings, no notifications, no realtime collaboration, and no complete phone booking/placement flow.
+- Recommended next P0 work: add cancel, confirm pending timed request, and non-drag move/reschedule before later phone and drag/resize work.
+
+## Manual New Booking Pass
+
+- Date of pass: 2026-05-16.
+- Desktop real-data Calendar V2 now exposes `Нов час` in the toolbar and lets the owner click a future empty scheduler slot to open the existing `AdminBookingModal`.
+- Empty-slot intent prefills staff, date, and exact start time; the reused modal preserves the existing service/client selection behavior and still submits through `POST /appointments/admin`.
+- Calendar V2 does not create optimistic committed cards. After a successful create, it closes the modal, refetches the current calendar board, invalidates `appointments-calendar-board`, and invalidates `appointment-context`; the selected date stays unchanged.
+- Sample mode remains non-writing and hides manual booking entry points. Phone width keeps the existing separate notice rather than exposing a compressed unfinished desktop booking flow.
+- Request placement keeps priority over ordinary slot clicks, so an active Action Inbox placement flow behaves exactly as before.
+- Frontend slot clicks block past time with `Изберете бъдещ час.`; backend create remains the authority for no-past/conflict validation and the reused modal maps create failures to calm Bulgarian copy.
+- This pass does not add notifications, realtime, drag/drop persistence, resize, recurring bookings, backend endpoints, schema changes, or migrations.
 
 ## Current Calendar Parity QA
 

@@ -14,6 +14,7 @@ const tempDir = await mkdtemp(path.join(tmpdir(), 'calendar-v2-regression-'));
 const files = [
   'native-scheduler-geometry.ts',
   'native-scheduler-drag.ts',
+  'native-scheduler-manual-booking.ts',
   'native-scheduler-regression-checks.ts',
 ];
 

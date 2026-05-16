@@ -200,6 +200,8 @@ APP_DOMAIN=saloniq.bg
 FRONTEND_URL=https://saloniq.bg
 CORS_ORIGINS=https://saloniq.bg,https://*.saloniq.bg
 INTERNAL_API_KEY=случайна_низ_за_вътрешна_комуникация
+# По подразбиране изключено; включвай само временно за read-only Calendar diagnostics.
+# ENABLE_INTERNAL_DIAGNOSTICS=true
 ```
 
 > **Генерирай JWT тайни:** `node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"`
@@ -230,6 +232,41 @@ curl http://localhost:3001/api/health
 ```
 
 > `001_init.sql` е bootstrap файл. Промяна в него не обновява автоматично вече съществуващите tenant схеми в работеща база. След текущия Calendar V2 hardening backend startup проверява всички вече налични tenant схеми и идемпотентно добавя липсващите `calendar_allocations`, индекси и exclusion constraint без destructive backfill на съществуващите appointments.
+
+### Read-only Calendar allocation diagnostics
+
+За deployed backend предпочитай вътрешния authenticated endpoint вместо ръчни SSH/container команди:
+
+```text
+GET /api/v1/internal/diagnostics/calendar-allocation-backfill-report
+```
+
+Endpoint-ът е изключен по подразбиране и работи само когато `ENABLE_INTERNAL_DIAGNOSTICS=true`. Изисква валиден bearer token на tenant `OWNER` или `ADMIN`, използва само схемата на автентикирания tenant и връща JSON без имена, телефони, имейли или бележки на клиенти.
+
+Пример:
+
+```bash
+BASE_URL="https://<backend-host>"
+TOKEN="$(
+  curl -sS "$BASE_URL/api/v1/auth/login" \
+    -H "Content-Type: application/json" \
+    --data '{"email":"<owner-or-admin-email>","password":"<password>"}' \
+  | jq -r '.data.accessToken'
+)"
+
+curl -sS "$BASE_URL/api/v1/internal/diagnostics/calendar-allocation-backfill-report" \
+  -H "Authorization: Bearer $TOKEN" \
+| jq '.data'
+```
+
+Това **не е backfill**. Endpoint-ът използва същия report код като CLI fallback-а, отваря `BEGIN READ ONLY`, изпълнява само inspection заявки и приключва с `ROLLBACK`. Не добавя `calendar_allocations`, не обновява `appointments` и не трие данни.
+
+Интерпретация:
+
+- `READY_FOR_BACKFILL`: report-ът е чист за следващо планиране; това не значи, че backfill вече е изпълнен.
+- `BLOCKED_BY_OVERLAPS`: първо се коригират overlap/buffer conflict записите.
+- `BLOCKED_BY_SCHEMA`: първо се възстановяват липсващите schema prerequisites.
+- `NEEDS_MANUAL_REVIEW`: първо се преглеждат orphan/terminal/duplicate allocation аномалиите.
 
 ---
 

@@ -403,24 +403,68 @@ The Oracle deploy path rebuilds and restarts the backend container; it does not 
 
 Existing appointments are not backfilled during this startup upgrade. The current waitlist placement flow keeps its buffer-aware legacy appointment overlap query until a separate validated backfill phase exists.
 
-Calendar allocation backfill dry-run report
+Calendar allocation backfill dry-run diagnostics
 
-The repo now includes a manual backend integrity report for the future appointment-allocation backfill:
+Chosen operational path: use the authenticated internal diagnostics endpoint for normal runs, not SSH/container commands.
+
+The endpoint is disabled by default. To enable it on the Oracle backend deploy, add this line to the existing `/opt/saloniq/deploy/oracle-dev/.env` file and redeploy the backend through the normal GitHub-based deploy flow:
+
+```env
+ENABLE_INTERNAL_DIAGNOSTICS=true
+```
+
+Do not leave the flag enabled longer than needed for the review window. When the flag is absent or `false`, the route returns `404`.
+
+The endpoint is:
+
+```text
+GET /api/v1/internal/diagnostics/calendar-allocation-backfill-report
+```
+
+It requires an existing tenant `OWNER` or `ADMIN` bearer token, resolves the tenant from that authenticated token, and can inspect only that same tenant schema. An optional `?schema=tenant_x` filter is accepted only when it exactly matches the authenticated tenant schema; cross-tenant schema filters return `403`.
+
+Example HTTPS run against the deployed backend:
 
 ```bash
-cd /opt/saloniq/backend
-docker compose --env-file ../deploy/oracle-dev/.env exec -T backend \
+BASE_URL="https://saloniq.duckdns.org"
+TOKEN="$(
+  curl -sS "$BASE_URL/api/v1/auth/login" \
+    -H "Content-Type: application/json" \
+    --data '{"email":"<owner-or-admin-email>","password":"<password>"}' \
+  | jq -r '.data.accessToken'
+)"
+
+curl -sS "$BASE_URL/api/v1/internal/diagnostics/calendar-allocation-backfill-report" \
+  -H "Authorization: Bearer $TOKEN" \
+| jq '.data'
+```
+
+Focused run for the same authenticated tenant schema:
+
+```bash
+curl -sS "$BASE_URL/api/v1/internal/diagnostics/calendar-allocation-backfill-report?schema=tenant_demo_business" \
+  -H "Authorization: Bearer $TOKEN" \
+| jq '.data'
+```
+
+The JSON response intentionally contains only readiness metadata, IDs, counts, timestamps, staff IDs, service IDs, and allocation IDs. It does not expose client names, phone numbers, emails, notes, or other sensitive appointment details.
+
+The older CLI remains available only as a fallback if endpoint access is intentionally not enabled:
+
+```bash
+cd /opt/saloniq/deploy/oracle-dev
+docker compose --env-file .env exec -T backend \
   npm run report:calendar-allocation-backfill
 ```
 
 For one tenant only:
 
 ```bash
-docker compose --env-file ../deploy/oracle-dev/.env exec -T backend \
+docker compose --env-file .env exec -T backend \
   npm run report:calendar-allocation-backfill -- --schema=tenant_demo_business
 ```
 
-This command is diagnostic only. It opens a `BEGIN READ ONLY` transaction, runs inspection queries, then rolls back. It does **not** insert appointments, create allocations, update allocations, or delete anything.
+Both the endpoint and CLI reuse the same diagnostic report logic. They open a `BEGIN READ ONLY` transaction, run inspection queries, then roll back. They do **not** insert appointments, create allocations, update allocations, update appointments, or delete anything.
 
 The report checks:
 
@@ -460,7 +504,12 @@ Tenant: tenant_demo_business
   Readiness: READY_FOR_BACKFILL
 ```
 
-Real backfill is still intentionally not present. Any tenant reported as `BLOCKED_BY_OVERLAPS`, `BLOCKED_BY_SCHEMA`, or `NEEDS_MANUAL_REVIEW` must be corrected before a future mutating backfill can be safely designed or run.
+Real backfill is still intentionally not present. Use each readiness result this way:
+
+- `READY_FOR_BACKFILL`: capture and review the report; this is permission to design the later backfill step, not proof that a real backfill has already happened.
+- `BLOCKED_BY_OVERLAPS`: resolve the legacy overlap, buffer-only conflict, or allocation-overlap rows before any mutating backfill.
+- `BLOCKED_BY_SCHEMA`: restore the missing allocation table, exclusion constraint, indexes, or `btree_gist` prerequisite before any mutating backfill.
+- `NEEDS_MANUAL_REVIEW`: inspect and correct orphan allocations, terminal rows with active allocations, or duplicate active allocations before any mutating backfill.
 
 Manual validation commands on the VM
 

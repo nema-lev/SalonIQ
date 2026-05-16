@@ -15,6 +15,7 @@ import { ServicesModule } from './modules/services/services.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { StatsModule } from './modules/stats/stats.module';
 import { PlatformModule } from './modules/platform/platform.module';
+import { InternalDiagnosticsModule } from './modules/internal-diagnostics/internal-diagnostics.module';
 import { HealthController } from './health.controller';
 
 const redisHost = process.env.REDIS_HOST?.trim();
@@ -81,6 +82,7 @@ const redisEnabled = Boolean(redisHost);
     NotificationsModule,
     StatsModule,
     PlatformModule,
+    InternalDiagnosticsModule,
   ],
   controllers: [HealthController],
 })

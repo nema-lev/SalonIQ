@@ -181,7 +181,15 @@ The second insert should fail on `calendar_allocations_no_active_exclusive_overl
 
 #### Allocation Backfill Dry-Run / Integrity Report
 
-Before any real appointment backfill is designed or executed, run the manual backend report:
+Before any real appointment backfill is designed or executed, run the authenticated internal diagnostics endpoint against the deployed backend when `ENABLE_INTERNAL_DIAGNOSTICS=true`:
+
+```text
+GET /api/v1/internal/diagnostics/calendar-allocation-backfill-report
+```
+
+This is the chosen production operational path because it reuses the existing tenant owner/admin JWT model instead of requiring SSH or manual container commands. It is disabled by default, requires an authenticated tenant `OWNER` or `ADMIN`, resolves the tenant from that authenticated context, and inspects only that same tenant schema. Optional `?schema=tenant_x` is accepted only when it matches the authenticated tenant schema.
+
+The original CLI remains available as a fallback:
 
 ```bash
 cd backend
@@ -194,7 +202,9 @@ Optional focused run:
 DATABASE_URL="postgresql://..." npm run report:calendar-allocation-backfill -- --schema=tenant_demo_business
 ```
 
-The command is intentionally **not** a backfill. It starts a `BEGIN READ ONLY` transaction, executes inspection queries only, rolls the transaction back, and does not insert/update/delete `appointments` or `calendar_allocations`.
+The endpoint and CLI both reuse the same report implementation. They are intentionally **not** a backfill: each starts a `BEGIN READ ONLY` transaction, executes inspection queries only, rolls the transaction back, and does not insert/update/delete `appointments` or `calendar_allocations`.
+
+The default JSON output is intentionally non-sensitive: it exposes IDs, counts, timestamps, staff IDs, service IDs, allocation IDs, and infrastructure/readiness metadata, but not client names, phone numbers, emails, or notes.
 
 Per tenant schema it reports:
 
@@ -215,7 +225,12 @@ Readiness classes:
 - `BLOCKED_BY_SCHEMA`: `calendar_allocations`, the exclusion constraint, required indexes, or `btree_gist` is missing.
 - `NEEDS_MANUAL_REVIEW`: source-integrity anomalies exist, such as orphan allocations, terminal appointments with active allocations, or duplicate active allocations.
 
-Real backfill remains deferred because the report is only the validation/readiness step. Any tenant with `BLOCKED_BY_OVERLAPS`, `BLOCKED_BY_SCHEMA`, or `NEEDS_MANUAL_REVIEW` must be corrected before a future mutating backfill can be considered safe.
+Real backfill remains deferred because the report is only the validation/readiness step:
+
+- `READY_FOR_BACKFILL`: capture and review the report; this is readiness evidence for a later backfill design, not a completed backfill.
+- `BLOCKED_BY_OVERLAPS`: correct overlapping legacy appointments, buffer-only conflicts, or allocation-overlap anomalies first.
+- `BLOCKED_BY_SCHEMA`: restore the allocation schema prerequisites first.
+- `NEEDS_MANUAL_REVIEW`: resolve source-integrity anomalies before any future mutating backfill.
 
 Example output shape:
 
@@ -253,7 +268,7 @@ Tenant: tenant_demo_business
 - Calendar V2 frontend command types include versions and optimistic metadata, but current real-data projections do not populate an authoritative entity version for scheduling writes.
 - Local UI preview is correctly not committed state and must remain that way.
 - Existing appointments and staff exceptions are not backfilled yet. New standard allocation writes are protected against each other by the DB constraint, while transition safety against older appointments still depends on the retained legacy appointment query.
-- A manual read-only allocation backfill dry-run report now exists, but it only diagnoses readiness; it does not create allocations or make legacy rows authoritative.
+- An authenticated tenant-scoped read-only allocation backfill dry-run endpoint now operationalizes the existing report logic; the fallback CLI still exists. Neither path creates allocations nor makes legacy rows authoritative.
 - Group waitlist placement remains on the existing group-capacity flow in this step; it does not yet create the future single authoritative `group_session` allocation model.
 - The old two-call `/admin` request placement path has now been retired for current-calendar request placement. Validated legacy backfill is still pending, so allocation-only authority remains intentionally deferred.
 

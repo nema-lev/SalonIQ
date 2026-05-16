@@ -37,6 +37,7 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY package*.json ./
 COPY prisma ./prisma
+COPY scripts ./scripts
 
 # Non-root user за сигурност
 RUN groupadd -g 1001 nodejs && \

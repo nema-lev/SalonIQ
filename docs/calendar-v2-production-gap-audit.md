@@ -87,9 +87,9 @@ The architecture docs explicitly state that allocation-only authority remains de
 
 `getAvailableSlots(...)` and the current calendar-board read path still operate during a mixed state: new writes maintain allocations, while older appointments can still exist without them. The transitional conflict fallback is intentional, but it means the read side has not yet become allocation-only authority either.
 
-### Dry-run report exists but has not been run on the production Oracle DB
+### Dry-run report is now operationalized but has not yet been run on the production Oracle DB
 
-`backend/scripts/calendar-allocation-backfill-report.js` is already a read-only integrity report and has backend tests. That is a strong foundation, but the current project state still lacks the operational fact that matters most: a verified report result against the production Oracle DB before any real backfill or authority switch.
+`backend/scripts/calendar-allocation-backfill-report.js` is already a read-only integrity report and now has a tenant-scoped internal diagnostics endpoint for deployed runs: `GET /api/v1/internal/diagnostics/calendar-allocation-backfill-report`. The endpoint is disabled by default behind `ENABLE_INTERNAL_DIAGNOSTICS=true`, requires existing tenant `OWNER`/`ADMIN` authentication, inspects only the authenticated tenant schema, and returns non-sensitive JSON. That is a strong operational improvement, but the project still lacks the fact that matters most: a verified report result against the production Oracle DB before any real backfill or authority switch.
 
 ### Durable command ledger / idempotency is not implemented
 
@@ -193,7 +193,7 @@ Until those conditions are met, the fallback should remain hidden from normal na
 
 ### Must do before a real salon pilot
 
-1. Operationally run and review the allocation backfill dry-run report against the production Oracle DB.
+1. Enable the internal diagnostics endpoint only for the review window, then run and review the allocation backfill dry-run report against the production Oracle DB.
 2. Add Calendar V2 manual new booking flow.
 3. Add Calendar V2 confirm and cancel actions from Booking Detail / Action Inbox.
 4. Add a non-drag Calendar V2 move/reschedule path.
@@ -242,13 +242,13 @@ Until those conditions are met, the fallback should remain hidden from normal na
 
 ### Chosen task
 
-**Run and operationalize the allocation backfill dry-run report against the production Oracle DB.**
+**Run the now-operationalized allocation backfill dry-run report against the production Oracle DB and capture the result.**
 
 ### Why this is the next task
 
-This is the narrowest safe next step with the highest decision value:
+This remains the narrowest safe next step with the highest decision value:
 
-- it does **not** change runtime behavior,
+- it uses a disabled-by-default authenticated read-only path,
 - it answers a real unknown that blocks stronger scheduling authority,
 - it reduces the risk of adding more write surfaces on top of unverified legacy data,
 - and it gives the team concrete evidence before any real backfill, authority switch, drag/drop work, or fallback removal discussion.
@@ -266,9 +266,7 @@ Reasoning level: high.
 Work directly on main.
 
 This is an operational-readiness task, not a feature task.
-Do NOT change runtime application behavior.
 Do NOT implement Calendar V2 UI features.
-Do NOT change backend endpoints.
 Do NOT change frontend UI.
 Do NOT change database schema or migrations.
 Do NOT add packages.
@@ -279,7 +277,7 @@ Do NOT add drag/drop persistence.
 Do NOT add resize.
 
 Goal:
-Operationalize the existing read-only calendar allocation backfill report so the team can safely run it against the production Oracle DB and capture a trustworthy readiness result before any real backfill work.
+Run the existing authenticated read-only calendar allocation backfill report against the production Oracle DB and capture a trustworthy readiness result before any real backfill work.
 
 Inspect first:
 - backend/scripts/calendar-allocation-backfill-report.js
@@ -289,17 +287,11 @@ Inspect first:
 - package scripts under backend/
 
 Tasks:
-1. Confirm the exact existing command needed to run the dry-run report.
-2. Add or update documentation only if needed so the production runbook is explicit:
-   - required env input
-   - read-only nature of the command
-   - optional schema-focused run
-   - exact readiness classes
-   - what evidence to save after the run
-   - explicit warning that this is not a mutating backfill
-3. Do not execute any real production backfill.
-4. If production DB credentials are not available in the workspace, state that clearly and stop after making the runbook precise.
-5. If credentials are available and the user explicitly provides/authorizes them, run only the existing read-only report command, capture the result, and summarize the observed readiness class without performing any mutation.
+1. Confirm `ENABLE_INTERNAL_DIAGNOSTICS=true` is enabled only for the report window.
+2. Authenticate as the tenant owner/admin and call `GET /api/v1/internal/diagnostics/calendar-allocation-backfill-report`.
+3. Capture the JSON readiness result without changing data.
+4. Keep the report read-only and do not execute any real production backfill.
+5. If the endpoint is unavailable or credentials are not available, state that clearly and stop rather than inventing a result.
 
 Validation:
 - Run git status.

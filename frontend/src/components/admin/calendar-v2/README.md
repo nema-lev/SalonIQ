@@ -12,6 +12,7 @@ This folder contains the renderer-independent contracts and current admin Calend
 - Placement preview UI is customer-facing Bulgarian copy only: command ids, local idempotency keys, ISO timestamps, and internal command names are not rendered.
 - After a placement slot is selected, the calendar outline is locked to that selected slot. Hover movement no longer moves the selected placement target.
 - The current-time indicator renders only for the selected local date when it is today, refreshes while the page is open, and is hidden for past/future dates or times outside 08:00-20:00.
+- New request placement treats elapsed slots on today and all slots on past dates as unavailable. Calendar V2 keeps historical appointments visible, blocks past placement save with `Не може да запишете час в миналото.`, and the backend remains the authority for the same rule.
 - During placement mode, the lower right rail follows the active request context before and after slot selection instead of showing unrelated selected booking details.
 - The previously explored `Пристигнал` action was intentionally removed from Calendar V2 UI after product review.
 - Calendar V2 should prioritize planning, pending approvals, untimed request placement, confirmations, and rescheduling.
@@ -37,6 +38,7 @@ This folder contains the renderer-independent contracts and current admin Calend
 - Future write interactions should go through typed commands before they are wired to API calls.
 - Calendar V2 can save request placement only in real-data mode when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"`.
 - Backend note: standard saved request placement now creates a booked staff `calendar_allocations` row with separate display and buffer-expanded occupied intervals; this changes scheduling authority only, not Calendar V2 UI behavior.
+- Backend note: all new scheduling writes reject start times in the past; historical appointments remain readable and terminal status transitions such as completed/no_show/cancelled stay allowed.
 
 ## Known limitations and next recommended tasks
 

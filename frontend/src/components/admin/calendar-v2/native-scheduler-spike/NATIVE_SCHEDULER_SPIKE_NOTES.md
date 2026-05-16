@@ -29,6 +29,7 @@
 - During placement mode, the lower right rail shows the active request context before slot selection and selected slot context after selection instead of unrelated Booking Detail content.
 - Desktop/tablet-landscape resource day grid with staff columns, 15-minute slots, 08:00-20:00 hours, sticky toolbar, sticky staff header, sticky time gutter, date-aware current-time line, fixture appointments, overlap lanes, and a blocked time region.
 - The current-time line renders only when the selected local calendar date is today, updates once per minute while eligible, and is hidden for past/future dates or when the current time is outside 08:00-20:00.
+- In placement mode, elapsed visible time on today and the full grid on past dates are subtly shaded as unavailable. Click attempts on past slots show `Изберете бъдещ час.`, and a selected slot that becomes historical cannot be saved.
 - Action Inbox mock shows demand/request items, pending approval, cancellation recovery, and collapsed updates.
 - Demand items can still be dragged from Action Inbox into the isolated non-read-only component fixture with native pointer events.
 - Dropping a demand item in that isolated fixture emits the same local `placeRequest` command-shaped object and opens a placement preview.
@@ -44,7 +45,7 @@
 - No request placement persistence from Calendar V2 unless `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"` in real-data mode.
 - No appointment, waitlist placement, waitlist status, appointment status, notification, or reschedule write API is called by the placement preview.
 - Placement confirm/save remains disabled in sample mode and flag-off real mode.
-- No server validation.
+- Backend placement validation remains authoritative and rejects past start times even if the UI is bypassed.
 - No persistence after reset/reload.
 - No resize interaction.
 - No keyboard drag interaction.
@@ -241,6 +242,14 @@ In the real-data route, appointment move handles are disabled.
 - The indicator updates once per minute while the page is open and clears its timer on unmount.
 - The indicator is hidden outside visible scheduler hours instead of being clamped to the top or bottom of the grid.
 - No backend, endpoint, payload, placement save, notification, or current `/admin` calendar behavior changed.
+
+## No-Past Placement Pass
+
+- Date of pass: 2026-05-16.
+- New waitlist/request placement treats past dates as unavailable and elapsed slots before the current-time line on today as invalid placement targets.
+- Past slot clicks stay non-writing and show `Изберете бъдещ час.`; if a previously selected target becomes historical while the preview is open, the selected slot stays visible but save is disabled with `Не може да запишете час в миналото.`.
+- The real-data adapter maps the backend past-time validation response to the same Bulgarian copy.
+- This pass does not add notifications, realtime, appointment move persistence, resize, recurring booking behavior, or any new write surface.
 
 ## Visit Progress Product Review
 

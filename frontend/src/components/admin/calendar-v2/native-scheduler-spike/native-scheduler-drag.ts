@@ -132,6 +132,28 @@ export function buildWaitlistPlacementSaveRequest({
   };
 }
 
+export function buildWaitlistPlacementSaveRequestIfFuture({
+  waitlistId,
+  command,
+  durationMinutes,
+  now = new Date(),
+}: {
+  waitlistId: string;
+  command: PlaceRequestCommand;
+  durationMinutes: number;
+  now?: Date;
+}) {
+  if (isPastPlacementStart(command.target.startAt, now)) {
+    return null;
+  }
+
+  return buildWaitlistPlacementSaveRequest({
+    waitlistId,
+    command,
+    durationMinutes,
+  });
+}
+
 export function getPlacementDurationMinutes(demandItem: CalendarV2DemandItem) {
   const durationMinutes = demandItem.service.durationMinutes;
 
@@ -171,6 +193,12 @@ export function detectLocalPlacementConflict({
     const blockEnd = new Date(block.endAt).getTime();
     return start < blockEnd && end > blockStart;
   });
+}
+
+export function isPastPlacementStart(startAt: string, now = new Date()) {
+  const start = new Date(startAt);
+
+  return Number.isFinite(start.getTime()) && start.getTime() < now.getTime();
 }
 
 export function createMoveAppointmentCommand({

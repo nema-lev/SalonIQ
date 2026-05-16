@@ -56,6 +56,7 @@ The production rule is:
 - `buildWaitlistPlacementSaveRequest(...)` sends `{ staffId, startAt, durationMinutes, idempotencyKey, notifyClient: false }` to `/appointments/waitlist/${waitlistId}/place`.
 - `detectLocalPlacementConflict(...)` uses client-side block overlap detection with `start < blockEnd && end > blockStart`. This is a preview hint only.
 - `NativeSchedulerV2Spike` locks selected placement target state separately from hover preview state.
+- `NativeSchedulerV2Spike` treats elapsed slots on today and every slot on past dates as invalid new-placement targets, keeps a selected target stable if it later becomes historical, and disables save with Bulgarian past-time copy.
 - `NativeSchedulerPlacementPreview` renders Bulgarian copy stating that the preview is not saved unless the save action is enabled.
 - `frontend/src/components/admin/calendar-v2/real-data/calendar-v2-real-data-mappers.ts` maps staff exceptions to `CalendarV2CalendarBlock` with `kind: 'blocked_time'`.
 - `frontend/src/components/admin/calendar-v2/projections.ts` maps appointments and waitlist rows into Calendar V2 projections. Untimed waitlist entries remain demand items, not calendar blocks.
@@ -82,6 +83,7 @@ The production rule is:
 - `backend/src/modules/appointments/appointments.service.ts` implements `AppointmentsService.placeWaitlistEntry(...)`.
 - `placeWaitlistEntry(...)` calls `ensureWaitlistTable(...)` and `ensureServiceGroupColumns(...)`.
 - It validates `startAt` and optional `durationMinutes`.
+- It rejects a placement `startAt` that is already before server time; the frontend preview is only a convenience layer, not the authority for this rule.
 - It uses `this.prisma.withTenantSchema(...)`, which wraps the callback in a Prisma transaction and executes `SET LOCAL search_path TO "<tenant_schema>", public`.
 - Inside that transaction it selects the waitlist row `FOR UPDATE OF w`.
 - It rejects missing waitlist rows, already handled waitlist rows, missing service, missing/inactive staff, invalid service duration, duration mismatch, outside working hours, staff exception overlap, appointment overlap, and full group capacity.
@@ -98,8 +100,10 @@ The production rule is:
 - `getAvailableSlots(...)` checks staff working hours, staff exceptions, min/max advance booking, appointment overlaps, and group capacity.
 - May 15 lifecycle-parity step: for standard exact-time services, `create(...)` now writes the appointment and matching staff `calendar_allocations` row in one tenant transaction. Pending appointments create active `held` allocations; confirmed appointments create active `booked` allocations.
 - Standard `create(...)` now validates both active allocation conflicts and the retained buffer-aware legacy appointment fallback before inserting. Group-service create stays on its existing capacity flow and does not create a standard exclusive allocation.
+- Public create, admin create, waitlist placement, and reschedule-to-new-time all share server-time validation that rejects a new scheduled start in the past.
 - `create(...)` calls `scheduleNotifications(...)` after appointment insert.
 - For standard services, `updateStatus(...)` now keeps existing appointment allocations aligned with lifecycle state: pending/proposal-pending confirmation promotes `held` to `booked`, while cancelled/completed/no-show states make the allocation non-active by setting the matching terminal status.
+- The no-past rule applies to new scheduled starts only: historical appointments remain visible, and terminal status transitions such as completed/no_show/cancelled remain allowed.
 - For standard services, `rescheduleAppointment(...)` now updates the appointment and matching staff allocation atomically in one tenant transaction, revalidates active allocations plus the retained legacy fallback, updates resource/display/occupied intervals, and creates a replacement allocation during safe legacy reschedules when none exists yet.
 - Private `assertNoConflict(...)` exists and checks appointment overlap with PostgreSQL `OVERLAPS`, but it is not a unified scheduling engine.
 

@@ -13,6 +13,7 @@ import {
   detectLocalOverlap,
   getCurrentTimeIndicatorMinutes,
   getCurrentTimeIndicatorTop,
+  getPastPlacementOverlayHeight,
   getGridHeight,
   getMinutesFromDateTime,
   getResourceFromX,
@@ -27,6 +28,7 @@ import {
 import {
   DEFAULT_PLACEMENT_DURATION_MINUTES,
   buildWaitlistPlacementSaveRequest,
+  buildWaitlistPlacementSaveRequestIfFuture,
   commandPreviewLabel,
   createMoveAppointmentCommand,
   createPlaceRequestCommand,
@@ -34,6 +36,7 @@ import {
   detectLocalPlacementConflict,
   getPlacementDurationMinutes,
   hasPassedDragThreshold,
+  isPastPlacementStart,
   usesFallbackPlacementDuration,
 } from './native-scheduler-drag';
 
@@ -114,6 +117,51 @@ const checks: RegressionCheck[] = [
         getCurrentTimeIndicatorMinutes({ schedulerDate: today, now: new Date(2026, 4, 10, 20, 1) }),
         null,
         'after scheduler hours should hide the current-time indicator',
+      );
+    },
+  },
+  {
+    name: 'past placement targets are invalid only for historical starts',
+    run: () => {
+      const today = new Date(2026, 4, 10);
+      const now = new Date(2026, 4, 10, 10, 30);
+      const pastDate = new Date(2026, 4, 9);
+      const futureDate = new Date(2026, 4, 11);
+
+      assertEqual(
+        isPastPlacementStart(dateAndMinutesToIso(today, 10 * 60 + 15), now),
+        true,
+        'today + a slot before now should be invalid for placement',
+      );
+      assertEqual(
+        isPastPlacementStart(dateAndMinutesToIso(today, 10 * 60 + 45), now),
+        false,
+        'today + a future slot should remain valid for placement',
+      );
+      assertEqual(
+        isPastPlacementStart(dateAndMinutesToIso(futureDate, 9 * 60), now),
+        false,
+        'future date slots should remain valid for placement',
+      );
+      assertEqual(
+        isPastPlacementStart(dateAndMinutesToIso(pastDate, 9 * 60), now),
+        true,
+        'past date slots should be invalid for new placement',
+      );
+      assertEqual(
+        getPastPlacementOverlayHeight({ schedulerDate: today, now }),
+        timeToY(10 * 60 + 30),
+        'today overlay should shade the elapsed visible range',
+      );
+      assertEqual(
+        getPastPlacementOverlayHeight({ schedulerDate: pastDate, now }),
+        getGridHeight(),
+        'past dates should shade the full visible placement range',
+      );
+      assertEqual(
+        getPastPlacementOverlayHeight({ schedulerDate: futureDate, now }),
+        0,
+        'future dates should not shade unavailable placement time',
       );
     },
   },
@@ -294,6 +342,25 @@ const checks: RegressionCheck[] = [
         saveRequest.payload.idempotencyKey,
         `calendar-v2-placement:demand-1:staff-2:${target.startAt}`,
         'save payload should use a stable slot-based idempotency key',
+      );
+      assertEqual(
+        buildWaitlistPlacementSaveRequestIfFuture({
+          waitlistId: demandItem.id,
+          command: placeCommand,
+          durationMinutes: 60,
+          now: new Date(2026, 4, 5, 11, 30),
+        }),
+        null,
+        'past selected slots should not produce a save payload',
+      );
+      assertDefined(
+        buildWaitlistPlacementSaveRequestIfFuture({
+          waitlistId: demandItem.id,
+          command: placeCommand,
+          durationMinutes: 60,
+          now: new Date(2026, 4, 5, 10, 30),
+        }),
+        'future selected slots should still produce a save payload',
       );
 
       const appointment = appointmentFixture();

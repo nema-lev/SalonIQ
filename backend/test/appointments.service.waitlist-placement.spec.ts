@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 
@@ -88,6 +88,31 @@ function expectNoInsertOrUpdate(tx: { $queryRawUnsafe: jest.Mock }) {
 }
 
 describe('AppointmentsService.placeWaitlistEntry', () => {
+  beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-05-10T06:00:00.000Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('rejects past placement startAt before opening the placement transaction', async () => {
+    jest.setSystemTime(new Date('2026-05-11T08:30:00.000Z'));
+
+    const tx = { $queryRawUnsafe: jest.fn() };
+    const { service, prisma } = createService(tx);
+
+    await expect(
+      service.placeWaitlistEntry(TENANT as any, WAITLIST_ID, {
+        staffId: STAFF_ID,
+        startAt: START_AT,
+      }),
+    ).rejects.toThrow(new BadRequestException('Не може да запишете час в миналото.'));
+
+    expect(prisma.withTenantSchema).not.toHaveBeenCalled();
+    expect(tx.$queryRawUnsafe).not.toHaveBeenCalled();
+  });
+
   it('creates an appointment, booked staff allocation, and booked waitlist row in one tenant transaction', async () => {
     const tx = {
       $queryRawUnsafe: jest

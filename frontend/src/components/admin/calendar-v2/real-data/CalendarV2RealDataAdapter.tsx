@@ -294,6 +294,10 @@ function getPlacementSaveErrorMessage(error: unknown) {
     return 'Заявката вече е обработена.';
   }
 
+  if (isPastSchedulingMessage(message)) {
+    return 'Не може да запишете час в миналото.';
+  }
+
   if (status === 409 && isConflictMessage(message)) {
     return 'Този час вече е зает.';
   }
@@ -324,6 +328,10 @@ function isRequestAlreadyHandledMessage(message: string | null) {
 function isConflictMessage(message: string | null) {
   const normalized = message?.toLocaleLowerCase('bg-BG') ?? '';
   return normalized.includes('зает') || normalized.includes('няма свободни места');
+}
+
+function isPastSchedulingMessage(message: string | null) {
+  return Boolean(message?.toLocaleLowerCase('bg-BG').includes('миналото'));
 }
 
 function getSchedulerNotice({

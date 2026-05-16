@@ -69,6 +69,10 @@ export function isSameLocalCalendarDate(left: Date, right: Date) {
   );
 }
 
+function localDateValue(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
 export function getCurrentTimeIndicatorMinutes({
   schedulerDate,
   now,
@@ -99,6 +103,38 @@ export function getCurrentTimeIndicatorTop({
 }) {
   const minutes = getCurrentTimeIndicatorMinutes({ schedulerDate, now, config });
   return minutes === null ? null : timeToY(minutes, config);
+}
+
+export function getPastPlacementOverlayHeight({
+  schedulerDate,
+  now,
+  config = NATIVE_SCHEDULER_GEOMETRY,
+}: {
+  schedulerDate: Date;
+  now: Date;
+  config?: NativeSchedulerGeometryConfig;
+}) {
+  const schedulerDay = localDateValue(schedulerDate);
+  const today = localDateValue(now);
+
+  if (schedulerDay < today) {
+    return getGridHeight(config);
+  }
+
+  if (schedulerDay > today) {
+    return 0;
+  }
+
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  if (minutes <= config.businessStartMinutes) {
+    return 0;
+  }
+
+  if (minutes >= config.businessEndMinutes) {
+    return getGridHeight(config);
+  }
+
+  return timeToY(minutes, config);
 }
 
 export function yToTime(y: number, date: Date, config = NATIVE_SCHEDULER_GEOMETRY) {

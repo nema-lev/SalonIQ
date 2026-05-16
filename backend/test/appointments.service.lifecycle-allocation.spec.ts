@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 
 import { AppointmentStatus } from '../src/common/types/enums';
 import { AppointmentsService } from '../src/modules/appointments/appointments.service';
@@ -115,6 +115,40 @@ function expectAllocationInsert(tx: { $queryRawUnsafe: jest.Mock }) {
 }
 
 describe('AppointmentsService standard appointment allocation lifecycle', () => {
+  beforeEach(() => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-05-19T06:00:00.000Z'));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('rejects public exact-time create when the requested start is in the past', async () => {
+    const { service, prisma } = createService();
+
+    await expect(
+      service.create(TENANT as any, {
+        ...createDto,
+        startAt: '2026-05-19T08:45:00+03:00',
+      } as any),
+    ).rejects.toThrow(new BadRequestException('Не може да запишете час в миналото.'));
+
+    expect(prisma.queryInSchema).not.toHaveBeenCalled();
+  });
+
+  it('rejects admin exact-time create when the requested start is in the past', async () => {
+    const { service, prisma } = createService();
+
+    await expect(
+      service.createByAdmin(TENANT as any, {
+        ...createDto,
+        startAt: '2026-05-19T08:45:00+03:00',
+      } as any),
+    ).rejects.toThrow(new BadRequestException('Не може да запишете час в миналото.'));
+
+    expect(prisma.queryInSchema).not.toHaveBeenCalled();
+  });
+
   it('writes a booked allocation for public exact-time create', async () => {
     const { service, prisma, tx } = createService({
       queryResults: standardCreateQueryResults(),
@@ -347,6 +381,31 @@ describe('AppointmentsService standard appointment allocation lifecycle', () => 
     expect(allocationUpdate?.[2]).toBe(newStatus);
   });
 
+  it('allows terminal status transitions for an existing historical appointment', async () => {
+    jest.setSystemTime(new Date('2026-05-21T06:00:00.000Z'));
+
+    const { service } = createService({
+      txResults: [
+        [
+          {
+            id: APPOINTMENT_ID,
+            client_id: CLIENT_ID,
+            status: AppointmentStatus.CONFIRMED,
+            start_at: START_AT_UTC,
+            intake_data: {},
+            booking_mode: 'standard',
+          },
+        ],
+        [],
+        [],
+      ],
+    });
+
+    await expect(
+      service.updateStatus(TENANT as any, APPOINTMENT_ID, AppointmentStatus.COMPLETED),
+    ).resolves.toEqual({ id: APPOINTMENT_ID, status: AppointmentStatus.COMPLETED });
+  });
+
   it('reschedules appointment and matching allocation atomically without leaving the old active slot', async () => {
     const { service, tx, notificationProcessor } = createService({
       txResults: [
@@ -484,5 +543,39 @@ describe('AppointmentsService standard appointment allocation lifecycle', () => 
     await expect(
       service.rescheduleAppointment(TENANT as any, APPOINTMENT_ID, NEXT_START_AT, NEXT_STAFF_ID),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('rejects reschedule when moving an appointment into the past', async () => {
+    jest.setSystemTime(new Date('2026-05-20T10:30:00.000Z'));
+
+    const { service, tx } = createService({
+      txResults: [
+        [
+          {
+            id: APPOINTMENT_ID,
+            client_id: CLIENT_ID,
+            staff_id: STAFF_ID,
+            service_id: SERVICE_ID,
+            status: AppointmentStatus.CONFIRMED,
+            intake_data: {},
+            duration_minutes: 60,
+            buffer_before_min: 0,
+            buffer_after_min: 0,
+            booking_mode: 'standard',
+          },
+        ],
+      ],
+    });
+
+    await expect(
+      service.rescheduleAppointment(
+        TENANT as any,
+        APPOINTMENT_ID,
+        '2026-05-20T12:15:00+03:00',
+        NEXT_STAFF_ID,
+      ),
+    ).rejects.toThrow(new BadRequestException('Не може да запишете час в миналото.'));
+
+    expect(tx.$queryRawUnsafe).toHaveBeenCalledTimes(1);
   });
 });

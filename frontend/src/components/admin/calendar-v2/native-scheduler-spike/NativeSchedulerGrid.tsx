@@ -14,6 +14,7 @@ import {
   detectLocalOverlap,
   formatMinutesAsTime,
   getCurrentTimeIndicatorTop,
+  getPastPlacementOverlayHeight,
   getGridHeight,
   getTimeSlots,
   minutesToPixels,
@@ -40,6 +41,7 @@ export type NativeSchedulerGridDropPreview = {
   endAt: string;
   durationMinutes: number;
   hasConflict: boolean;
+  isPast: boolean;
 };
 
 type NativeSchedulerGridProps = {
@@ -121,6 +123,13 @@ export function NativeSchedulerGrid({
     now: currentTime,
     config: geometry,
   });
+  const pastPlacementOverlayHeight = placementModeActive
+    ? getPastPlacementOverlayHeight({
+        schedulerDate: date,
+        now: currentTime,
+        config: geometry,
+      })
+    : 0;
 
   useEffect(() => {
     const node = containerRef.current;
@@ -244,6 +253,14 @@ export function NativeSchedulerGrid({
               />
             )}
 
+            {pastPlacementOverlayHeight > 0 && (
+              <span
+                className={styles.pastPlacementRegion}
+                style={{ height: pastPlacementOverlayHeight }}
+                aria-hidden="true"
+              />
+            )}
+
             {blockedBlocks.map((block) => {
               const rect = calendarBlockToColumnRect(block, resources, geometry);
               if (!rect) return null;
@@ -267,7 +284,9 @@ export function NativeSchedulerGrid({
 
             {dropPreview && previewRect && (
               <div
-                className={`${styles.dropPreview} ${dropPreview.hasConflict ? styles.dropPreviewConflict : ''}`}
+                className={`${styles.dropPreview} ${
+                  dropPreview.hasConflict || dropPreview.isPast ? styles.dropPreviewConflict : ''
+                } ${dropPreview.isPast ? styles.dropPreviewUnavailable : ''}`}
                 style={{
                   top: previewRect.top,
                   left: previewRect.left,
@@ -334,6 +353,10 @@ function getNoticeToneClass(tone: NativeSchedulerNotice['tone']) {
 }
 
 function formatDropPreview(preview: NativeSchedulerGridDropPreview) {
+  if (preview.isPast) {
+    return 'Минал час';
+  }
+
   const start = new Date(preview.startAt);
   const end = new Date(preview.endAt);
   const label = `${formatMinutesAsTime(start.getHours() * 60 + start.getMinutes())}-${formatMinutesAsTime(

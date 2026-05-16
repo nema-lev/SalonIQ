@@ -20,6 +20,7 @@ type NativeSchedulerPlacementPreviewProps = {
   onClose: () => void;
   onSave?: () => void;
   canSave?: boolean;
+  isPast?: boolean;
   isSaving?: boolean;
   saveDisabledReason?: string;
   saveFeedback?: {
@@ -33,6 +34,7 @@ export function NativeSchedulerPlacementPreview({
   onClose,
   onSave,
   canSave = false,
+  isPast = false,
   isSaving = false,
   saveDisabledReason = 'Записването ще добавим в следващата стъпка',
   saveFeedback = null,
@@ -51,8 +53,8 @@ export function NativeSchedulerPlacementPreview({
           <p className={styles.panelTitle}>Преглед на поставяне · не е записано</p>
           <p className={styles.panelSubtitle}>Само преглед</p>
         </div>
-        <span className={preview.hasConflict ? styles.panelCountWarning : styles.panelCount}>
-          {preview.hasConflict ? 'Конфликт' : 'Само преглед'}
+        <span className={preview.hasConflict || isPast ? styles.panelCountWarning : styles.panelCount}>
+          {isPast ? 'Минал час' : preview.hasConflict ? 'Конфликт' : 'Само преглед'}
         </span>
       </div>
       <div className={styles.placementContent}>
@@ -90,6 +92,11 @@ export function NativeSchedulerPlacementPreview({
         {preview.hasConflict && (
           <p className={styles.previewConflictNote}>
             Избраният слот се застъпва с друг час или блокирано време. Това е само локална проверка.
+          </p>
+        )}
+        {isPast && (
+          <p className={styles.previewConflictNote}>
+            Не може да запишете час в миналото.
           </p>
         )}
         <p className={styles.previewReadOnlyNote}>

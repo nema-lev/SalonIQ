@@ -895,6 +895,8 @@ export class AppointmentsService {
   ) {
     const minAdvanceBookingHours = Number((tenant as any).minAdvanceBookingHours ?? 1);
     const requiresConfirmation = Boolean((tenant as any).requiresConfirmation ?? false);
+    const startAt = new Date(dto.startAt);
+    this.assertScheduledStartIsNotInPast(startAt);
 
     // 1. Валидация на услугата
     await this.prisma.ensureServiceGroupColumns(tenant.schemaName);
@@ -920,7 +922,6 @@ export class AppointmentsService {
     const service = services[0];
 
     // 2. Изчисли края на резервацията
-    const startAt = new Date(dto.startAt);
     const endAt = addMinutes(startAt, service.duration_minutes);
 
     // 3. Провери/създай клиент
@@ -1577,6 +1578,7 @@ export class AppointmentsService {
     if (Number.isNaN(startAt.getTime())) {
       throw new BadRequestException('Невалиден начален час.');
     }
+    this.assertScheduledStartIsNotInPast(startAt);
 
     const requestedDurationMinutes =
       dto.durationMinutes === undefined ? null : Number(dto.durationMinutes);
@@ -2114,6 +2116,7 @@ export class AppointmentsService {
       if (Number.isNaN(nextStartAt.getTime())) {
         throw new BadRequestException('Невалиден нов час.');
       }
+      this.assertScheduledStartIsNotInPast(nextStartAt);
 
       const allocationInterval = this.calculateAppointmentAllocationInterval(
         nextStartAt,
@@ -2246,6 +2249,16 @@ export class AppointmentsService {
       (isAfter(endAt, workEnd) && endAt.getTime() !== workEnd.getTime())
     ) {
       throw new ConflictException('Избраният час е извън работното време на специалиста.');
+    }
+  }
+
+  private assertScheduledStartIsNotInPast(startAt: Date) {
+    if (Number.isNaN(startAt.getTime())) {
+      throw new BadRequestException('Невалиден начален час.');
+    }
+
+    if (startAt.getTime() < Date.now()) {
+      throw new BadRequestException('Не може да запишете час в миналото.');
     }
   }
 

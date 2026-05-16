@@ -413,6 +413,16 @@
   content: "";
 }
 
+.pastPlacementRegion {
+  position: absolute;
+  z-index: 7;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: rgba(148, 163, 184, 0.12);
+  pointer-events: none;
+}
+
 .blockedRegion {
   position: absolute;
   z-index: 8;
@@ -681,6 +691,10 @@
 .dropPreviewConflict {
   border-color: #dc2626;
   background: rgba(248, 113, 113, 0.15);
+}
+
+.dropPreviewUnavailable {
+  background: rgba(148, 163, 184, 0.18);
 }
 
 .dropPreviewLabel {

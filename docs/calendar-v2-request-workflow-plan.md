@@ -42,6 +42,8 @@ May 15 current-calendar routing note: the production `/admin` request placement 
 
 May 16 primary-route note: Calendar V2 is now the primary admin calendar direction. `/admin` renders Calendar V2 in real-data mode, `/admin/calendar-v2` remains an alias, and `/admin/calendar-legacy` preserves the old calendar only for emergency comparison/debugging. This promotion does not add new writes, does not change request placement save behavior, and does not alter backend/schema/deployment state.
 
+May 16 no-past scheduling note: Calendar V2 now marks elapsed slots on today and all slots on past dates unavailable for new request placement, keeps historical appointments visible, and blocks save with Bulgarian copy when a selected target is historical. The backend is authoritative: public create, admin create, waitlist placement, and reschedule-to-new-time reject a start instant before server time, while historical terminal status transitions remain allowed.
+
 Current intentional limitations remain: no persisted drag-to-move, no resize, no full mobile placement flow, no notifications, no recurring appointments, and no advanced realtime collaboration.
 
 Recommended next tasks after this promotion:
@@ -106,6 +108,7 @@ Recommended next tasks after this promotion:
 - `frontend/src/components/admin/calendar-v2/native-scheduler-spike/NativeSchedulerActionInboxMock.tsx:18` renders the Action Inbox panel.
 - `NativeSchedulerActionInboxMock` hides demand drag controls in read-only mode at `frontend/src/components/admin/calendar-v2/native-scheduler-spike/NativeSchedulerActionInboxMock.tsx:78`.
 - `frontend/src/components/admin/calendar-v2/native-scheduler-spike/NATIVE_SCHEDULER_SPIKE_NOTES.md:219` records command-shape coverage for `placeRequest`.
+- The native scheduler now treats past placement targets as unavailable in the UI and maps backend past-time validation to `Не може да запишете час в миналото.`.
 
 ### Shared current-calendar read path
 
@@ -189,10 +192,12 @@ Current backend service behavior:
 - `backend/src/modules/appointments/appointments.service.ts:638` defines `getAvailableSlots`.
 - `getAvailableSlots` validates service existence, staff existence, working hours, existing appointments, staff exceptions, min/max advance booking, and group-service capacity.
 - `backend/src/modules/appointments/appointments.service.ts:831` defines generic `create`.
+- New scheduling writes share server-time validation that rejects a requested start instant in the past for public create, admin create, waitlist placement, and reschedule.
 - `create` validates service existence at line 847, calculates `endAt` from service duration at line 868, finds or creates the client at line 872, checks appointment conflicts at lines 875-936, checks minimum advance booking at lines 938-944, inserts into `appointments` at lines 964-989, and schedules notifications at line 994.
 - The generic `create` path does not check staff working hours or staff exceptions. Those checks exist in `getAvailableSlots` and `rescheduleAppointment`, not in `create`.
 - For standard exact-time services, generic `create` now validates active allocation conflicts plus the retained buffer-aware legacy appointment fallback, then inserts the appointment and matching staff allocation in one tenant transaction. Pending creates produce `held`; confirmed creates produce `booked`.
 - `backend/src/modules/appointments/appointments.service.ts:1063` defines `updateStatus`.
+- Historical appointments remain displayable, and the no-past scheduling rule does not block existing completed/no_show/cancelled status workflows.
 - `updateStatus` validates appointment status transitions, keeps standard appointment allocations aligned with confirmed/cancelled/completed/no-show lifecycle state, and sends the existing immediate status/cancellation notification.
 - `backend/src/modules/appointments/appointments.service.ts:1262` defines `listWaitlist`.
 - `backend/src/modules/appointments/appointments.service.ts:1314` defines `createBookingRequest`.

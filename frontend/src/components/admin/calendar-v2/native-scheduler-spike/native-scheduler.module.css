@@ -1268,8 +1268,31 @@
   color: #475569;
 }
 
+.confirmBookingSection,
 .cancelBookingSection {
   margin-top: 8px;
+}
+
+.confirmBookingConfirm {
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #f8fbff;
+  padding: 9px;
+}
+
+.confirmBookingTitle {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 950;
+  color: #1d4ed8;
+}
+
+.confirmBookingBody {
+  margin: 5px 0 0;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.4;
+  color: #1e40af;
 }
 
 .cancelBookingConfirm {
@@ -1294,6 +1317,7 @@
   color: #9f1239;
 }
 
+.confirmBookingActions,
 .cancelBookingActions {
   display: flex;
   flex-wrap: wrap;

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { CalendarCheck2, Clock3, MessageCircle, Scissors, UserRound } from 'lucide-react';
 import type { CalendarV2CalendarBlock, CalendarV2Command, CalendarV2DemandItem } from '..';
 import { getNativeSchedulerCancelBookingIntent } from './native-scheduler-cancel-booking';
+import { getNativeSchedulerConfirmBookingIntent } from './native-scheduler-confirm-booking';
 import { commandPreviewLabel } from './native-scheduler-drag';
 import styles from './native-scheduler.module.css';
 
@@ -25,6 +26,10 @@ type NativeSchedulerPreviewPanelProps = {
   lastCommand: CalendarV2Command | null;
   placementContext?: NativeSchedulerPlacementPanelContext | null;
   readOnly?: boolean;
+  confirmBooking?: {
+    enabled: boolean;
+    onConfirm?: (appointmentId: string) => Promise<void>;
+  };
   cancelBooking?: {
     enabled: boolean;
     onCancel?: (appointmentId: string) => Promise<void>;
@@ -36,6 +41,7 @@ export function NativeSchedulerPreviewPanel({
   lastCommand,
   placementContext = null,
   readOnly = false,
+  confirmBooking,
   cancelBooking,
 }: NativeSchedulerPreviewPanelProps) {
   const appointment = selectedBlock?.appointment;
@@ -43,6 +49,15 @@ export function NativeSchedulerPreviewPanel({
   const serviceName = appointment?.service.name ?? selectedBlock?.subtitle ?? 'Услугата липсва';
   const staffName = appointment?.staff.name ?? selectedBlock?.cardSummary?.staffLabel ?? selectedBlock?.staffId ?? '';
   const isPlacementContext = Boolean(placementContext);
+  const confirmIntent = useMemo(
+    () =>
+      getNativeSchedulerConfirmBookingIntent({
+        selectedBlock,
+        canWrite: Boolean(confirmBooking?.enabled && confirmBooking.onConfirm),
+        placementContextActive: isPlacementContext,
+      }),
+    [confirmBooking?.enabled, confirmBooking?.onConfirm, isPlacementContext, selectedBlock],
+  );
   const cancelIntent = useMemo(
     () =>
       getNativeSchedulerCancelBookingIntent({
@@ -52,15 +67,41 @@ export function NativeSchedulerPreviewPanel({
       }),
     [cancelBooking?.enabled, cancelBooking?.onCancel, isPlacementContext, selectedBlock],
   );
+  const [confirmBookingOpen, setConfirmBookingOpen] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
   const [confirmCancelOpen, setConfirmCancelOpen] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
 
   useEffect(() => {
+    setConfirmBookingOpen(false);
+    setIsConfirming(false);
+    setConfirmError(null);
     setConfirmCancelOpen(false);
     setIsCancelling(false);
     setCancelError(null);
-  }, [cancelIntent?.appointmentId, isPlacementContext]);
+  }, [cancelIntent?.appointmentId, confirmIntent?.appointmentId, isPlacementContext]);
+
+  const handleConfirmBooking = async () => {
+    if (!confirmIntent || !confirmBooking?.onConfirm) return;
+
+    setIsConfirming(true);
+    setConfirmError(null);
+
+    try {
+      await confirmBooking.onConfirm(confirmIntent.appointmentId);
+      setConfirmBookingOpen(false);
+    } catch (error) {
+      setConfirmError(
+        error instanceof Error && error.message
+          ? error.message
+          : 'Не успяхме да потвърдим часа. Опитайте отново.',
+      );
+    } finally {
+      setIsConfirming(false);
+    }
+  };
 
   const handleConfirmCancel = async () => {
     if (!cancelIntent || !cancelBooking?.onCancel) return;
@@ -82,7 +123,7 @@ export function NativeSchedulerPreviewPanel({
     }
   };
   const panelSubtitle =
-    isPlacementContext || (readOnly && !cancelIntent) ? 'Само преглед' : 'Детайли и действия';
+    isPlacementContext || (readOnly && !confirmIntent && !cancelIntent) ? 'Само преглед' : 'Детайли и действия';
 
   return (
     <section className={`${styles.previewPanel} ${selectedBlock || isPlacementContext ? '' : styles.previewPanelEmpty}`}>
@@ -136,6 +177,55 @@ export function NativeSchedulerPreviewPanel({
               </p>
             )}
             {appointment?.notes && <p className={styles.previewNote}>{appointment.notes}</p>}
+            {confirmIntent && (
+              <div className={styles.confirmBookingSection}>
+                {!confirmBookingOpen ? (
+                  <button
+                    type="button"
+                    className={styles.primaryButton}
+                    onClick={() => {
+                      setConfirmBookingOpen(true);
+                      setConfirmCancelOpen(false);
+                      setConfirmError(null);
+                      setCancelError(null);
+                    }}
+                  >
+                    Потвърди час
+                  </button>
+                ) : (
+                  <div className={styles.confirmBookingConfirm}>
+                    <p className={styles.confirmBookingTitle}>Да потвърдим ли часа?</p>
+                    <p className={styles.confirmBookingBody}>
+                      Часът ще бъде потвърден и ще остане в графика.
+                    </p>
+                    {confirmError && <p className={styles.previewConflictNote}>{confirmError}</p>}
+                    <div className={styles.confirmBookingActions}>
+                      <button
+                        type="button"
+                        className={styles.primaryButton}
+                        onClick={() => {
+                          void handleConfirmBooking();
+                        }}
+                        disabled={isConfirming}
+                      >
+                        {isConfirming ? 'Потвърждаване…' : 'Потвърди'}
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.ghostButton}
+                        onClick={() => {
+                          setConfirmBookingOpen(false);
+                          setConfirmError(null);
+                        }}
+                        disabled={isConfirming}
+                      >
+                        Назад
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             {cancelIntent && (
               <div className={styles.cancelBookingSection}>
                 {!confirmCancelOpen ? (
@@ -144,6 +234,8 @@ export function NativeSchedulerPreviewPanel({
                     className={styles.dangerButton}
                     onClick={() => {
                       setConfirmCancelOpen(true);
+                      setConfirmBookingOpen(false);
+                      setConfirmError(null);
                       setCancelError(null);
                     }}
                   >

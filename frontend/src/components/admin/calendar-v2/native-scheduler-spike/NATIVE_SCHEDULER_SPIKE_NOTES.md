@@ -22,6 +22,7 @@
 - The primary route renders the native scheduler from real appointments, staff, services, waitlist entries, and staff exceptions when current admin auth/tenant context can read the existing calendar data.
 - Real-data route keeps appointment drag handles and waitlist drag-to-place controls disabled.
 - Desktop real-data route now supports manual new booking with a visible `Нов час` action and future empty-slot click. Slot clicks reuse the existing admin booking modal with staff/date/time prefilled and submit through the existing admin-create path.
+- Desktop real-data route now supports confirming eligible `pending` and `proposal_pending` timed bookings from Booking Detail through the existing appointment-status endpoint, with an explicit confirmation step and backend-truth refresh after success.
 - Desktop real-data route now supports cancelling eligible `pending`, `proposal_pending`, and `confirmed` bookings from Booking Detail through the existing appointment-status endpoint, with an explicit confirmation step and backend-truth refresh after success.
 - Real-data and sample routes now allow a click-to-place preview for Action Inbox waitlist/demand items. The owner selects `Постави в графика`, clicks a staff/time slot, and sees a lightweight placement preview.
 - Real-data route can save only that waitlist/request placement when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"`. Sample mode and flag-off real mode remain non-writing.
@@ -110,8 +111,8 @@ In the real-data route, appointment move handles are disabled.
 - Legacy fallback route: `/admin/calendar-legacy`.
 - Calendar V2 is now the main admin calendar direction; the legacy calendar remains only for emergency comparison/debugging.
 - User-facing route language now says `Calendar V2`, `Manual booking enabled`, `Manual booking + request placement`, or `Read-only` when applicable rather than presenting the main route as a preview.
-- Existing limitations remain intentional: no cancel, no confirm pending timed request, no move/reschedule flow, no persisted drag-to-move, no resize, no recurring bookings, no notifications, no realtime collaboration, and no complete phone booking/placement flow.
-- Recommended next P0 work: add confirm pending timed request and non-drag move/reschedule before later phone and drag/resize work.
+- Existing limitations remain intentional: no move/reschedule flow, no persisted drag-to-move, no resize, no recurring bookings, no new notification controls, no realtime collaboration, and no complete phone booking/placement flow.
+- Remaining P0 work: add non-drag move/reschedule before later phone and drag/resize work.
 
 ## Manual New Booking Pass
 
@@ -135,6 +136,17 @@ In the real-data route, appointment move handles are disabled.
 - Sample mode remains non-writing; placement preview, empty detail state, terminal bookings, and waitlist/request items do not expose cancel intent.
 - Standard appointment cancellation continues through the existing backend allocation lifecycle, which deactivates/releases the matching `calendar_allocations` row for terminal statuses.
 - The existing backend status endpoint already performs the product's current cancellation notification behavior; this pass does not add or change notification behavior.
+
+## Confirm Booking Pass
+
+- Date of pass: 2026-05-16.
+- Desktop real-data Calendar V2 now exposes `Потвърди час` in Booking Detail only for real timed appointments with statuses `pending` or `proposal_pending`.
+- The confirmation copy is explicit: `Да потвърдим ли часа?`, `Часът ще бъде потвърден и ще остане в графика.`, `Потвърди`, and `Назад`.
+- The action reuses `PATCH /appointments/:id/status` with `{ status: "confirmed" }`; it adds no backend endpoint, schema change, migration, realtime, drag persistence, resize, or recurrence behavior.
+- After success, Calendar V2 refetches the board, invalidates `appointments-calendar-board` and `appointment-context`, keeps the selected date, and keeps the selected booking only when it still exists after the refreshed backend read.
+- Sample mode remains non-writing; placement preview, empty detail state, confirmed/terminal bookings, and waitlist/request items do not expose confirm intent.
+- Standard pending/proposal booking confirmation continues through the existing backend allocation lifecycle, which promotes the matching held `calendar_allocations` row to booked.
+- The existing backend status endpoint already performs the product's current status-change notification behavior; this pass does not add or change notification behavior.
 
 ## Current Calendar Parity QA
 

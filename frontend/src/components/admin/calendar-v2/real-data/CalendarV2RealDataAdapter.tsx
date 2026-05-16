@@ -13,6 +13,7 @@ import { useAdminCalendarBoardData } from '../../use-admin-calendar-board-data';
 import {
   NativeSchedulerV2Spike,
   type NativeSchedulerCancelBookingResult,
+  type NativeSchedulerConfirmBookingResult,
   type NativeSchedulerPlacementSaveResult,
 } from '../native-scheduler-spike/NativeSchedulerV2Spike';
 import type { NativeSchedulerManualBookingIntent } from '../native-scheduler-spike/native-scheduler-manual-booking';
@@ -20,6 +21,7 @@ import type { NativeSchedulerNotice } from '../native-scheduler-spike/NativeSche
 import type { WaitlistPlacementSaveRequest } from '../native-scheduler-spike/native-scheduler-drag';
 import {
   buildCalendarV2RealDataProjection,
+  doesCalendarV2BookingExistAfterRefresh,
   shouldKeepCalendarV2SelectedBookingAfterRefresh,
 } from './calendar-v2-real-data-mappers';
 import { buildCalendarV2SampleDayProjection } from './calendar-v2-sample-day';
@@ -27,8 +29,8 @@ import { buildCalendarV2SampleDayProjection } from './calendar-v2-sample-day';
 const ENABLE_CALENDAR_V2_PLACEMENT_SAVE =
   process.env.NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === 'true';
 const CALENDAR_V2_READONLY_NOTICE = 'Calendar V2 · Read-only';
-const CALENDAR_V2_MANUAL_BOOKING_NOTICE = 'Calendar V2 · Manual booking + cancel';
-const CALENDAR_V2_OPERATIONS_NOTICE = 'Calendar V2 · Manual booking + request placement + cancel';
+const CALENDAR_V2_MANUAL_BOOKING_NOTICE = 'Calendar V2 · Manual booking + confirm + cancel';
+const CALENDAR_V2_OPERATIONS_NOTICE = 'Calendar V2 · Manual booking + request placement + confirm + cancel';
 
 type PlaceWaitlistEntryResponse = {
   id?: string;
@@ -180,6 +182,35 @@ export function CalendarV2RealDataAdapter() {
         };
       } catch (error) {
         const message = getCancelBookingErrorMessage(error);
+        toast.error(message);
+        throw new Error(message);
+      }
+    },
+    [queryClient, refetchCalendarBoard],
+  );
+
+  const handleConfirmBooking = useCallback(
+    async (appointmentId: string): Promise<NativeSchedulerConfirmBookingResult> => {
+      try {
+        await apiClient.patch(`/appointments/${appointmentId}/status`, { status: 'confirmed' });
+
+        const refreshedBoard = await refetchCalendarBoard();
+
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['appointments-calendar-board'] }),
+          queryClient.invalidateQueries({ queryKey: ['appointment-context'] }),
+        ]);
+
+        toast.success('Часът е потвърден.');
+
+        return {
+          appointmentVisibleAfterRefresh: doesCalendarV2BookingExistAfterRefresh(
+            refreshedBoard.data?.appointments,
+            appointmentId,
+          ),
+        };
+      } catch (error) {
+        const message = getConfirmBookingErrorMessage(error);
         toast.error(message);
         throw new Error(message);
       }
@@ -340,6 +371,14 @@ export function CalendarV2RealDataAdapter() {
           onBlockedPast: () => toast.error('Изберете бъдещ час.'),
           onUnavailable: () => toast.error('Този час не е наличен.'),
         }}
+        confirmBooking={
+          isSampleMode
+            ? undefined
+            : {
+                enabled: true,
+                onConfirm: handleConfirmBooking,
+              }
+        }
         cancelBooking={
           isSampleMode
             ? undefined
@@ -427,6 +466,36 @@ function getCancelBookingErrorMessage(error: unknown) {
 
   if (status === 400 && message.includes('не може да се смени статус')) {
     return 'Този час вече не може да бъде отказан.';
+  }
+
+  if (status === 404 || status === 409) {
+    return 'Часът е променен. Обновете календара и опитайте отново.';
+  }
+
+  return fallback;
+}
+
+function getConfirmBookingErrorMessage(error: unknown) {
+  const fallback = 'Не успяхме да потвърдим часа. Опитайте отново.';
+
+  if (!axios.isAxiosError(error)) {
+    return fallback;
+  }
+
+  const status = error.response?.status;
+  const message = extractApiMessage(error)?.toLocaleLowerCase('bg-BG') ?? '';
+
+  if (
+    status === 400 &&
+    message.includes('не може да се смени статус') &&
+    message.includes("'confirmed'") &&
+    message.includes("на 'confirmed'")
+  ) {
+    return 'Този час вече е потвърден.';
+  }
+
+  if (status === 400 && message.includes('не може да се смени статус')) {
+    return 'Този час вече не може да бъде потвърден.';
   }
 
   if (status === 404 || status === 409) {

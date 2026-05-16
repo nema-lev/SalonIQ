@@ -108,6 +108,7 @@ type NativeSchedulerV2SpikeProps = {
   actionInboxSubtitle?: string;
   placementSave?: NativeSchedulerPlacementSaveOptions;
   manualBooking?: NativeSchedulerManualBookingOptions;
+  confirmBooking?: NativeSchedulerConfirmBookingOptions;
   cancelBooking?: NativeSchedulerCancelBookingOptions;
 };
 
@@ -133,7 +134,16 @@ export type NativeSchedulerCancelBookingOptions = {
   onCancel?: (appointmentId: string) => Promise<NativeSchedulerCancelBookingResult | void>;
 };
 
+export type NativeSchedulerConfirmBookingOptions = {
+  enabled: boolean;
+  onConfirm?: (appointmentId: string) => Promise<NativeSchedulerConfirmBookingResult | void>;
+};
+
 export type NativeSchedulerCancelBookingResult = {
+  appointmentVisibleAfterRefresh?: boolean;
+};
+
+export type NativeSchedulerConfirmBookingResult = {
   appointmentVisibleAfterRefresh?: boolean;
 };
 
@@ -162,6 +172,7 @@ export function NativeSchedulerV2Spike({
   actionInboxSubtitle,
   placementSave,
   manualBooking,
+  confirmBooking,
   cancelBooking,
 }: NativeSchedulerV2SpikeProps = {}) {
   const sourceBlocks = calendarBlocks ?? nativeSchedulerCalendarBlocks;
@@ -770,6 +781,18 @@ export function NativeSchedulerV2Spike({
     [cancelBooking],
   );
 
+  const handleConfirmBooking = useCallback(
+    async (appointmentId: string) => {
+      if (!confirmBooking?.enabled || !confirmBooking.onConfirm) return;
+
+      const result = await confirmBooking.onConfirm(appointmentId);
+      if (result?.appointmentVisibleAfterRefresh === false) {
+        setSelectedBlockId(null);
+      }
+    },
+    [confirmBooking],
+  );
+
   return (
     <>
       <div className={styles.phoneNotice}>
@@ -890,6 +913,10 @@ export function NativeSchedulerV2Spike({
                 lastCommand={placementPanelContext ? null : lastCommand}
                 placementContext={placementPanelContext}
                 readOnly={readOnly}
+                confirmBooking={{
+                  enabled: Boolean(confirmBooking?.enabled && confirmBooking.onConfirm),
+                  onConfirm: handleConfirmBooking,
+                }}
                 cancelBooking={{
                   enabled: Boolean(cancelBooking?.enabled && cancelBooking.onCancel),
                   onCancel: handleCancelBooking,

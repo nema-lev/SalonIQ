@@ -93,6 +93,13 @@ export function shouldKeepCalendarV2SelectedBookingAfterRefresh(
   return Boolean(refreshedAppointment && isCalendarV2ActiveGridAppointment(refreshedAppointment));
 }
 
+export function doesCalendarV2BookingExistAfterRefresh(
+  appointments: Appointment[] | undefined,
+  appointmentId: string,
+) {
+  return Boolean(appointments?.some((appointment) => appointment.id === appointmentId));
+}
+
 export function mapStaffToCalendarV2Resources(
   staff: CalendarBoardStaff[],
   appointments: Appointment[] = [],

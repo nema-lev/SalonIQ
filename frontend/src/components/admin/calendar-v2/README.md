@@ -8,6 +8,7 @@ This folder contains the renderer-independent contracts and current admin Calend
 - An explicit read-only sample scenario is available at `/admin/calendar-v2?sample=1` for visual review when the current tenant has no bookings.
 - The `/admin/calendar-v2` alias route is enabled by default and can be disabled with `NEXT_PUBLIC_DISABLE_CALENDAR_V2_PREVIEW=true`.
 - Calendar V2 supports manual new booking in desktop real-data mode: use `Нов час` or click a future empty slot to open the existing admin booking modal with staff/date/time prefilled.
+- Calendar V2 supports confirming eligible real-data timed bookings from Booking Detail with an explicit confirmation step. Eligible statuses are `pending` and `proposal_pending`; confirmed/terminal bookings, sample mode, placement preview, empty detail state, and waitlist/request items do not expose the action.
 - Calendar V2 supports cancelling eligible real-data bookings from Booking Detail with an explicit confirmation step. Eligible statuses are `pending`, `proposal_pending`, and `confirmed`; terminal bookings, sample mode, placement preview, empty detail state, and waitlist/request items do not expose the action.
 - Manual new booking is not tied to `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE`; it uses the existing admin-create path because Calendar V2 is now the primary `/admin` calendar.
 - With `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"`, real-data mode can additionally save waitlist/request placement through the dedicated placement endpoint.
@@ -22,7 +23,7 @@ This folder contains the renderer-independent contracts and current admin Calend
 - Day-of visit progress can remain backend-capable for future clinic/front-desk use cases, but it is not part of the main salon Calendar V2 UX.
 - Sample mode remains visual-only and read-only; it does not call read or write APIs, and it hides the manual booking entry points.
 - Request placement persistence remains disabled unless `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"` and sample mode is off. The preview command remains typed as `placeRequest` with `localOnly: true`; the explicit save action sends the dedicated waitlist placement call with `notifyClient: false`.
-- Move, confirmed timed-request handling, no-show, completed, and in-service actions remain disabled in Calendar V2.
+- Move, no-show, completed, and in-service actions remain disabled in Calendar V2.
 - The current Calendar V2 UI is desktop-first: the scheduler is the hero, the right rail stays lightweight, and the header keeps only date controls plus one subtle capability indicator.
 - The primary Calendar V2 route renders available staff/resources even when names look like sample/demo labels, with a quiet toolbar note when that happens.
 - Real data mode remains the default. Empty real-data days keep staff columns visible and offer a compact `Show sample day` action instead of injecting fake production data.
@@ -40,17 +41,19 @@ This folder contains the renderer-independent contracts and current admin Calend
 - Untimed demand belongs in demand/request/waitlist projections, not in scheduled calendar blocks.
 - Future write interactions should go through typed commands before they are wired to API calls.
 - Calendar V2 can create manual bookings only in real-data mode through `POST /appointments/admin`; after success it refetches `appointments-calendar-board`, invalidates board/context queries, and trusts backend truth instead of creating optimistic committed cards.
+- Calendar V2 can confirm eligible real-data timed bookings only through the existing `PATCH /appointments/:id/status` endpoint with `{ status: "confirmed" }`; after success it refetches `appointments-calendar-board`, invalidates board/context queries, keeps the selected date and booking when it still exists, and trusts refreshed backend truth instead of fabricating optimistic committed state.
 - Calendar V2 can cancel eligible real-data bookings only through the existing `PATCH /appointments/:id/status` endpoint with `{ status: "cancelled" }`; after success it refetches `appointments-calendar-board`, invalidates board/context queries, keeps the selected date, and trusts refreshed backend truth instead of fabricating optimistic committed state.
 - Real-data Calendar V2 removes `cancelled` appointments from the active scheduler-grid projection even when the calendar-board endpoint still returns them, so a cancelled booking no longer occupies operational layout space. Cancellation-related items may still appear in non-blocking Action Inbox updates/history.
 - Calendar V2 can save request placement only in real-data mode when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"`.
 - Backend note: standard saved request placement now creates a booked staff `calendar_allocations` row with separate display and buffer-expanded occupied intervals; this changes scheduling authority only, not Calendar V2 UI behavior.
+- Backend note: confirming a standard pending/proposal booking reuses the existing status transition lifecycle, which promotes the matching held `calendar_allocations` row to booked. The existing status endpoint already performs the current status-change notification behavior; Calendar V2 does not add a new notification path here.
 - Backend note: cancelling a standard appointment reuses the existing status transition lifecycle, which deactivates/releases the matching `calendar_allocations` row. The existing status endpoint already performs the current cancellation notification behavior; Calendar V2 does not add a new notification path here.
 - Backend note: all new scheduling writes reject start times in the past; historical appointments remain readable and terminal status transitions such as completed/no_show/cancelled stay allowed.
 
 ## Known limitations and next recommended tasks
 
-- Calendar V2 still does not support confirm pending timed request, move/reschedule, persisted drag-to-move, resize, recurring bookings, new notification controls, or realtime collaboration.
+- Calendar V2 still does not support move/reschedule, persisted drag-to-move, resize, recurring bookings, new notification controls, or realtime collaboration.
 - The phone-width experience is still intentionally incomplete and uses the separate agenda notice instead of a full placement flow.
 - Manual new booking is desktop/tablet-landscape only for now; phone width intentionally keeps the separate limited experience rather than compressing the desktop modal flow into an unfinished mobile calendar.
 - Existing disabled/coming-next states should remain honest until the backend scheduling path supports the corresponding write.
-- Recommended next P0 work: add confirm pending timed request and non-drag move/reschedule; then finish the phone-specific calendar flow before later drag/resize work.
+- Remaining P0 work: add non-drag move/reschedule; then finish the phone-specific calendar flow before later drag/resize work.

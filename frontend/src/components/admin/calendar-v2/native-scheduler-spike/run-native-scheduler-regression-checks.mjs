@@ -15,6 +15,7 @@ const files = [
   'native-scheduler-geometry.ts',
   'native-scheduler-drag.ts',
   'native-scheduler-manual-booking.ts',
+  'native-scheduler-confirm-booking.ts',
   'native-scheduler-cancel-booking.ts',
   'native-scheduler-regression-checks.ts',
 ];

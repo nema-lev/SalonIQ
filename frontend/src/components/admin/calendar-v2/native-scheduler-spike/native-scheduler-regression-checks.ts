@@ -40,6 +40,7 @@ import {
   usesFallbackPlacementDuration,
 } from './native-scheduler-drag';
 import { getNativeSchedulerCancelBookingIntent } from './native-scheduler-cancel-booking';
+import { getNativeSchedulerConfirmBookingIntent } from './native-scheduler-confirm-booking';
 import { buildManualBookingIntent } from './native-scheduler-manual-booking';
 
 export type NativeSchedulerRegressionCheckResult = {
@@ -632,10 +633,10 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
         const placementPreviewSource = readSource(sourceDir, 'NativeSchedulerPlacementPreview.tsx');
 
         assert(
-          adapterSource.includes('Calendar V2 · Manual booking + cancel') &&
-            adapterSource.includes('Calendar V2 · Manual booking + request placement + cancel') &&
+          adapterSource.includes('Calendar V2 · Manual booking + confirm + cancel') &&
+            adapterSource.includes('Calendar V2 · Manual booking + request placement + confirm + cancel') &&
             adapterSource.includes('const modeNotice = isSampleMode'),
-          'real-data mode should describe manual booking, request-placement, and cancel capability honestly',
+          'real-data mode should describe manual booking, request-placement, confirm, and cancel capability honestly',
         );
         assert(
           adapterSource.includes('Поставяне на заявки в графика') &&
@@ -710,6 +711,99 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
           !adapterSource.includes('apiClient.delete') &&
             adapterSource.includes('apiClient.post<PlaceWaitlistEntryResponse>(request.path, request.payload)'),
           'Calendar V2 placement save should have one explicit POST write path',
+        );
+      },
+    },
+    {
+      name: 'confirm booking intent is pending real-data only and yields to placement mode',
+      run: () => {
+        const pendingBlock = calendarBlock('pending-booking', 'staff-1', 10 * 60, 11 * 60, {
+          rawStatus: 'pending',
+        });
+        const proposalPendingBlock = calendarBlock('proposal-pending-booking', 'staff-1', 11 * 60, 12 * 60, {
+          rawStatus: 'proposal_pending',
+        });
+        const confirmedBlock = calendarBlock('confirmed-booking', 'staff-1', 12 * 60, 13 * 60, {
+          rawStatus: 'confirmed',
+        });
+        const terminalBlock = calendarBlock('terminal-booking', 'staff-1', 13 * 60, 14 * 60, {
+          rawStatus: 'cancelled',
+        });
+
+        assertDefined(
+          getNativeSchedulerConfirmBookingIntent({
+            selectedBlock: pendingBlock,
+            canWrite: true,
+            placementContextActive: false,
+          }),
+          'pending real appointments should expose confirm intent',
+        );
+        assertDefined(
+          getNativeSchedulerConfirmBookingIntent({
+            selectedBlock: proposalPendingBlock,
+            canWrite: true,
+            placementContextActive: false,
+          }),
+          'proposal-pending real appointments should expose confirm intent',
+        );
+        assertEqual(
+          getNativeSchedulerConfirmBookingIntent({
+            selectedBlock: confirmedBlock,
+            canWrite: true,
+            placementContextActive: false,
+          }),
+          null,
+          'confirmed appointments should not expose confirm intent',
+        );
+        assertEqual(
+          getNativeSchedulerConfirmBookingIntent({
+            selectedBlock: terminalBlock,
+            canWrite: true,
+            placementContextActive: false,
+          }),
+          null,
+          'terminal appointments should not expose confirm intent',
+        );
+        assertEqual(
+          getNativeSchedulerConfirmBookingIntent({
+            selectedBlock: pendingBlock,
+            canWrite: false,
+            placementContextActive: false,
+          }),
+          null,
+          'sample/read-only appointments should not expose confirm write intent',
+        );
+        assertEqual(
+          getNativeSchedulerConfirmBookingIntent({
+            selectedBlock: pendingBlock,
+            canWrite: true,
+            placementContextActive: true,
+          }),
+          null,
+          'placement preview should take precedence over confirm intent',
+        );
+      },
+    },
+    {
+      name: 'confirm booking reuses status endpoint and backend-truth refresh',
+      run: () => {
+        const adapterSource = readSource(sourceDir, '../real-data/CalendarV2RealDataAdapter.tsx');
+        const mapperSource = readSource(sourceDir, '../real-data/calendar-v2-real-data-mappers.ts');
+
+        assert(
+          adapterSource.includes("apiClient.patch(`/appointments/${appointmentId}/status`, { status: 'confirmed' })"),
+          'confirm flow should reuse the existing appointment status endpoint',
+        );
+        assert(
+          adapterSource.includes('doesCalendarV2BookingExistAfterRefresh(') &&
+            adapterSource.includes("queryClient.invalidateQueries({ queryKey: ['appointments-calendar-board'] })") &&
+            adapterSource.includes("queryClient.invalidateQueries({ queryKey: ['appointment-context'] })"),
+          'confirm flow should reconcile from refreshed backend truth and invalidate board/context queries',
+        );
+        assert(
+          mapperSource.includes('doesCalendarV2BookingExistAfterRefresh') &&
+            mapperSource.includes('appointments?.some((appointment) => appointment.id === appointmentId)'),
+          'confirm selection should survive refresh only when the backend still returns the booking',
         );
       },
     },

@@ -39,6 +39,7 @@ import {
   isPastPlacementStart,
   usesFallbackPlacementDuration,
 } from './native-scheduler-drag';
+import { getNativeSchedulerCancelBookingIntent } from './native-scheduler-cancel-booking';
 import { buildManualBookingIntent } from './native-scheduler-manual-booking';
 
 export type NativeSchedulerRegressionCheckResult = {
@@ -631,10 +632,10 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
         const placementPreviewSource = readSource(sourceDir, 'NativeSchedulerPlacementPreview.tsx');
 
         assert(
-          adapterSource.includes('Calendar V2 · Manual booking enabled') &&
-            adapterSource.includes('Calendar V2 · Manual booking + request placement') &&
+          adapterSource.includes('Calendar V2 · Manual booking + cancel') &&
+            adapterSource.includes('Calendar V2 · Manual booking + request placement + cancel') &&
             adapterSource.includes('const modeNotice = isSampleMode'),
-          'real-data mode should describe manual booking and request-placement capability honestly',
+          'real-data mode should describe manual booking, request-placement, and cancel capability honestly',
         );
         assert(
           adapterSource.includes('Поставяне на заявки в графика') &&
@@ -700,17 +701,62 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
         );
         assert(
           !adapterSource.includes('/appointments/admin') &&
-            !adapterSource.includes('/appointments/:id/status') &&
             !adapterSource.includes('/appointments/:id/reschedule') &&
             !adapterSource.includes('/notifications') &&
             !adapterSource.includes('/notify'),
-          'Calendar V2 placement save should not call appointment create/status/reschedule or notification endpoints',
+          'Calendar V2 placement save should not call appointment create/reschedule or notification endpoints',
         );
         assert(
-          !adapterSource.includes('apiClient.patch') &&
-            !adapterSource.includes('apiClient.delete') &&
+          !adapterSource.includes('apiClient.delete') &&
             adapterSource.includes('apiClient.post<PlaceWaitlistEntryResponse>(request.path, request.payload)'),
           'Calendar V2 placement save should have one explicit POST write path',
+        );
+      },
+    },
+    {
+      name: 'cancel booking intent is real-data only and yields to placement mode',
+      run: () => {
+        const confirmedBlock = calendarBlock('confirmed-booking', 'staff-1', 11 * 60, 12 * 60, {
+          rawStatus: 'confirmed',
+        });
+        const terminalBlock = calendarBlock('terminal-booking', 'staff-1', 12 * 60, 13 * 60, {
+          rawStatus: 'cancelled',
+        });
+
+        assertDefined(
+          getNativeSchedulerCancelBookingIntent({
+            selectedBlock: confirmedBlock,
+            canWrite: true,
+            placementContextActive: false,
+          }),
+          'eligible real appointments should expose cancel intent',
+        );
+        assertEqual(
+          getNativeSchedulerCancelBookingIntent({
+            selectedBlock: terminalBlock,
+            canWrite: true,
+            placementContextActive: false,
+          }),
+          null,
+          'terminal appointments should not expose cancel intent',
+        );
+        assertEqual(
+          getNativeSchedulerCancelBookingIntent({
+            selectedBlock: confirmedBlock,
+            canWrite: false,
+            placementContextActive: false,
+          }),
+          null,
+          'sample/read-only appointments should not expose write intent',
+        );
+        assertEqual(
+          getNativeSchedulerCancelBookingIntent({
+            selectedBlock: confirmedBlock,
+            canWrite: true,
+            placementContextActive: true,
+          }),
+          null,
+          'placement preview should take precedence over cancel intent',
         );
       },
     },
@@ -841,12 +887,16 @@ function calendarBlock(
   staffId: string,
   startMinutes: number,
   endMinutes: number,
+  options: {
+    rawStatus?: string;
+  } = {},
 ): CalendarV2CalendarBlock {
   const appointment = appointmentFixture({
     id,
     staffId,
     startMinutes,
     endMinutes,
+    rawStatus: options.rawStatus,
   });
 
   return {
@@ -880,6 +930,7 @@ function appointmentFixture(
     staffId?: string;
     startMinutes?: number;
     endMinutes?: number;
+    rawStatus?: string;
   } = {},
 ): CalendarV2Appointment {
   const id = options.id ?? 'appointment-1';
@@ -914,6 +965,7 @@ function appointmentFixture(
       name: RESOURCES.find((resource) => resource.id === staffId)?.name ?? staffId,
       color: '#64748b',
     },
+    rawStatus: options.rawStatus ?? 'confirmed',
   };
 }
 

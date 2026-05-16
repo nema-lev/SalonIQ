@@ -22,6 +22,7 @@
 - The primary route renders the native scheduler from real appointments, staff, services, waitlist entries, and staff exceptions when current admin auth/tenant context can read the existing calendar data.
 - Real-data route keeps appointment drag handles and waitlist drag-to-place controls disabled.
 - Desktop real-data route now supports manual new booking with a visible `Нов час` action and future empty-slot click. Slot clicks reuse the existing admin booking modal with staff/date/time prefilled and submit through the existing admin-create path.
+- Desktop real-data route now supports cancelling eligible `pending`, `proposal_pending`, and `confirmed` bookings from Booking Detail through the existing appointment-status endpoint, with an explicit confirmation step and backend-truth refresh after success.
 - Real-data and sample routes now allow a click-to-place preview for Action Inbox waitlist/demand items. The owner selects `Постави в графика`, clicks a staff/time slot, and sees a lightweight placement preview.
 - Real-data route can save only that waitlist/request placement when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"`. Sample mode and flag-off real mode remain non-writing.
 - The local preview emits a typed `placeRequest` command-shaped object with the request id, target staff/start/end, source surface, idempotency key, appointment draft details, and `localOnly: true`.
@@ -110,7 +111,7 @@ In the real-data route, appointment move handles are disabled.
 - Calendar V2 is now the main admin calendar direction; the legacy calendar remains only for emergency comparison/debugging.
 - User-facing route language now says `Calendar V2`, `Manual booking enabled`, `Manual booking + request placement`, or `Read-only` when applicable rather than presenting the main route as a preview.
 - Existing limitations remain intentional: no cancel, no confirm pending timed request, no move/reschedule flow, no persisted drag-to-move, no resize, no recurring bookings, no notifications, no realtime collaboration, and no complete phone booking/placement flow.
-- Recommended next P0 work: add cancel, confirm pending timed request, and non-drag move/reschedule before later phone and drag/resize work.
+- Recommended next P0 work: add confirm pending timed request and non-drag move/reschedule before later phone and drag/resize work.
 
 ## Manual New Booking Pass
 
@@ -122,6 +123,17 @@ In the real-data route, appointment move handles are disabled.
 - Request placement keeps priority over ordinary slot clicks, so an active Action Inbox placement flow behaves exactly as before.
 - Frontend slot clicks block past time with `Изберете бъдещ час.`; backend create remains the authority for no-past/conflict validation and the reused modal maps create failures to calm Bulgarian copy.
 - This pass does not add notifications, realtime, drag/drop persistence, resize, recurring bookings, backend endpoints, schema changes, or migrations.
+
+## Cancel Booking Pass
+
+- Date of pass: 2026-05-16.
+- Desktop real-data Calendar V2 now exposes `Откажи час` in Booking Detail only for real appointments with statuses `pending`, `proposal_pending`, or `confirmed`.
+- The confirmation copy is explicit: `Да откажем ли часа?`, `Часът ще бъде премахнат от графика. Това действие ще освободи слота.`, `Откажи часа`, and `Назад`.
+- The action reuses `PATCH /appointments/:id/status` with `{ status: "cancelled" }`; it adds no backend endpoint, schema change, migration, realtime, drag persistence, resize, or recurrence behavior.
+- After success, Calendar V2 refetches the board, invalidates `appointments-calendar-board` and `appointment-context`, keeps the selected date, and clears the selected booking only if it no longer exists in refreshed board data.
+- Sample mode remains non-writing; placement preview, empty detail state, terminal bookings, and waitlist/request items do not expose cancel intent.
+- Standard appointment cancellation continues through the existing backend allocation lifecycle, which deactivates/releases the matching `calendar_allocations` row for terminal statuses.
+- The existing backend status endpoint already performs the product's current cancellation notification behavior; this pass does not add or change notification behavior.
 
 ## Current Calendar Parity QA
 
@@ -271,7 +283,7 @@ In the real-data route, appointment move handles are disabled.
 - Small salon owners and specialists are unlikely to mark every client as arrived during the working day, so this action is not part of the core salon workflow.
 - Calendar V2 should focus on planning, pending approvals, untimed request placement, confirmations, and rescheduling.
 - Day-of visit progress remains backend-capable for future clinic/front-desk workflows, but Calendar V2 does not expose a visit-progress write action.
-- Scheduler drag, appointment move persistence, waitlist/request placement, appointment creation, cancel, confirm, no-show, completed, and in-service actions remain disabled.
+- Scheduler drag, appointment move persistence, waitlist/request placement, appointment creation, confirm, no-show, completed, and in-service actions remain disabled in the isolated fixture review flow.
 - Backend DTO validation and idempotent checked-in hardening remain in place.
 
 ## Short-Card Readability Verdict

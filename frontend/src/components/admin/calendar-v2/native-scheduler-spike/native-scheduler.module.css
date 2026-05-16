@@ -1268,6 +1268,39 @@
   color: #475569;
 }
 
+.cancelBookingSection {
+  margin-top: 8px;
+}
+
+.cancelBookingConfirm {
+  border: 1px solid #fecdd3;
+  border-radius: 8px;
+  background: #fff7f8;
+  padding: 9px;
+}
+
+.cancelBookingTitle {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 950;
+  color: #881337;
+}
+
+.cancelBookingBody {
+  margin: 5px 0 0;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.4;
+  color: #9f1239;
+}
+
+.cancelBookingActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 9px;
+}
+
 .commandLine {
   margin-top: 10px;
   overflow: hidden;
@@ -1508,7 +1541,8 @@
 
 .ghostButton,
 .disabledButton,
-.primaryButton {
+.primaryButton,
+.dangerButton {
   border-radius: 8px;
   padding: 8px 10px;
   font-size: 12px;
@@ -1539,6 +1573,24 @@
 
 .primaryButton:hover {
   background: #1e293b;
+}
+
+.dangerButton {
+  border: 1px solid #be123c;
+  background: #be123c;
+  color: #ffffff;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(190, 18, 60, 0.16);
+}
+
+.dangerButton:hover {
+  background: #9f1239;
+}
+
+.dangerButton:disabled,
+.ghostButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
 }
 
 .dragOverlay {

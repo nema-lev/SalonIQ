@@ -12,6 +12,7 @@ import { AdminBookingModal } from '../../admin-booking-modal';
 import { useAdminCalendarBoardData } from '../../use-admin-calendar-board-data';
 import {
   NativeSchedulerV2Spike,
+  type NativeSchedulerCancelBookingResult,
   type NativeSchedulerPlacementSaveResult,
 } from '../native-scheduler-spike/NativeSchedulerV2Spike';
 import type { NativeSchedulerManualBookingIntent } from '../native-scheduler-spike/native-scheduler-manual-booking';
@@ -23,8 +24,8 @@ import { buildCalendarV2SampleDayProjection } from './calendar-v2-sample-day';
 const ENABLE_CALENDAR_V2_PLACEMENT_SAVE =
   process.env.NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === 'true';
 const CALENDAR_V2_READONLY_NOTICE = 'Calendar V2 · Read-only';
-const CALENDAR_V2_MANUAL_BOOKING_NOTICE = 'Calendar V2 · Manual booking enabled';
-const CALENDAR_V2_OPERATIONS_NOTICE = 'Calendar V2 · Manual booking + request placement';
+const CALENDAR_V2_MANUAL_BOOKING_NOTICE = 'Calendar V2 · Manual booking + cancel';
+const CALENDAR_V2_OPERATIONS_NOTICE = 'Calendar V2 · Manual booking + request placement + cancel';
 
 type PlaceWaitlistEntryResponse = {
   id?: string;
@@ -153,6 +154,34 @@ export function CalendarV2RealDataAdapter() {
       queryClient.invalidateQueries({ queryKey: ['appointment-context'] }),
     ]);
   }, [queryClient, refetchCalendarBoard]);
+
+  const handleCancelBooking = useCallback(
+    async (appointmentId: string): Promise<NativeSchedulerCancelBookingResult> => {
+      try {
+        await apiClient.patch(`/appointments/${appointmentId}/status`, { status: 'cancelled' });
+
+        const refreshedBoard = await refetchCalendarBoard();
+
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['appointments-calendar-board'] }),
+          queryClient.invalidateQueries({ queryKey: ['appointment-context'] }),
+        ]);
+
+        toast.success('Часът е отказан.');
+
+        return {
+          appointmentVisibleAfterRefresh: Boolean(
+            refreshedBoard.data?.appointments.some((appointment) => appointment.id === appointmentId),
+          ),
+        };
+      } catch (error) {
+        const message = getCancelBookingErrorMessage(error);
+        toast.error(message);
+        throw new Error(message);
+      }
+    },
+    [queryClient, refetchCalendarBoard],
+  );
 
   const headerControls = (
     <div className="inline-flex min-w-0 items-center gap-2">
@@ -307,6 +336,14 @@ export function CalendarV2RealDataAdapter() {
           onBlockedPast: () => toast.error('Изберете бъдещ час.'),
           onUnavailable: () => toast.error('Този час не е наличен.'),
         }}
+        cancelBooking={
+          isSampleMode
+            ? undefined
+            : {
+                enabled: true,
+                onCancel: handleCancelBooking,
+              }
+        }
       />
 
       <AdminBookingModal
@@ -369,6 +406,27 @@ function getPlacementSaveErrorMessage(error: unknown) {
 
   if (status === 400 || status === 404 || status === 409) {
     return 'Този час не е наличен.';
+  }
+
+  return fallback;
+}
+
+function getCancelBookingErrorMessage(error: unknown) {
+  const fallback = 'Не успяхме да откажем часа. Опитайте отново.';
+
+  if (!axios.isAxiosError(error)) {
+    return fallback;
+  }
+
+  const status = error.response?.status;
+  const message = extractApiMessage(error)?.toLocaleLowerCase('bg-BG') ?? '';
+
+  if (status === 400 && message.includes('не може да се смени статус')) {
+    return 'Този час вече не може да бъде отказан.';
+  }
+
+  if (status === 404 || status === 409) {
+    return 'Часът е променен. Обновете календара и опитайте отново.';
   }
 
   return fallback;

@@ -22,7 +22,7 @@ This folder connects the primary Calendar V2 admin route to the existing admin c
   - `GET /services/admin`
 - Uses the existing `apiClient`, so current admin auth and tenant headers stay unchanged.
 - Does not add backend endpoints.
-- Does not call write APIs from Calendar V2 unless `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"` and real-data request placement is explicitly saved.
+- Calls write APIs only for intentional real-data actions: manual booking create, eligible booking cancel, and request placement when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"` and the placement preview is explicitly saved.
 - Sample mode is built in the frontend adapter only; it does not read or write sample records through backend APIs.
 
 ## Projection
@@ -37,7 +37,7 @@ This folder connects the primary Calendar V2 admin route to the existing admin c
 
 ## UX States
 
-- Header: date navigation, date picker, Today, and one subtle mode indicator. Sample mode and flag-off real mode show `Calendar V2 · Read-only`; flag-on real mode shows `Calendar V2 · Request placement enabled`.
+- Header: date navigation, date picker, Today, and one subtle mode indicator. Sample mode stays read-only; real mode reflects manual booking plus cancel support, with request placement added when the placement-save flag is enabled.
 - Scheduler: fills the desktop calendar canvas and shows compact, non-blocking notices for loading, no staff resources, and no scheduled appointments.
 - Action Inbox: shows request/recovery items when present and a compact empty state when there is nothing to act on.
 - Booking Detail: shows selected booking facts or a compact no-selection state.
@@ -47,10 +47,10 @@ This folder connects the primary Calendar V2 admin route to the existing admin c
 
 ## Limited Write Contract
 
-- No appointment creation.
+- Manual appointment creation only through the existing admin-create flow in real-data mode.
 - No appointment move persistence.
 - No waitlist placement unless `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"` and the user explicitly saves a real-data placement preview.
-- No status transitions.
+- One explicit status transition exists in real-data mode: eligible booking cancel through `PATCH /appointments/:id/status` with `{ status: "cancelled" }`.
 - No optimistic persistence.
 - No notifications from Calendar V2 placement save.
 

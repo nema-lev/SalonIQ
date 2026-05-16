@@ -108,6 +108,7 @@ type NativeSchedulerV2SpikeProps = {
   actionInboxSubtitle?: string;
   placementSave?: NativeSchedulerPlacementSaveOptions;
   manualBooking?: NativeSchedulerManualBookingOptions;
+  cancelBooking?: NativeSchedulerCancelBookingOptions;
 };
 
 export type NativeSchedulerPlacementSaveResult = {
@@ -125,6 +126,15 @@ export type NativeSchedulerManualBookingOptions = {
   onOpen?: (intent: NativeSchedulerManualBookingIntent) => void;
   onBlockedPast?: () => void;
   onUnavailable?: () => void;
+};
+
+export type NativeSchedulerCancelBookingOptions = {
+  enabled: boolean;
+  onCancel?: (appointmentId: string) => Promise<NativeSchedulerCancelBookingResult | void>;
+};
+
+export type NativeSchedulerCancelBookingResult = {
+  appointmentVisibleAfterRefresh?: boolean;
 };
 
 type PlacementSaveStatus =
@@ -152,6 +162,7 @@ export function NativeSchedulerV2Spike({
   actionInboxSubtitle,
   placementSave,
   manualBooking,
+  cancelBooking,
 }: NativeSchedulerV2SpikeProps = {}) {
   const sourceBlocks = calendarBlocks ?? nativeSchedulerCalendarBlocks;
   const schedulerDate = date ?? nativeSchedulerDate;
@@ -747,6 +758,18 @@ export function NativeSchedulerV2Spike({
     }
   }, [clearPlacementMode, currentTime, placementPreview, placementSave]);
 
+  const handleCancelBooking = useCallback(
+    async (appointmentId: string) => {
+      if (!cancelBooking?.enabled || !cancelBooking.onCancel) return;
+
+      const result = await cancelBooking.onCancel(appointmentId);
+      if (result?.appointmentVisibleAfterRefresh === false) {
+        setSelectedBlockId(null);
+      }
+    },
+    [cancelBooking],
+  );
+
   return (
     <>
       <div className={styles.phoneNotice}>
@@ -867,6 +890,10 @@ export function NativeSchedulerV2Spike({
                 lastCommand={placementPanelContext ? null : lastCommand}
                 placementContext={placementPanelContext}
                 readOnly={readOnly}
+                cancelBooking={{
+                  enabled: Boolean(cancelBooking?.enabled && cancelBooking.onCancel),
+                  onCancel: handleCancelBooking,
+                }}
               />
             </aside>
           </div>

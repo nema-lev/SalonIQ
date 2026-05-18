@@ -27,9 +27,9 @@ This folder contains the renderer-independent contracts and current admin Calend
 - Request placement persistence remains disabled unless `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"` and sample mode is off. The preview command remains typed as `placeRequest` with `localOnly: true`; the explicit save action sends the dedicated waitlist placement call with `notifyClient: false`.
 - Drag/drop persistence, no-show, completed, and in-service actions remain disabled in Calendar V2.
 - The current Calendar V2 UI is desktop-first: the scheduler is the hero, the right rail stays lightweight, and the header keeps only date controls plus one subtle capability indicator.
-- The primary Calendar V2 route renders available staff/resources even when names look like sample/demo labels, with a quiet toolbar note when that happens.
-- Real data mode remains the default. Empty real-data days keep staff columns visible and offer a compact `Show sample day` action instead of injecting fake production data.
-- Sample mode uses clearly labeled Bulgarian salon sample data, shows `Sample day · Read-only`, and provides `Back to real data`.
+- The primary Calendar V2 route renders available staff/resources even when names look like sample/demo labels, but does not surface noisy sample-name notes in real-mode operator chrome.
+- Real data mode remains the default. Empty real-data days keep staff columns visible without promoting sample/demo affordances in the production route.
+- Sample mode uses clearly labeled Bulgarian salon sample data, shows `Примерен ден · само преглед`, provides `Назад към реалните данни`, and remains visibly non-writing.
 - Sample mode supports the same local-only request placement preview and remains non-writing.
 - Real-data mode supports the same request placement preview when current read endpoints return waitlist/demand items. With the placement-save flag off, refresh/reload does not persist the preview.
 - The dedicated backend placement endpoint is wired only behind `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE`.
@@ -62,3 +62,10 @@ This folder contains the renderer-independent contracts and current admin Calend
 - Manual new booking is desktop/tablet-landscape only for now; phone width intentionally keeps the separate limited experience rather than compressing the desktop modal flow into an unfinished mobile calendar.
 - Existing disabled/coming-next states should remain honest until the backend scheduling path supports the corresponding write.
 - Remaining production hardening after this pass: run/review the pilot-tenant allocation backfill report, tighten structured stale/terminal recovery, finish the most visible real-mode copy cleanup, then continue with the phone-specific calendar flow; realtime remains later.
+
+## Production Copy Cleanup Pass
+
+- Real-mode operator copy was cleaned up so `/admin` no longer presents itself as a preview, demo, sample, or read-only screen while write-capable actions are available.
+- Real-mode loading, error, empty, and shell labels are now calm Bulgarian copy, including retry, empty-calendar, and no-pending-actions states.
+- Sample mode remains explicitly visible as read-only/non-writing at `/admin/calendar-v2?sample=1`.
+- The internal `native-scheduler-spike` folder name remains implementation technical debt only; it is not exposed in user-facing Calendar V2 copy.

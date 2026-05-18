@@ -35,9 +35,9 @@ import { buildCalendarV2SampleDayProjection } from './calendar-v2-sample-day';
 
 const ENABLE_CALENDAR_V2_PLACEMENT_SAVE =
   process.env.NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === 'true';
-const CALENDAR_V2_READONLY_NOTICE = 'Calendar V2 · Read-only';
-const CALENDAR_V2_MANUAL_BOOKING_NOTICE = 'Calendar V2 · Manual booking + reschedule + confirm + cancel';
-const CALENDAR_V2_OPERATIONS_NOTICE = 'Calendar V2 · Manual booking + request placement + reschedule + confirm + cancel';
+const CALENDAR_V2_SAMPLE_NOTICE = 'Примерен ден · само преглед';
+const CALENDAR_V2_MANUAL_BOOKING_NOTICE = 'Ръчно записване';
+const CALENDAR_V2_OPERATIONS_NOTICE = 'Поставяне на заявки';
 
 type PlaceWaitlistEntryResponse = {
   id?: string;
@@ -63,7 +63,6 @@ export function CalendarV2RealDataAdapter() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const isSampleMode = searchParams.get('sample') === '1';
-  const showSampleDay = () => router.push(`${pathname}?sample=1`);
   const backToRealData = () => router.push(pathname);
 
   const rangeStart = useMemo(() => startOfDay(currentDate), [currentDate]);
@@ -87,18 +86,18 @@ export function CalendarV2RealDataAdapter() {
   const canCreateManualBooking = !isSampleMode;
   const placementSaveDisabledReason =
     ENABLE_CALENDAR_V2_PLACEMENT_SAVE && isSampleMode
-      ? 'Sample режимът не записва часове.'
-      : 'Записването ще добавим в следващата стъпка';
+      ? 'Примерният режим не записва часове.'
+      : 'Поставянето на заявки не е активно.';
   const modeNotice = isSampleMode
-    ? CALENDAR_V2_READONLY_NOTICE
+    ? CALENDAR_V2_SAMPLE_NOTICE
     : canSavePlacement
       ? CALENDAR_V2_OPERATIONS_NOTICE
       : CALENDAR_V2_MANUAL_BOOKING_NOTICE;
   const actionInboxSubtitle = canSavePlacement
-    ? 'Поставяне на заявки в графика'
+    ? 'Поставяне на заявки'
     : isSampleMode
       ? 'Само преглед'
-      : 'Само локален преглед';
+      : 'Поставянето не е активно';
 
   const projection = useMemo(
     () =>
@@ -296,7 +295,7 @@ export function CalendarV2RealDataAdapter() {
   const handleRescheduleBooking = useCallback(
     async (request: AppointmentRescheduleSaveRequest): Promise<NativeSchedulerRescheduleBookingResult> => {
       if (isSampleMode) {
-        throw new Error('Sample режимът не записва часове.');
+        throw new Error('Примерният режим не записва часове.');
       }
 
       try {
@@ -352,7 +351,7 @@ export function CalendarV2RealDataAdapter() {
         type="button"
         onClick={() => setCurrentDate((date) => addDays(date, -1))}
         className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-950"
-        aria-label="Previous day"
+        aria-label="Предишен ден"
       >
         <ChevronLeft className="h-4 w-4" />
       </button>
@@ -369,7 +368,7 @@ export function CalendarV2RealDataAdapter() {
         type="button"
         onClick={() => setCurrentDate((date) => addDays(date, 1))}
         className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-950"
-        aria-label="Next day"
+        aria-label="Следващ ден"
       >
         <ChevronRight className="h-4 w-4" />
       </button>
@@ -379,7 +378,7 @@ export function CalendarV2RealDataAdapter() {
         className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-950"
       >
         <RotateCcw className="h-3.5 w-3.5" />
-        Today
+        Днес
       </button>
       {!isSampleMode && (
         <button
@@ -405,12 +404,12 @@ export function CalendarV2RealDataAdapter() {
       <section className="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-700 shadow-sm">
         <div className="max-w-3xl">
           <p className="text-xs font-black uppercase text-slate-500">{modeNotice}</p>
-          <h2 className="mt-2 text-xl font-black text-slate-950">Calendar data is unavailable.</h2>
+          <h2 className="mt-2 text-xl font-black text-slate-950">Не успяхме да заредим календара.</h2>
           <p className="mt-2 max-w-2xl font-semibold leading-6 text-slate-600">
-            The current admin calendar read did not complete. Fixture data is not shown on the Calendar V2 route.
+            Опитайте отново.
           </p>
           <p className="mt-3 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">
-            {getApiErrorMessage(error, 'The existing calendar read endpoint returned an unknown error.')}
+            {getApiErrorMessage(error, 'Възникна неочаквана грешка при зареждането.')}
           </p>
           <div className="mt-5 flex flex-wrap items-center gap-3">
             <button
@@ -422,25 +421,14 @@ export function CalendarV2RealDataAdapter() {
               }}
               className="rounded-lg bg-slate-950 px-4 py-2.5 text-xs font-black text-white shadow-sm"
             >
-              Retry read
+              Опитайте отново
             </button>
-            <button
-              type="button"
-              onClick={showSampleDay}
-              className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-xs font-black text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-950"
-            >
-              Show sample day
-            </button>
-            <span className="text-xs font-bold text-slate-500">
-              Calendar V2 is the primary admin calendar.
-            </span>
           </div>
         </div>
       </section>
     );
   }
 
-  const hasSampleStaffNames = !isSampleMode && !isInitialLoading && hasSampleLikeStaffLabels(projection);
   const visibleAppointmentCount = activeProjection.calendarBlocks.filter(
     (block) => block.kind === 'appointment',
   ).length;
@@ -448,26 +436,23 @@ export function CalendarV2RealDataAdapter() {
     isInitialLoading: !isSampleMode && isInitialLoading,
     resourceCount: activeProjection.resources.length,
     appointmentCount: visibleAppointmentCount,
-    showSampleDay: isSampleMode ? undefined : showSampleDay,
   });
   const toolbarStatusNote = isInitialLoading
-    ? 'Reading from the current admin calendar.'
+    ? 'Зареждане на календара…'
     : isFetching
-      ? 'Refreshing current calendar reads.'
-      : 'Calendar V2 is the primary admin calendar.';
+      ? 'Обновяване на календара…'
+      : 'Календарът е готов.';
   const toolbarNote = isSampleMode ? (
     <>
-      <span>Sample day · Read-only</span>
+      <span>Примерен ден · само преглед</span>
       <button
         type="button"
         onClick={backToRealData}
         className="ml-2 border-b border-slate-400 pb-0.5 text-[11px] font-black text-slate-700 transition hover:border-slate-900 hover:text-slate-950"
       >
-        Back to real data
+        Назад към реалните данни
       </button>
     </>
-  ) : hasSampleStaffNames ? (
-    `Sample staff names · ${toolbarStatusNote}`
   ) : (
     toolbarStatusNote
   );
@@ -767,73 +752,34 @@ function getSchedulerNotice({
   isInitialLoading,
   resourceCount,
   appointmentCount,
-  showSampleDay,
 }: {
   isInitialLoading: boolean;
   resourceCount: number;
   appointmentCount: number;
-  showSampleDay?: () => void;
 }): NativeSchedulerNotice | null {
   if (isInitialLoading) {
     return {
       tone: 'loading',
-      title: 'Loading calendar data',
-      message: 'Reading the current admin calendar.',
+      title: 'Зареждане на календара',
+      message: 'Подготвяме данните за избрания ден.',
     };
   }
 
   if (resourceCount === 0) {
     return {
       tone: 'warning',
-      title: 'No staff available for this date',
-      message: 'Calendar V2 needs staff resources from the current calendar read before it can draw the day grid.',
-      ...(showSampleDay ? { action: { label: 'Show sample day', onClick: showSampleDay } } : {}),
+      title: 'Няма наличен персонал за тази дата',
+      message: 'Добавете персонал, за да се покаже дневният график.',
     };
   }
 
   if (appointmentCount === 0) {
     return {
       tone: 'empty',
-      title: 'No bookings scheduled for this date',
-      message: 'The staff day grid stays visible for layout review.',
-      ...(showSampleDay ? { action: { label: 'Show sample day', onClick: showSampleDay } } : {}),
+      title: 'Няма записани часове за тази дата.',
+      message: 'Дневният график остава видим.',
     };
   }
 
   return null;
-}
-
-function hasSampleLikeStaffLabels(projection: {
-  resources: Array<{ name: string }>;
-  calendarBlocks: Array<{
-    kind: string;
-    title: string;
-    subtitle?: string | null;
-    appointment?: {
-      client: { name: string };
-      service: { name: string };
-      staff: { name?: string | null };
-    } | null;
-  }>;
-  demandItems: Array<{
-    client: { name: string };
-    service: { name: string };
-    preferredStaff?: { name?: string | null } | null;
-  }>;
-}) {
-  const labels = [
-    ...projection.resources.map((resource) => resource.name),
-    ...projection.calendarBlocks.flatMap((block) => [
-      block.kind === 'blocked_time' ? block.subtitle : undefined,
-      block.appointment?.staff.name,
-    ]),
-    ...projection.demandItems.map((item) => item.preferredStaff?.name),
-  ];
-
-  return labels.some((label) => isSampleLikeLabel(label));
-}
-
-function isSampleLikeLabel(label: string | null | undefined) {
-  if (!label) return false;
-  return /\b(demo|fixture|sample)\b/i.test(label);
 }

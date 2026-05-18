@@ -45,7 +45,7 @@ export function NativeSchedulerActionInboxMock({
     <section className={`${styles.inboxPanel} ${hasInboxItems ? '' : styles.inboxPanelEmpty}`}>
       <div className={styles.panelHeader}>
         <div className={styles.panelHeaderText}>
-          <p className={styles.panelTitle}>Action Inbox</p>
+          <p className={styles.panelTitle}>Действия</p>
           <p className={styles.panelSubtitle}>
             {subtitle ?? (readOnly ? 'Само локален преглед' : 'Заявки и промени')}
           </p>
@@ -62,7 +62,7 @@ export function NativeSchedulerActionInboxMock({
               <CheckCircle2 size={17} strokeWidth={2.5} />
             </span>
             <div className={styles.emptyText}>
-              <p className={styles.emptyTitle}>Няма заявки за действие</p>
+              <p className={styles.emptyTitle}>Няма чакащи действия</p>
               <p className={styles.emptyCopy}>
                 Новите заявки и свободни места за запълване ще се покажат тук.
               </p>

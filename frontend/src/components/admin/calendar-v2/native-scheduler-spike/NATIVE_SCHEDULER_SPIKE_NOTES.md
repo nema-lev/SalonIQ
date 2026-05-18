@@ -361,3 +361,11 @@ The spike keeps the calendar as the hero. The admin shell has its existing page 
 ## Recommended Next Step
 
 Wire these regression checks into the project's future frontend test workflow, then connect the renderer to a read-only Calendar V2 projection adapter fed by the current calendar board data.
+
+## Production copy cleanup pass
+
+- Date of pass: 2026-05-18.
+- Real `/admin` operator copy no longer describes the primary Calendar V2 surface as preview, sample, demo, or read-only when real writes are available.
+- Real-mode loading, empty, error, navigation, and inbox labels were tightened into calm Bulgarian copy.
+- Explicit sample mode remains clearly labeled `Примерен ден · само преглед` and stays non-writing.
+- The `native-scheduler-spike` folder name is retained as internal technical debt only; it is no longer a user-facing product label.

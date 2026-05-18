@@ -32,18 +32,18 @@ This folder connects the primary Calendar V2 admin route to the existing admin c
 - Waitlist entries are projected into `CalendarV2DemandItem`.
 - Waitlist entries and timed appointment request states are projected into Action Inbox items with `buildActionInboxItems(...)`.
 - Staff exceptions from the calendar board are mapped to read-only blocked-time blocks.
-- Demo/sample-labeled staff/resource values are still rendered when they come from the current read path. The UI adds a quiet toolbar note instead of blocking the scheduler.
+- Demo/sample-labeled staff/resource values are still rendered when they come from the current read path, but the real-mode operator chrome does not add a noisy sample-name note.
 - When `sample=1` is present, the adapter swaps in a clearly labeled read-only Bulgarian salon sample day with staff, appointments, blocked time, and Action Inbox examples.
 
 ## UX States
 
-- Header: date navigation, date picker, Today, and one subtle mode indicator. Sample mode stays read-only; real mode reflects manual booking plus reschedule/confirm/cancel support, with request placement added when the placement-save flag is enabled.
+- Header: Bulgarian date navigation, date picker, `Днес`, and one subtle mode indicator. Sample mode stays visibly read-only; real mode reflects manual booking plus reschedule/confirm/cancel support, with `Поставяне на заявки` shown when placement save is enabled.
 - Scheduler: fills the desktop calendar canvas and shows compact, non-blocking notices for loading, no staff resources, and no scheduled appointments.
 - Action Inbox: shows request/recovery items when present and a compact empty state when there is nothing to act on.
 - Booking Detail: shows selected booking facts or a compact no-selection state.
-- Real empty day: keeps staff columns visible and offers a compact `Show sample day` action.
-- Sample mode: shows `Sample day · Read-only` plus `Back to real data`.
-- Read error: shows retry and `Show sample day` actions while stating that fixture data is not shown on the Calendar V2 route.
+- Real empty day: keeps staff columns visible with calm Bulgarian copy and does not promote sample-mode actions in the production route.
+- Sample mode: shows `Примерен ден · само преглед` plus `Назад към реалните данни`.
+- Read error: shows a Bulgarian retry state without sample/demo fallback wording.
 
 ## Limited Write Contract
 

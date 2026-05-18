@@ -725,7 +725,7 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
           'save control should stay disabled when the flag is off',
         );
         assert(
-          adapterSource.includes('Sample режимът не записва часове.'),
+          adapterSource.includes('Примерният режим не записва часове.'),
           'sample mode should keep the placement save disabled with explicit copy',
         );
       },
@@ -801,14 +801,14 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
         const placementPreviewSource = readSource(sourceDir, 'NativeSchedulerPlacementPreview.tsx');
 
         assert(
-          adapterSource.includes('Calendar V2 · Manual booking + reschedule + confirm + cancel') &&
-            adapterSource.includes('Calendar V2 · Manual booking + request placement + reschedule + confirm + cancel') &&
+          adapterSource.includes("const CALENDAR_V2_MANUAL_BOOKING_NOTICE = 'Ръчно записване'") &&
+            adapterSource.includes("const CALENDAR_V2_OPERATIONS_NOTICE = 'Поставяне на заявки'") &&
             adapterSource.includes('const modeNotice = isSampleMode'),
           'real-data mode should describe manual booking, request-placement, reschedule, confirm, and cancel capability honestly',
         );
         assert(
-          adapterSource.includes('Поставяне на заявки в графика') &&
-            adapterSource.includes("isSampleMode\n      ? 'Само преглед'\n      : 'Само локален преглед'"),
+          adapterSource.includes("? 'Поставяне на заявки'") &&
+            adapterSource.includes("isSampleMode\n      ? 'Само преглед'\n      : 'Поставянето не е активно'"),
           'Action Inbox subtitle should distinguish sample, flag-off real, and flag-on real modes',
         );
         assert(

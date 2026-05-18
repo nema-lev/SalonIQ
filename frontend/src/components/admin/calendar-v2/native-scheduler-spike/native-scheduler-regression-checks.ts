@@ -46,6 +46,11 @@ import {
   buildAppointmentRescheduleSaveRequestIfValid,
   getNativeSchedulerRescheduleBookingIntent,
 } from './native-scheduler-reschedule-booking';
+import {
+  attemptNativeSchedulerPostWriteSync,
+  runNativeSchedulerPostWriteMutation,
+  shouldClearNativeSchedulerSelectionAfterPostWriteSync,
+} from './native-scheduler-post-write-sync';
 
 export type NativeSchedulerRegressionCheckResult = {
   name: string;
@@ -54,7 +59,7 @@ export type NativeSchedulerRegressionCheckResult = {
 
 type RegressionCheck = {
   name: string;
-  run: () => void;
+  run: () => void | Promise<void>;
 };
 
 const CHECK_DATE = new Date(2026, 4, 5);
@@ -220,6 +225,99 @@ const checks: RegressionCheck[] = [
         }),
         null,
         'request placement mode should take precedence over manual booking clicks',
+      );
+    },
+  },
+  {
+    name: 'post-write sync separates committed mutation success from refresh failure',
+    run: async () => {
+      const syncedResult = await runNativeSchedulerPostWriteMutation({
+        mutate: async () => 'committed',
+        refresh: async () => ({ usable: true }),
+        isRefreshResultUsable: (result) => result.usable,
+      });
+      assertEqual(syncedResult.mutationResult, 'committed', 'successful mutation should stay committed');
+      assertEqual(syncedResult.syncResult.status, 'synced', 'usable refresh should report synced');
+
+      const refreshWarningResult = await runNativeSchedulerPostWriteMutation({
+        mutate: async () => 'committed',
+        refresh: async () => {
+          throw new Error('refresh failed');
+        },
+      });
+      assertEqual(
+        refreshWarningResult.mutationResult,
+        'committed',
+        'refresh failure must not erase committed mutation success',
+      );
+      assertEqual(
+        refreshWarningResult.syncResult.status,
+        'refresh_warning',
+        'refresh failure should return a warning result',
+      );
+
+      const unusableRefreshResult = await attemptNativeSchedulerPostWriteSync({
+        refresh: async () => ({ usable: false }),
+        isRefreshResultUsable: (result) => result.usable,
+      });
+      assertEqual(
+        unusableRefreshResult.status,
+        'refresh_warning',
+        'unexpected refresh payload should become a refresh warning',
+      );
+
+      let mutationFailureMessage = '';
+      try {
+        await runNativeSchedulerPostWriteMutation({
+          mutate: async () => {
+            throw new Error('mutation failed');
+          },
+          refresh: async () => ({ usable: true }),
+        });
+      } catch (error) {
+        mutationFailureMessage = error instanceof Error ? error.message : '';
+      }
+      assertEqual(
+        mutationFailureMessage,
+        'mutation failed',
+        'mutation failure should stay distinguishable from refresh failure',
+      );
+    },
+  },
+  {
+    name: 'post-write selection reconciliation clears stale unsafe selection only when needed',
+    run: () => {
+      assertEqual(
+        shouldClearNativeSchedulerSelectionAfterPostWriteSync({
+          syncStatus: 'synced',
+          appointmentVisibleAfterRefresh: false,
+        }),
+        true,
+        'cancelled booking disappearing from the active grid should clear selection',
+      );
+      assertEqual(
+        shouldClearNativeSchedulerSelectionAfterPostWriteSync({
+          syncStatus: 'synced',
+          appointmentVisibleAfterRefresh: true,
+        }),
+        false,
+        'confirmed booking still visible after refresh should remain selectable',
+      );
+      assertEqual(
+        shouldClearNativeSchedulerSelectionAfterPostWriteSync({
+          syncStatus: 'refresh_warning',
+          appointmentVisibleAfterRefresh: true,
+        }),
+        true,
+        'refresh warning should clear stale selection even when the previous card was visible',
+      );
+      assertEqual(
+        shouldClearNativeSchedulerSelectionAfterPostWriteSync({
+          syncStatus: 'synced',
+          appointmentVisibleAfterRefresh: false,
+        }),
+        true,
+        'rescheduled booking leaving the visible day should clear selection',
       );
     },
   },
@@ -579,13 +677,17 @@ const checks: RegressionCheck[] = [
   },
 ];
 
-export function runNativeSchedulerRegressionChecks(sourceDir?: string): NativeSchedulerRegressionCheckResult[] {
+export async function runNativeSchedulerRegressionChecks(sourceDir?: string): Promise<NativeSchedulerRegressionCheckResult[]> {
   const activeChecks = sourceDir ? [...checks, ...getSourceChecks(sourceDir)] : checks;
 
-  return activeChecks.map((check) => {
-    check.run();
-    return { name: check.name, passed: true };
-  });
+  const results: NativeSchedulerRegressionCheckResult[] = [];
+
+  for (const check of activeChecks) {
+    await check.run();
+    results.push({ name: check.name, passed: true });
+  }
+
+  return results;
 }
 
 function getSourceChecks(sourceDir: string): RegressionCheck[] {
@@ -625,6 +727,68 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
         assert(
           adapterSource.includes('Sample режимът не записва часове.'),
           'sample mode should keep the placement save disabled with explicit copy',
+        );
+      },
+    },
+    {
+      name: 'Calendar V2 committed writes keep warning copy separate from action failures',
+      run: () => {
+        const adapterSource = readSource(sourceDir, '../real-data/CalendarV2RealDataAdapter.tsx');
+        const schedulerSource = readSource(sourceDir, 'NativeSchedulerV2Spike.tsx');
+        const syncSource = readSource(sourceDir, 'native-scheduler-post-write-sync.ts');
+
+        assert(
+          syncSource.includes('Промяната е запазена, но календарът не се обнови автоматично. Обновете страницата.'),
+          'shared post-write sync helper should define the refresh-warning copy',
+        );
+        assert(
+          adapterSource.includes('toast.warning(CALENDAR_V2_POST_WRITE_REFRESH_WARNING)'),
+          'real-data writes should surface refresh warnings separately from write failures',
+        );
+        assert(
+          adapterSource.includes('Не успяхме да запишем часа. Опитайте отново.') &&
+            adapterSource.includes('Не успяхме да откажем часа. Опитайте отново.') &&
+            adapterSource.includes('Не успяхме да потвърдим часа. Опитайте отново.') &&
+            adapterSource.includes('Не успяхме да преместим часа. Опитайте отново.'),
+          'action-specific write failures should remain present',
+        );
+        assert(
+          schedulerSource.includes("const refreshWarning = result?.syncStatus === 'refresh_warning'"),
+          'scheduler preview state should distinguish refresh warnings after committed writes',
+        );
+      },
+    },
+    {
+      name: 'successful committed placement and reschedule always leave write mode safely',
+      run: () => {
+        const schedulerSource = readSource(sourceDir, 'NativeSchedulerV2Spike.tsx');
+
+        assert(
+          schedulerSource.includes('clearPlacementMode();'),
+          'successful request placement should clear preview/commit state',
+        );
+        assert(
+          schedulerSource.includes('clearRescheduleMode();'),
+          'successful reschedule should exit write mode even when sync returns a warning',
+        );
+      },
+    },
+    {
+      name: 'sample mode keeps Calendar V2 non-writing and out of sync-warning paths',
+      run: () => {
+        const adapterSource = readSource(sourceDir, '../real-data/CalendarV2RealDataAdapter.tsx');
+
+        assert(
+          adapterSource.includes('const canSavePlacement = ENABLE_CALENDAR_V2_PLACEMENT_SAVE && !isSampleMode;') &&
+            adapterSource.includes('const canCreateManualBooking = !isSampleMode;'),
+          'sample mode should keep placement and manual booking writes disabled',
+        );
+        assert(
+          (adapterSource.match(/isSampleMode\s*\? undefined\s*: \{/g) ?? []).length >= 3 &&
+            adapterSource.includes('onConfirm: handleConfirmBooking') &&
+            adapterSource.includes('onCancel: handleCancelBooking') &&
+            adapterSource.includes('onSave: handleRescheduleBooking'),
+          'sample mode should not expose confirm, cancel, or reschedule write callbacks',
         );
       },
     },
@@ -889,7 +1053,7 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
         const adapterSource = readSource(sourceDir, '../real-data/CalendarV2RealDataAdapter.tsx');
 
         assert(
-          adapterSource.includes('await apiClient.patch(request.path, request.payload);'),
+          adapterSource.includes('mutate: () => apiClient.patch(request.path, request.payload)'),
           'reschedule flow should reuse the existing appointment reschedule PATCH contract',
         );
         assert(
@@ -1072,7 +1236,8 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
           'selection should survive refresh only while the refreshed appointment is still active in the grid',
         );
         assert(
-          adapterSource.includes('appointmentVisibleAfterRefresh: shouldKeepCalendarV2SelectedBookingAfterRefresh('),
+          adapterSource.includes('appointmentVisibleAfterRefresh:') &&
+            adapterSource.includes('shouldKeepCalendarV2SelectedBookingAfterRefresh('),
           'cancel flow should reconcile selection from refreshed active-grid visibility rather than raw row existence',
         );
       },

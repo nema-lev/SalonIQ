@@ -22,6 +22,11 @@ import type { NativeSchedulerNotice } from '../native-scheduler-spike/NativeSche
 import type { WaitlistPlacementSaveRequest } from '../native-scheduler-spike/native-scheduler-drag';
 import type { AppointmentRescheduleSaveRequest } from '../native-scheduler-spike/native-scheduler-reschedule-booking';
 import {
+  attemptNativeSchedulerPostWriteSync,
+  CALENDAR_V2_POST_WRITE_REFRESH_WARNING,
+  runNativeSchedulerPostWriteMutation,
+} from '../native-scheduler-spike/native-scheduler-post-write-sync';
+import {
   buildCalendarV2RealDataProjection,
   doesCalendarV2BookingExistAfterRefresh,
   shouldKeepCalendarV2SelectedBookingAfterRefresh,
@@ -39,6 +44,11 @@ type PlaceWaitlistEntryResponse = {
   appointment?: {
     id?: string;
   };
+};
+
+type CreatedManualBooking = {
+  id: string;
+  startAt: string;
 };
 
 export function CalendarV2RealDataAdapter() {
@@ -114,20 +124,39 @@ export function CalendarV2RealDataAdapter() {
       }
 
       try {
-        const result = await apiClient.post<PlaceWaitlistEntryResponse>(request.path, request.payload);
+        const mutationResult = await apiClient.post<PlaceWaitlistEntryResponse>(request.path, request.payload);
+        const appointmentId = mutationResultToAppointmentId(mutationResult);
+        const syncResult = await attemptNativeSchedulerPostWriteSync({
+          refresh: async () => {
+            const [refreshedBoard, refreshedWaitlist] = await Promise.all([
+              refetchCalendarBoard(),
+              refetchWaitlist(),
+              queryClient.invalidateQueries({ queryKey: ['appointments-calendar-board'] }),
+              queryClient.invalidateQueries({ queryKey: ['appointments-waitlist'] }),
+              queryClient.invalidateQueries({ queryKey: ['appointment-context'] }),
+            ]);
 
-        await Promise.all([
-          refetchCalendarBoard(),
-          refetchWaitlist(),
-          queryClient.invalidateQueries({ queryKey: ['appointments-calendar-board'] }),
-          queryClient.invalidateQueries({ queryKey: ['appointments-waitlist'] }),
-          queryClient.invalidateQueries({ queryKey: ['appointment-context'] }),
-        ]);
+            return { refreshedBoard, refreshedWaitlist };
+          },
+          isRefreshResultUsable: ({ refreshedBoard, refreshedWaitlist }) => {
+            return (
+              isCalendarBoardRefreshUsable(refreshedBoard) &&
+              isWaitlistRefreshUsable(refreshedWaitlist) &&
+              appointmentId !== null &&
+              doesCalendarV2BookingExistAfterRefresh(refreshedBoard.data?.appointments, appointmentId)
+            );
+          },
+        });
 
-        toast.success('Часът е записан.');
+        if (syncResult.status === 'refresh_warning') {
+          toast.warning(CALENDAR_V2_POST_WRITE_REFRESH_WARNING);
+        } else {
+          toast.success('Часът е записан.');
+        }
 
         return {
-          appointmentId: result.appointment?.id ?? result.id ?? null,
+          appointmentId,
+          syncStatus: syncResult.status,
         };
       } catch (error) {
         const message = getPlacementSaveErrorMessage(error);
@@ -152,35 +181,63 @@ export function CalendarV2RealDataAdapter() {
     });
   }, []);
 
-  const handleManualBookingCreated = useCallback(async () => {
+  const handleManualBookingCreated = useCallback(async (createdBooking: CreatedManualBooking) => {
     setBookingPrefill(null);
 
-    await Promise.all([
-      refetchCalendarBoard(),
-      queryClient.invalidateQueries({ queryKey: ['appointments-calendar-board'] }),
-      queryClient.invalidateQueries({ queryKey: ['appointment-context'] }),
-    ]);
+    const syncResult = await attemptNativeSchedulerPostWriteSync({
+      refresh: async () => {
+        const [refreshedBoard] = await Promise.all([
+          refetchCalendarBoard(),
+          queryClient.invalidateQueries({ queryKey: ['appointments-calendar-board'] }),
+          queryClient.invalidateQueries({ queryKey: ['appointment-context'] }),
+        ]);
+
+        return refreshedBoard;
+      },
+      isRefreshResultUsable: (refreshedBoard) =>
+        isCalendarBoardRefreshUsable(refreshedBoard) &&
+        doesCalendarV2BookingExistAfterRefresh(refreshedBoard.data?.appointments, createdBooking.id),
+    });
+
+    if (syncResult.status === 'refresh_warning') {
+      toast.warning(CALENDAR_V2_POST_WRITE_REFRESH_WARNING);
+    }
   }, [queryClient, refetchCalendarBoard]);
 
   const handleCancelBooking = useCallback(
     async (appointmentId: string): Promise<NativeSchedulerCancelBookingResult> => {
       try {
-        await apiClient.patch(`/appointments/${appointmentId}/status`, { status: 'cancelled' });
+        const { syncResult } = await runNativeSchedulerPostWriteMutation({
+          mutate: () => apiClient.patch(`/appointments/${appointmentId}/status`, { status: 'cancelled' }),
+          refresh: async () => {
+            const [refreshedBoard] = await Promise.all([
+              refetchCalendarBoard(),
+              queryClient.invalidateQueries({ queryKey: ['appointments-calendar-board'] }),
+              queryClient.invalidateQueries({ queryKey: ['appointment-context'] }),
+            ]);
 
-        const refreshedBoard = await refetchCalendarBoard();
+            return refreshedBoard;
+          },
+          isRefreshResultUsable: (refreshedBoard) =>
+            isCalendarBoardRefreshUsable(refreshedBoard) &&
+            !shouldKeepCalendarV2SelectedBookingAfterRefresh(refreshedBoard.data?.appointments, appointmentId),
+        });
 
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: ['appointments-calendar-board'] }),
-          queryClient.invalidateQueries({ queryKey: ['appointment-context'] }),
-        ]);
-
-        toast.success('Часът е отказан.');
+        if (syncResult.status === 'refresh_warning') {
+          toast.warning(CALENDAR_V2_POST_WRITE_REFRESH_WARNING);
+        } else {
+          toast.success('Часът е отказан.');
+        }
 
         return {
-          appointmentVisibleAfterRefresh: shouldKeepCalendarV2SelectedBookingAfterRefresh(
-            refreshedBoard.data?.appointments,
-            appointmentId,
-          ),
+          appointmentVisibleAfterRefresh:
+            syncResult.status === 'synced'
+              ? shouldKeepCalendarV2SelectedBookingAfterRefresh(
+                  syncResult.refreshResult.data?.appointments,
+                  appointmentId,
+                )
+              : undefined,
+          syncStatus: syncResult.status,
         };
       } catch (error) {
         const message = getCancelBookingErrorMessage(error);
@@ -194,22 +251,38 @@ export function CalendarV2RealDataAdapter() {
   const handleConfirmBooking = useCallback(
     async (appointmentId: string): Promise<NativeSchedulerConfirmBookingResult> => {
       try {
-        await apiClient.patch(`/appointments/${appointmentId}/status`, { status: 'confirmed' });
+        const { syncResult } = await runNativeSchedulerPostWriteMutation({
+          mutate: () => apiClient.patch(`/appointments/${appointmentId}/status`, { status: 'confirmed' }),
+          refresh: async () => {
+            const [refreshedBoard] = await Promise.all([
+              refetchCalendarBoard(),
+              queryClient.invalidateQueries({ queryKey: ['appointments-calendar-board'] }),
+              queryClient.invalidateQueries({ queryKey: ['appointment-context'] }),
+            ]);
 
-        const refreshedBoard = await refetchCalendarBoard();
+            return refreshedBoard;
+          },
+          isRefreshResultUsable: (refreshedBoard) =>
+            isCalendarBoardRefreshUsable(refreshedBoard) &&
+            doesCalendarV2BookingHaveStatusAfterRefresh(
+              refreshedBoard.data?.appointments,
+              appointmentId,
+              'confirmed',
+            ),
+        });
 
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: ['appointments-calendar-board'] }),
-          queryClient.invalidateQueries({ queryKey: ['appointment-context'] }),
-        ]);
-
-        toast.success('Часът е потвърден.');
+        if (syncResult.status === 'refresh_warning') {
+          toast.warning(CALENDAR_V2_POST_WRITE_REFRESH_WARNING);
+        } else {
+          toast.success('Часът е потвърден.');
+        }
 
         return {
-          appointmentVisibleAfterRefresh: doesCalendarV2BookingExistAfterRefresh(
-            refreshedBoard.data?.appointments,
-            appointmentId,
-          ),
+          appointmentVisibleAfterRefresh:
+            syncResult.status === 'synced'
+              ? doesCalendarV2BookingExistAfterRefresh(syncResult.refreshResult.data?.appointments, appointmentId)
+              : undefined,
+          syncStatus: syncResult.status,
         };
       } catch (error) {
         const message = getConfirmBookingErrorMessage(error);
@@ -227,22 +300,42 @@ export function CalendarV2RealDataAdapter() {
       }
 
       try {
-        await apiClient.patch(request.path, request.payload);
+        const appointmentId = getAppointmentIdFromReschedulePath(request.path);
+        const { syncResult } = await runNativeSchedulerPostWriteMutation({
+          mutate: () => apiClient.patch(request.path, request.payload),
+          refresh: async () => {
+            const [refreshedBoard] = await Promise.all([
+              refetchCalendarBoard(),
+              queryClient.invalidateQueries({ queryKey: ['appointments-calendar-board'] }),
+              queryClient.invalidateQueries({ queryKey: ['appointment-context'] }),
+            ]);
 
-        const refreshedBoard = await refetchCalendarBoard();
+            return refreshedBoard;
+          },
+          isRefreshResultUsable: (refreshedBoard) =>
+            isCalendarBoardRefreshUsable(refreshedBoard) &&
+            isCalendarV2RescheduleRefreshSynchronized(
+              refreshedBoard.data?.appointments,
+              appointmentId,
+              request,
+            ),
+        });
 
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: ['appointments-calendar-board'] }),
-          queryClient.invalidateQueries({ queryKey: ['appointment-context'] }),
-        ]);
-
-        toast.success('Часът е преместен.');
+        if (syncResult.status === 'refresh_warning') {
+          toast.warning(CALENDAR_V2_POST_WRITE_REFRESH_WARNING);
+        } else {
+          toast.success('Часът е преместен.');
+        }
 
         return {
-          appointmentVisibleAfterRefresh: shouldKeepCalendarV2SelectedBookingAfterRefresh(
-            refreshedBoard.data?.appointments,
-            getAppointmentIdFromReschedulePath(request.path),
-          ),
+          appointmentVisibleAfterRefresh:
+            syncResult.status === 'synced'
+              ? shouldKeepCalendarV2SelectedBookingAfterRefresh(
+                  syncResult.refreshResult.data?.appointments,
+                  appointmentId,
+                )
+              : undefined,
+          syncStatus: syncResult.status,
         };
       } catch (error) {
         const message = getRescheduleBookingErrorMessage(error);
@@ -438,8 +531,10 @@ export function CalendarV2RealDataAdapter() {
         defaultStaffId={bookingPrefill?.staffId ?? defaultStaffId}
         preferredSlot={bookingPrefill?.preferredSlot ?? ''}
         onClose={() => setBookingPrefill(null)}
-        onCreated={() => {
-          void handleManualBookingCreated();
+        onCreated={(_startAt, createdBooking) => {
+          if (createdBooking) {
+            void handleManualBookingCreated(createdBooking);
+          }
         }}
       />
     </>
@@ -618,6 +713,54 @@ function isPastSchedulingMessage(message: string | null) {
 
 function getAppointmentIdFromReschedulePath(path: string) {
   return path.split('/')[2] ?? '';
+}
+
+function mutationResultToAppointmentId(result: PlaceWaitlistEntryResponse) {
+  return result.appointment?.id ?? result.id ?? null;
+}
+
+function isCalendarBoardRefreshUsable(
+  result: {
+    data?: {
+      appointments?: unknown;
+    };
+    error?: unknown;
+  },
+) {
+  return !result.error && Array.isArray(result.data?.appointments);
+}
+
+function isWaitlistRefreshUsable(
+  result: {
+    data?: unknown;
+    error?: unknown;
+  },
+) {
+  return !result.error && Array.isArray(result.data);
+}
+
+function doesCalendarV2BookingHaveStatusAfterRefresh(
+  appointments: Array<{ id: string; status: string }> | undefined,
+  appointmentId: string,
+  status: string,
+) {
+  return appointments?.some((appointment) => appointment.id === appointmentId && appointment.status === status) ?? false;
+}
+
+function isCalendarV2RescheduleRefreshSynchronized(
+  appointments: Array<{ id: string; start_at: string; staff_id: string | null }> | undefined,
+  appointmentId: string,
+  request: AppointmentRescheduleSaveRequest,
+) {
+  if (!appointments) return false;
+
+  const refreshedAppointment = appointments.find((appointment) => appointment.id === appointmentId);
+  if (!refreshedAppointment) return true;
+
+  return (
+    refreshedAppointment.start_at === request.payload.startAt &&
+    refreshedAppointment.staff_id === request.payload.staffId
+  );
 }
 
 function getSchedulerNotice({

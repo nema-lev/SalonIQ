@@ -31,7 +31,7 @@ export function AdminBookingModal({
   defaultStaffId: string;
   preferredSlot: string;
   onClose: () => void;
-  onCreated: (startAt: string) => void;
+  onCreated: (startAt: string, booking?: { id: string; startAt: string }) => void | Promise<void>;
 }) {
   const tenant = useTenant();
   const queryClient = useQueryClient();
@@ -126,7 +126,7 @@ export function AdminBookingModal({
       queryClient.invalidateQueries({ queryKey: ['appointments-waitlist'] });
       queryClient.invalidateQueries({ queryKey: ['appointment-context'] });
       resetForm();
-      onCreated(data.startAt);
+      void onCreated(data.startAt, { id: data.id, startAt: data.startAt });
     },
     onError: (error: unknown) => {
       toast.error(getAdminBookingCreateErrorMessage(error));

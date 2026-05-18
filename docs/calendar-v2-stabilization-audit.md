@@ -14,26 +14,27 @@ It is **not yet ready for a first controlled salon pilot** without a short stabi
 
 The remaining blockers are not missing “big features.” They are trust and recovery gaps:
 
-1. **Post-write refresh handling can misreport a committed write as a failed action.** Placement, confirm, cancel, and reschedule await the follow-up refresh inside the same `try` block as the write. If the backend commit succeeds and the refresh fails, the operator can be shown a failure even though the appointment was already changed.
+1. **The allocation model is still transitional.** New standard writes maintain `calendar_allocations`, but the production dry-run/backfill result has not been executed and reviewed in the inspected repo state, old appointments can still lack allocations, and allocation-only authority remains intentionally disabled.
 2. **Error handling is still partly string-parsed and uneven across actions.** The Bulgarian UX is decent for common conflicts and past-time cases, but stale/terminal/retry cases are not yet consistently explicit enough for a real operator under pressure.
-3. **The allocation model is still transitional.** New standard writes maintain `calendar_allocations`, but the production dry-run/backfill result has not been executed and reviewed in the inspected repo state, old appointments can still lack allocations, and allocation-only authority remains intentionally disabled.
-4. **Some production-mode polish still reads like an internal preview surface.** Real mode can still show sample/demo concepts and several loading/error/empty-state strings remain in English.
+3. **Some production-mode polish still reads like an internal preview surface.** Real mode can still show sample/demo concepts and several loading/error/empty-state strings remain in English.
+
+Completed on 2026-05-18: the post-write refresh trust gap was hardened. Calendar V2 now keeps mutation success separate from follow-up sync failure across manual booking, request placement, cancel, confirm, and reschedule. A committed write that cannot be re-synchronized automatically is no longer reported as a failed write; the operator instead sees `Промяната е запазена, но календарът не се обнови автоматично. Обновете страницата.` and the scheduler exits unsafe write state without inventing canonical appointment data.
 
 ### Answer to the primary question
 
 - **Internal dogfooding on desktop:** yes.
 - **First controlled desktop salon pilot:** not yet.
-- **What must be fixed first:** post-write refresh/selection consistency, then run and review the allocation dry-run report for the pilot tenant, then close the most visible operator-facing wording/error-state gaps.
+- **What must be fixed first now:** run and review the allocation dry-run report for the pilot tenant, then close the most visible operator-facing wording/error-state gaps.
 
 ## 2. Completed capability checklist
 
 | Capability | Implemented | Tested by Codex regression | Manually verified by user if known | Remaining risk |
 | --- | --- | --- | --- | --- |
-| Manual booking | Yes. Real-data Calendar V2 opens the shared `AdminBookingModal` from `Нов час` or a future empty slot and writes through `POST /appointments/admin`. | Yes. Native scheduler regression checks cover manual booking intent, past-slot rejection, and precedence beneath placement/reschedule modes. | Not recorded in inspected files. | Uses the shared legacy modal and a separate refresh path. If the write succeeds but the follow-up board refresh fails, the user gets success feedback but the board can remain stale. |
-| Request placement | Yes. Real-data placement preview exists; explicit save writes through `POST /appointments/waitlist/:waitlistId/place` only when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"` and sample mode is off. | Yes. Regression checks cover preview shape, slot locking, flag gating, dedicated endpoint use, no notification writes, and placement/manual-click precedence. | Not recorded in inspected files. | Save remains flag-gated; stale handled requests and post-write refresh ambiguity still need stronger recovery. |
-| Cancel | Yes. Eligible `pending`, `proposal_pending`, and `confirmed` bookings cancel through `PATCH /appointments/:id/status` with `{ status: "cancelled" }`. | Yes. Regression checks cover eligibility, placement-mode precedence, cancelled filtering, and selection clearing after refresh. Backend lifecycle tests cover terminal allocation deactivation. | Not recorded in inspected files. | If the status write succeeds but refresh fails, the UI can report failure after a real cancellation. Already-cancelled copy is still generic rather than explicit. |
-| Confirm | Yes. Eligible `pending` and `proposal_pending` bookings confirm through `PATCH /appointments/:id/status` with `{ status: "confirmed" }`. | Yes. Regression checks cover eligibility, placement-mode precedence, endpoint reuse, and backend-truth refresh. Backend lifecycle tests cover held-to-booked promotion. | Not recorded in inspected files. | Stale/terminal handling is present but still message-parsed; refresh failure after a committed confirm is misleading. |
-| Reschedule | Yes. Eligible `pending`, `proposal_pending`, and `confirmed` bookings use explicit click-to-reschedule through `PATCH /appointments/:id/reschedule`. | Yes. Regression checks cover eligibility, click ownership, valid save request generation, backend endpoint reuse, and refreshed selection behavior. Backend lifecycle tests cover atomic allocation updates. | Not recorded in inspected files. | Selection is intentionally cleared if the booking leaves the visible day, but the operator does not get a strong “moved off this day” explanation. Refresh failure after a committed move is the main trust gap. |
+| Manual booking | Yes. Real-data Calendar V2 opens the shared `AdminBookingModal` from `Нов час` or a future empty slot and writes through `POST /appointments/admin`. | Yes. Native scheduler regression checks cover manual booking intent, past-slot rejection, precedence beneath placement/reschedule modes, and the shared post-write sync contract. | Not recorded in inspected files. | If auto-refresh cannot re-establish backend truth after create, the modal still closes and the operator gets the refresh warning instead of a false failed-write message. |
+| Request placement | Yes. Real-data placement preview exists; explicit save writes through `POST /appointments/waitlist/:waitlistId/place` only when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"` and sample mode is off. | Yes. Regression checks cover preview shape, slot locking, flag gating, dedicated endpoint use, no notification writes, placement/manual-click precedence, and warning-path sync handling. | Not recorded in inspected files. | Save remains flag-gated; stale handled requests still need more explicit recovery, but committed placement is no longer misreported as a failed write when refresh is ambiguous. |
+| Cancel | Yes. Eligible `pending`, `proposal_pending`, and `confirmed` bookings cancel through `PATCH /appointments/:id/status` with `{ status: "cancelled" }`. | Yes. Regression checks cover eligibility, placement-mode precedence, cancelled filtering, post-write sync handling, and selection clearing after refresh. Backend lifecycle tests cover terminal allocation deactivation. | Not recorded in inspected files. | Already-cancelled copy is still generic rather than explicit, but a committed cancel with failed refresh now shows a refresh warning and clears unsafe stale selection. |
+| Confirm | Yes. Eligible `pending` and `proposal_pending` bookings confirm through `PATCH /appointments/:id/status` with `{ status: "confirmed" }`. | Yes. Regression checks cover eligibility, placement-mode precedence, endpoint reuse, backend-truth refresh, and post-write sync handling. Backend lifecycle tests cover held-to-booked promotion. | Not recorded in inspected files. | Stale/terminal handling is still message-parsed, but a committed confirm with failed refresh now shows a refresh warning instead of a false failed-write message. |
+| Reschedule | Yes. Eligible `pending`, `proposal_pending`, and `confirmed` bookings use explicit click-to-reschedule through `PATCH /appointments/:id/reschedule`. | Yes. Regression checks cover eligibility, click ownership, valid save request generation, backend endpoint reuse, refreshed selection behavior, and warning-path exit semantics. Backend lifecycle tests cover atomic allocation updates. | Not recorded in inspected files. | Selection is intentionally cleared if the booking leaves the visible day, and committed moves now exit reschedule mode safely even when the board refresh is ambiguous. |
 | No-past guard | Yes. UI blocks past slot clicks and backend rejects past create/place/reschedule writes with `Не може да запишете час в миналото.` | Yes. Regression checks cover historical slots, elapsed time shading, save blocking after a selected slot becomes historical, and manual-booking/reschedule past rejection. Backend tests cover create, place, and reschedule rejection. | Not recorded in inspected files. | Good current coverage. The wording differs slightly by flow (`Изберете бъдещ час.` vs `Не може...`) but the rule itself is strong. |
 | Sample mode safety | Yes. `?sample=1` disables reads and writes, hides manual booking entry points, and keeps previews local-only. | Yes. Regression/source checks cover real-data-only writes and sample-mode disabled behavior. | Not recorded in inspected files. | Safe from a write perspective. The remaining concern is polish: sample/demo concepts are still too visible around the real production surface. |
 | Legacy fallback | Yes. `/admin/calendar-legacy` still renders `AdminCalendarWorkspace`. | No dedicated regression found in the inspected Calendar V2 runner. | Not recorded in inspected files. | Valuable emergency fallback, but it preserves a second operating surface with different interaction patterns and some richer legacy/mobile behavior. |
@@ -221,10 +222,9 @@ Use this as a concrete gate before allowing one real salon to operate on desktop
 
 ### P0 — must fix before a controlled salon pilot
 
-1. **Harden post-write refresh and selection consistency** for placement, confirm, cancel, and reschedule so a successful backend commit is never reported as a failed action solely because the follow-up refresh failed.
-2. **Run and review the read-only allocation backfill report** for the actual pilot tenant data before claiming the backend transition state is acceptable for live use.
-3. **Polish the highest-trust real-mode copy gaps**: remove or gate ordinary-operator sample/demo language in real mode and translate the visible loading/error/empty states that are still English.
-4. **Tighten the most important stale/terminal action messages** so confirm/cancel/reschedule/request-placement failures are consistently understandable in Bulgarian without overloading “unavailable.”
+1. **Run and review the read-only allocation backfill report** for the actual pilot tenant data before claiming the backend transition state is acceptable for live use.
+2. **Polish the highest-trust real-mode copy gaps**: remove or gate ordinary-operator sample/demo language in real mode and translate the visible loading/error/empty states that are still English.
+3. **Tighten the most important stale/terminal action messages** so confirm/cancel/reschedule/request-placement failures are consistently understandable in Bulgarian without overloading “unavailable.”
 
 ### P1 — should fix soon after pilot
 
@@ -253,9 +253,9 @@ Use this as a concrete gate before allowing one real salon to operate on desktop
 
 ## 11. Recommended next implementation task
 
-### Chosen task: **post-write refresh/selection consistency hardening**
+### Completed task: **post-write refresh/selection consistency hardening**
 
-This is the best next move because it is:
+This pass was the right stabilization move because it was:
 
 - narrow,
 - safe,
@@ -263,9 +263,15 @@ This is the best next move because it is:
 - already visible in the current code,
 - more urgent than adding breadth.
 
-It also improves several existing actions at once without adding a new feature, changing endpoints, or changing the database model.
+It improved several existing actions at once without adding a new feature, changing endpoints, or changing the database model.
 
-### Exact Codex prompt for the next task
+### Recommended next task after this hardening
+
+**Run and review the read-only allocation backfill report for the actual pilot tenant data.**
+
+That is now the highest-value next task because the frontend trust gap is closed, while the backend transition state is still unproven for the real pilot dataset. The next decision should be based on the authenticated report output and anomaly counts, not on assumptions about legacy rows.
+
+### Original Codex prompt used for the completed hardening pass
 
 ```text
 You are working on the SalonIQ repository.

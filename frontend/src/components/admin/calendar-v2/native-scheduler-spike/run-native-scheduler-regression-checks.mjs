@@ -18,6 +18,7 @@ const files = [
   'native-scheduler-confirm-booking.ts',
   'native-scheduler-cancel-booking.ts',
   'native-scheduler-reschedule-booking.ts',
+  'native-scheduler-post-write-sync.ts',
   'native-scheduler-regression-checks.ts',
 ];
 
@@ -27,7 +28,7 @@ try {
   }
 
   const checksModule = require(path.join(tempDir, 'native-scheduler-regression-checks.js'));
-  const results = checksModule.runNativeSchedulerRegressionChecks(sourceDir);
+  const results = await checksModule.runNativeSchedulerRegressionChecks(sourceDir);
 
   console.log(`Native scheduler regression checks passed (${results.length})`);
   for (const result of results) {

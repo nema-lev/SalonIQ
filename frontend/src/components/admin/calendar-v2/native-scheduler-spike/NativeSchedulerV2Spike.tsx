@@ -72,6 +72,11 @@ import {
   buildAppointmentRescheduleSaveRequestIfValid,
   type AppointmentRescheduleSaveRequest,
 } from './native-scheduler-reschedule-booking';
+import {
+  CALENDAR_V2_POST_WRITE_REFRESH_WARNING,
+  shouldClearNativeSchedulerSelectionAfterPostWriteSync,
+  type NativeSchedulerPostWriteSyncStatus,
+} from './native-scheduler-post-write-sync';
 import styles from './native-scheduler.module.css';
 
 type ActiveDragOperation =
@@ -124,6 +129,7 @@ type NativeSchedulerV2SpikeProps = {
 
 export type NativeSchedulerPlacementSaveResult = {
   appointmentId?: string | null;
+  syncStatus?: NativeSchedulerPostWriteSyncStatus;
 };
 
 export type NativeSchedulerPlacementSaveOptions = {
@@ -156,14 +162,17 @@ export type NativeSchedulerRescheduleBookingOptions = {
 
 export type NativeSchedulerCancelBookingResult = {
   appointmentVisibleAfterRefresh?: boolean;
+  syncStatus?: NativeSchedulerPostWriteSyncStatus;
 };
 
 export type NativeSchedulerConfirmBookingResult = {
   appointmentVisibleAfterRefresh?: boolean;
+  syncStatus?: NativeSchedulerPostWriteSyncStatus;
 };
 
 export type NativeSchedulerRescheduleBookingResult = {
   appointmentVisibleAfterRefresh?: boolean;
+  syncStatus?: NativeSchedulerPostWriteSyncStatus;
 };
 
 type PlacementSaveStatus =
@@ -905,10 +914,13 @@ export function NativeSchedulerV2Spike({
 
     try {
       const result = await placementSave.onSave(request);
-      setPlacementSaveStatus({ state: 'success', message: 'Часът е записан.' });
-      setPlacementMessage('Часът е записан.');
+      const refreshWarning = result?.syncStatus === 'refresh_warning';
+      const message = refreshWarning ? CALENDAR_V2_POST_WRITE_REFRESH_WARNING : 'Часът е записан.';
 
-      if (result?.appointmentId) {
+      setPlacementSaveStatus({ state: 'success', message });
+      setPlacementMessage(message);
+
+      if (!refreshWarning && result?.appointmentId) {
         setSelectedBlockId(result.appointmentId);
       }
 
@@ -954,10 +966,19 @@ export function NativeSchedulerV2Spike({
 
     try {
       const result = await rescheduleBooking.onSave(request);
-      setRescheduleSaveStatus({ state: 'success', message: 'Часът е преместен.' });
-      setRescheduleMessage('Часът е преместен.');
+      const syncStatus = result?.syncStatus ?? 'synced';
+      const refreshWarning = syncStatus === 'refresh_warning';
+      const message = refreshWarning ? CALENDAR_V2_POST_WRITE_REFRESH_WARNING : 'Часът е преместен.';
 
-      if (result?.appointmentVisibleAfterRefresh === false) {
+      setRescheduleSaveStatus({ state: 'success', message });
+      setRescheduleMessage(message);
+
+      if (
+        shouldClearNativeSchedulerSelectionAfterPostWriteSync({
+          syncStatus,
+          appointmentVisibleAfterRefresh: result?.appointmentVisibleAfterRefresh,
+        })
+      ) {
         setSelectedBlockId(null);
       } else {
         setSelectedBlockId(rescheduleSourceBlock.appointment.id);
@@ -980,7 +1001,12 @@ export function NativeSchedulerV2Spike({
       if (!cancelBooking?.enabled || !cancelBooking.onCancel) return;
 
       const result = await cancelBooking.onCancel(appointmentId);
-      if (result?.appointmentVisibleAfterRefresh === false) {
+      if (
+        shouldClearNativeSchedulerSelectionAfterPostWriteSync({
+          syncStatus: result?.syncStatus ?? 'synced',
+          appointmentVisibleAfterRefresh: result?.appointmentVisibleAfterRefresh,
+        })
+      ) {
         setSelectedBlockId(null);
       }
     },
@@ -992,7 +1018,12 @@ export function NativeSchedulerV2Spike({
       if (!confirmBooking?.enabled || !confirmBooking.onConfirm) return;
 
       const result = await confirmBooking.onConfirm(appointmentId);
-      if (result?.appointmentVisibleAfterRefresh === false) {
+      if (
+        shouldClearNativeSchedulerSelectionAfterPostWriteSync({
+          syncStatus: result?.syncStatus ?? 'synced',
+          appointmentVisibleAfterRefresh: result?.appointmentVisibleAfterRefresh,
+        })
+      ) {
         setSelectedBlockId(null);
       }
     },

@@ -24,6 +24,7 @@
 - Desktop real-data route now supports manual new booking with a visible `Нов час` action and future empty-slot click. Slot clicks reuse the existing admin booking modal with staff/date/time prefilled and submit through the existing admin-create path.
 - Desktop real-data route now supports confirming eligible `pending` and `proposal_pending` timed bookings from Booking Detail through the existing appointment-status endpoint, with an explicit confirmation step and backend-truth refresh after success.
 - Desktop real-data route now supports cancelling eligible `pending`, `proposal_pending`, and `confirmed` bookings from Booking Detail through the existing appointment-status endpoint, with an explicit confirmation step and backend-truth refresh after success.
+- All committed desktop real-data writes now separate mutation success from follow-up refresh/sync success. If the write commits but automatic synchronization is unavailable or returns unusable data, Calendar V2 shows `Промяната е запазена, но календарът не се обнови автоматично. Обновете страницата.` instead of a false failed-write message.
 - Real-data and sample routes now allow a click-to-place preview for Action Inbox waitlist/demand items. The owner selects `Постави в графика`, clicks a staff/time slot, and sees a lightweight placement preview.
 - Real-data route can save only that waitlist/request placement when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"`. Sample mode and flag-off real mode remain non-writing.
 - The local preview emits a typed `placeRequest` command-shaped object with the request id, target staff/start/end, source surface, idempotency key, appointment draft details, and `localOnly: true`.
@@ -122,7 +123,7 @@ In the real-data route, appointment move handles are disabled.
 - Request placement and reschedule modes are separate. Entering either mode clears the other, and reschedule mode consumes grid clicks before ordinary manual booking intent.
 - Past targets are blocked with `Не може да преместите час в миналото.`; local conflict preview uses `Този час вече е зает.` when the current projection already shows overlap, while the backend remains final authority.
 - Saving reuses `PATCH /appointments/:id/reschedule` with `{ startAt, staffId }`; no backend endpoint, schema change, migration, drag/drop persistence, resize, realtime, or recurrence behavior was added.
-- After success, Calendar V2 refetches the board, invalidates `appointments-calendar-board` and `appointment-context`, keeps the selected date, and keeps the moved booking selected only when the refreshed board still shows it on that date.
+- After success, Calendar V2 refetches the board, invalidates `appointments-calendar-board` and `appointment-context`, keeps the selected date, and keeps the moved booking selected only when the refreshed board still shows it on that date. If synchronization is ambiguous, it exits reschedule mode and clears stale selection rather than leaving the old slot selected as if still authoritative.
 - Sample mode remains non-writing and does not expose working reschedule intent.
 - The existing backend reschedule path updates the appointment plus matching allocation atomically and still performs backend no-past/allocation/legacy-fallback conflict checks.
 - The current reschedule endpoint does not add notification behavior; this pass does not add or change notifications.
@@ -132,7 +133,7 @@ In the real-data route, appointment move handles are disabled.
 - Date of pass: 2026-05-16.
 - Desktop real-data Calendar V2 now exposes `Нов час` in the toolbar and lets the owner click a future empty scheduler slot to open the existing `AdminBookingModal`.
 - Empty-slot intent prefills staff, date, and exact start time; the reused modal preserves the existing service/client selection behavior and still submits through `POST /appointments/admin`.
-- Calendar V2 does not create optimistic committed cards. After a successful create, it closes the modal, refetches the current calendar board, invalidates `appointments-calendar-board`, and invalidates `appointment-context`; the selected date stays unchanged.
+- Calendar V2 does not create optimistic committed cards. After a successful create, it closes the modal, refetches the current calendar board, invalidates `appointments-calendar-board`, and invalidates `appointment-context`; the selected date stays unchanged. If the refresh cannot verify the new booking, Calendar V2 keeps the write committed but shows the shared refresh warning.
 - Sample mode remains non-writing and hides manual booking entry points. Phone width keeps the existing separate notice rather than exposing a compressed unfinished desktop booking flow.
 - Request placement keeps priority over ordinary slot clicks, so an active Action Inbox placement flow behaves exactly as before.
 - Frontend slot clicks block past time with `Изберете бъдещ час.`; backend create remains the authority for no-past/conflict validation and the reused modal maps create failures to calm Bulgarian copy.
@@ -144,7 +145,7 @@ In the real-data route, appointment move handles are disabled.
 - Desktop real-data Calendar V2 now exposes `Откажи час` in Booking Detail only for real appointments with statuses `pending`, `proposal_pending`, or `confirmed`.
 - The confirmation copy is explicit: `Да откажем ли часа?`, `Часът ще бъде премахнат от графика. Това действие ще освободи слота.`, `Откажи часа`, and `Назад`.
 - The action reuses `PATCH /appointments/:id/status` with `{ status: "cancelled" }`; it adds no backend endpoint, schema change, migration, realtime, drag persistence, resize, or recurrence behavior.
-- After success, Calendar V2 refetches the board, invalidates `appointments-calendar-board` and `appointment-context`, keeps the selected date, and clears the selected booking when the refreshed appointment is missing or is no longer active in the scheduler-grid projection.
+- After success, Calendar V2 refetches the board, invalidates `appointments-calendar-board` and `appointment-context`, keeps the selected date, and clears the selected booking when the refreshed appointment is missing or is no longer active in the scheduler-grid projection. If refresh is ambiguous after a committed cancel, it also clears stale selection and shows the shared refresh warning.
 - `cancelled` appointments are removed from the active Calendar V2 grid projection even when the calendar-board endpoint still returns them, so the slot becomes visually free after refresh while cancellation can remain available through non-blocking update/history surfaces.
 - Sample mode remains non-writing; placement preview, empty detail state, terminal bookings, and waitlist/request items do not expose cancel intent.
 - Standard appointment cancellation continues through the existing backend allocation lifecycle, which deactivates/releases the matching `calendar_allocations` row for terminal statuses.
@@ -156,7 +157,7 @@ In the real-data route, appointment move handles are disabled.
 - Desktop real-data Calendar V2 now exposes `Потвърди час` in Booking Detail only for real timed appointments with statuses `pending` or `proposal_pending`.
 - The confirmation copy is explicit: `Да потвърдим ли часа?`, `Часът ще бъде потвърден и ще остане в графика.`, `Потвърди`, and `Назад`.
 - The action reuses `PATCH /appointments/:id/status` with `{ status: "confirmed" }`; it adds no backend endpoint, schema change, migration, realtime, drag persistence, resize, or recurrence behavior.
-- After success, Calendar V2 refetches the board, invalidates `appointments-calendar-board` and `appointment-context`, keeps the selected date, and keeps the selected booking only when it still exists after the refreshed backend read.
+- After success, Calendar V2 refetches the board, invalidates `appointments-calendar-board` and `appointment-context`, keeps the selected date, and keeps the selected booking only when refreshed backend truth confirms the booking; an ambiguous refresh shows the shared warning and clears stale action selection.
 - Sample mode remains non-writing; placement preview, empty detail state, confirmed/terminal bookings, and waitlist/request items do not expose confirm intent.
 - Standard pending/proposal booking confirmation continues through the existing backend allocation lifecycle, which promotes the matching held `calendar_allocations` row to booked.
 - The existing backend status endpoint already performs the product's current status-change notification behavior; this pass does not add or change notification behavior.

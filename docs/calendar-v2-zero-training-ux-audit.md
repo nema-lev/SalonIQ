@@ -467,9 +467,33 @@ Only first-impression and basic-understanding work belongs here:
 
 ## 15. Recommended next implementation task
 
-**Chosen task: appointment card visual simplification.**
+**Completed task: appointment card visual simplification.**
 
-This is the narrowest high-impact next step for "Tetris / Candy Crush, not Excel."
+Completed on 2026-05-19. Calendar V2 appointment cards were simplified toward the zero-training block model without changing backend behavior, API calls, database schema, routing, sample mode write safety, or the existing manual booking, request placement, cancel, confirm, and reschedule flows.
+
+What changed:
+
+- Grid cards now prioritize client, service, exact time, and only meaningful cues.
+- Confirmed/default bookings no longer need loud status text on the card; stable appointments are treated as the normal state.
+- Pending/proposal/action-needed bookings use a stronger block treatment plus short Bulgarian cue text such as `Чака избор` or `Чака потвърждение`.
+- Completed and no-show bookings, if rendered, are visually quieter than active future work.
+- Selected cards have a stronger ring/elevation treatment so the selected object is obvious.
+- Short cards keep client identity and time visible instead of collapsing mostly to initials/metadata.
+- Duration text was removed from the card surface; duration is communicated primarily by block height and can remain available in detail/context surfaces.
+
+Remaining UX risks after this task:
+
+- Empty slots still need a stronger placeable-slot affordance.
+- Action Inbox request cards still read more like a queue than loose blocks waiting for the board.
+- The selected booking detail panel remains useful but dense, especially around action hierarchy and notes.
+- Placement/reschedule ghost blocks and invalid-slot feedback can still become more physical.
+- Manual booking still uses the existing legacy modal rather than a Calendar V2-native draft block flow.
+
+Recommended next UX task: **strengthen free-slot and placement/reschedule preview affordances** so valid targets, no-fit states, and selected ghost blocks read physically before the operator needs explanatory text.
+
+### Original rationale
+
+This was the narrowest high-impact next step for "Tetris / Candy Crush, not Excel."
 
 Why this task:
 

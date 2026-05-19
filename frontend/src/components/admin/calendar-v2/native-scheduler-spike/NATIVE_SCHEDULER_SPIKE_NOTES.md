@@ -26,6 +26,7 @@
 - Desktop real-data route now supports cancelling eligible `pending`, `proposal_pending`, and `confirmed` bookings from Booking Detail through the existing appointment-status endpoint, with an explicit confirmation step and backend-truth refresh after success.
 - All committed desktop real-data writes now separate mutation success from follow-up refresh/sync success. If the write commits but automatic synchronization is unavailable or returns unusable data, Calendar V2 shows `Промяната е запазена, но календарът не се обнови автоматично. Обновете страницата.` instead of a false failed-write message.
 - Desktop real-data action errors now share `native-scheduler-action-errors.ts`. Manual booking, request placement, cancel, confirm, reschedule, board load failure, and refresh-warning states normalize known HTTP/status/code/message shapes to stable frontend categories and calm Bulgarian copy before any UI rendering.
+- Appointment cards now use a simplified block model: stable confirmed bookings stay calm without repeated status text, pending/proposal bookings show an action-needed block treatment and short Bulgarian cue, completed/no-show bookings are quieter than active future work, selected cards have a stronger selected state, and short appointments keep client identity plus time visible.
 - Real-data and sample routes now allow a click-to-place preview for Action Inbox waitlist/demand items. The owner selects `Постави в графика`, clicks a staff/time slot, and sees a lightweight placement preview.
 - Real-data route can save only that waitlist/request placement when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"`. Sample mode and flag-off real mode remain non-writing.
 - The local preview emits a typed `placeRequest` command-shaped object with the request id, target staff/start/end, source surface, idempotency key, appointment draft details, and `localOnly: true`.
@@ -233,6 +234,19 @@ In the real-data route, appointment move handles are disabled.
 - Screenshots captured under `screenshots/`: `calendar-v2-visual-refine-sample-1440x900.png`, `calendar-v2-visual-refine-sample-1366x768.png`, `calendar-v2-visual-refine-real-1440x900.png`, and `calendar-v2-visual-refine-sample-390x844.png`.
 - Visual QA result from `/private/tmp/saloniq-calendar-v2-visual-refine-qa-results.json`: sample badge, selected Booking Detail, non-blocking real empty state, and phone fallback were visible; appointment drag grip count was `0`, waitlist placement button count was `0`, and `writesAfterV2` was empty.
 - Remaining UX limitations: phone still intentionally shows the separate agenda-renderer notice, tablet portrait remains out of scope, and Booking Detail can still scroll when selected notes are longer than the available rail height.
+
+## Appointment Card Block Simplification Pass
+
+- Date of pass: 2026-05-19.
+- Appointment cards were simplified toward the zero-training board model without backend/API/schema changes, route changes, new packages, notifications, realtime behavior, drag/drop persistence, resize, or sample-mode writes.
+- Normal grid cards now answer who, what, when, and whether action is needed. Client name, service, and exact time remain on the card; duration text was removed because card height carries duration.
+- Confirmed/default cards are treated as the stable baseline and no longer need visible confirmed status text in the grid.
+- Pending/proposal cards use action-needed display metadata plus short Bulgarian labels such as `Чака избор` and `Чака потвърждение`.
+- Completed/no-show cards, if rendered, are visually muted and distinct from active future work. Cancelled bookings remain excluded from the active grid projection.
+- Short cards now keep client identity and time visible, with only a compact cue when action/message/terminal state matters.
+- Selected, hover, and focus states were strengthened so cards feel like selectable physical blocks while preserving the existing click-to-select body and drag-grip ownership contract.
+- Request placement preview, reschedule preview, selected slot locking, invalid/past slot feedback, manual booking slot click behavior, cancel/confirm/reschedule actions, and sample-mode non-writing behavior remain unchanged.
+- Remaining UX limitations: free slots still need stronger placeable affordance, Action Inbox request cards still need a looser block-tray treatment, selected-detail action hierarchy remains dense, and manual booking still enters the legacy modal.
 
 ## Viewport and Scroll Hardening Pass
 

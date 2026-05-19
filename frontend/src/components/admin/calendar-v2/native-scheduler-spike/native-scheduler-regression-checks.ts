@@ -904,6 +904,45 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
       },
     },
     {
+      name: 'appointment cards stay block-like without loud confirmed status text',
+      run: () => {
+        const eventCardSource = readSource(sourceDir, 'NativeSchedulerEventCard.tsx');
+        const styleSource = readSource(sourceDir, 'native-scheduler.module.css');
+
+        assert(
+          eventCardSource.includes('data-native-scheduler-action-needed') &&
+            eventCardSource.includes('getStatusCue(block)') &&
+            eventCardSource.includes("appointment.actionState === 'requires_action'"),
+          'appointment cards should expose action-needed state as display metadata',
+        );
+        assert(
+          eventCardSource.includes("label: getActionNeededLabel") &&
+            eventCardSource.includes("'Чака избор'") &&
+            eventCardSource.includes("'Чака потвърждение'"),
+          'pending/proposal cards should use short Bulgarian action-needed labels',
+        );
+        assert(
+          !eventCardSource.includes("'потвърден'") &&
+            !eventCardSource.includes('formatDurationLabel') &&
+            !eventCardSource.includes('eventMetaRow'),
+          'confirmed/default cards should not render loud status or duration metadata on the grid card',
+        );
+        assert(
+          eventCardSource.includes('shortBlockText') &&
+            eventCardSource.includes('shortTitle') &&
+            eventCardSource.includes('shortTime'),
+          'short cards should keep client identity and time readable instead of collapsing to initials only',
+        );
+        assert(
+          styleSource.includes('.eventCardNeedsAction') &&
+            styleSource.includes('.eventCardSelected') &&
+            styleSource.includes('.eventCardCompleted') &&
+            styleSource.includes('.eventCardNoShow'),
+          'card CSS should keep selected, action-needed, completed, and no-show states visually distinct',
+        );
+      },
+    },
+    {
       name: 'placement save labels describe the active mode honestly',
       run: () => {
         const adapterSource = readSource(sourceDir, '../real-data/CalendarV2RealDataAdapter.tsx');

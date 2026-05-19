@@ -476,23 +476,36 @@
   grid-template-columns: 26px minmax(0, 1fr);
   min-width: 0;
   overflow: hidden;
-  border: 1px solid var(--event-border, #cbd5e1);
-  border-left: 5px solid var(--event-accent, #64748b);
+  border: 1px solid rgba(203, 213, 225, 0.92);
+  border-left: 6px solid var(--event-accent, #64748b);
   border-radius: 8px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0.9)),
-    linear-gradient(135deg, var(--event-soft, rgba(100, 116, 139, 0.08)), transparent 68%);
-  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.09);
-  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+    linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(248, 250, 252, 0.95)),
+    linear-gradient(135deg, var(--event-soft, rgba(100, 116, 139, 0.08)), transparent 62%);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.95) inset,
+    0 10px 24px rgba(15, 23, 42, 0.1);
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease, background 140ms ease;
+}
+
+.eventCard:hover {
+  border-color: var(--event-border, #cbd5e1);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.95) inset,
+    0 16px 34px rgba(15, 23, 42, 0.14);
+  transform: translateY(-1px);
 }
 
 .eventCardSelected {
   border-color: var(--event-accent, #64748b);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 1), rgba(248, 250, 252, 0.98)),
+    linear-gradient(135deg, var(--event-soft, rgba(100, 116, 139, 0.08)), transparent 58%);
   box-shadow:
-    0 0 0 1px var(--event-accent, #64748b),
-    0 0 0 4px var(--event-ring, rgba(100, 116, 139, 0.18)),
-    0 16px 34px rgba(15, 23, 42, 0.16);
-  transform: translateY(-1px);
+    0 0 0 2px var(--event-accent, #64748b),
+    0 0 0 6px var(--event-ring, rgba(100, 116, 139, 0.18)),
+    0 18px 40px rgba(15, 23, 42, 0.2);
+  transform: translateY(-2px);
 }
 
 .eventCardDragging {
@@ -501,6 +514,32 @@
 
 .eventCardReadOnly {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.eventCardNeedsAction {
+  border-color: rgba(245, 158, 11, 0.62);
+  border-left-color: #f59e0b;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(255, 251, 235, 0.93)),
+    linear-gradient(135deg, rgba(245, 158, 11, 0.13), transparent 66%);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.95) inset,
+    0 12px 28px rgba(146, 64, 14, 0.14);
+}
+
+.eventCardCompleted,
+.eventCardNoShow {
+  border-left-color: #94a3b8;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(241, 245, 249, 0.9));
+  box-shadow: 0 7px 16px rgba(15, 23, 42, 0.06);
+}
+
+.eventCardCompleted {
+  opacity: 0.78;
+}
+
+.eventCardNoShow {
+  border-color: rgba(148, 163, 184, 0.9);
 }
 
 .eventGrip {
@@ -530,10 +569,16 @@
   justify-content: flex-start;
   border: 0;
   background: transparent;
-  padding: 8px 9px 8px 8px;
+  padding: 9px 10px 8px 9px;
   color: inherit;
   cursor: pointer;
   text-align: left;
+}
+
+.eventBody:focus-visible,
+.eventGrip:focus-visible {
+  outline: 2px solid var(--event-accent, #64748b);
+  outline-offset: -2px;
 }
 
 .eventHeader {
@@ -541,7 +586,7 @@
   min-width: 0;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
 }
 
 .eventTitleGroup {
@@ -559,72 +604,83 @@
 }
 
 .eventTitle {
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 950;
   line-height: 1.15;
   color: #0f172a;
 }
 
 .eventSubtitle {
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 800;
   line-height: 1.2;
-  color: #64748b;
+  color: #475569;
 }
 
 .eventTime {
   flex: 0 0 auto;
-  border-radius: 999px;
-  background: rgba(248, 250, 252, 0.9);
-  padding: 2px 5px;
-  font-size: 10px;
+  padding-top: 1px;
+  font-size: 10.5px;
   font-weight: 900;
-  line-height: 1;
+  line-height: 1.1;
   color: #334155;
 }
 
-.cueRow {
+.eventCueRow {
   display: flex;
   min-width: 0;
   align-items: center;
   gap: 5px;
-  margin-top: 4px;
+  margin-top: auto;
+  padding-top: 7px;
 }
 
-.cuePill {
+.eventStatusCue,
+.eventIconCue {
   display: inline-flex;
   min-width: 0;
   align-items: center;
   gap: 4px;
-  border-radius: 999px;
-  border: 1px solid rgba(203, 213, 225, 0.7);
-  background: rgba(248, 250, 252, 0.92);
-  padding: 2px 6px;
   font-size: 10px;
   font-weight: 900;
+  line-height: 1;
+}
+
+.eventStatusCue {
+  max-width: 100%;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  border-radius: 999px;
+  background: rgba(255, 251, 235, 0.96);
+  padding: 3px 7px;
+  color: #92400e;
+}
+
+.eventCardCompleted .eventStatusCue {
+  border-color: rgba(148, 163, 184, 0.32);
+  background: rgba(248, 250, 252, 0.92);
   color: #475569;
 }
 
-.eventMetaRow {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 6px;
-  margin-top: auto;
-  padding-top: 7px;
-  font-size: 10px;
-  font-weight: 900;
-  color: #64748b;
+.eventCardNoShow .eventStatusCue {
+  border-color: rgba(148, 163, 184, 0.42);
+  background: rgba(241, 245, 249, 0.95);
+  color: #334155;
 }
 
-.eventMetaRow span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.eventIconCue {
+  flex: 0 0 auto;
   border-radius: 999px;
-  background: rgba(241, 245, 249, 0.86);
-  padding: 2px 6px;
+  background: rgba(241, 245, 249, 0.92);
+  padding: 3px;
+  color: #475569;
+}
+
+.eventBlockFill {
+  display: block;
+  margin-top: auto;
+  height: 9px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--event-soft, rgba(100, 116, 139, 0.08)), transparent);
 }
 
 .cueDot {
@@ -637,8 +693,8 @@
 
 .eventCardShort {
   grid-template-columns: 22px minmax(0, 1fr);
-  border-left-width: 4px;
-  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
+  border-left-width: 5px;
+  box-shadow: 0 7px 16px rgba(15, 23, 42, 0.09);
 }
 
 .eventCardShort.eventCardReadOnly {
@@ -651,37 +707,62 @@
 
 .eventCardShort .eventBody {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   padding: 4px 6px;
 }
 
-.shortInitials {
+.shortBlockText {
   display: grid;
-  height: 20px;
-  min-width: 20px;
-  place-items: center;
-  border-radius: 999px;
-  background: var(--event-soft, #f1f5f9);
-  font-size: 10px;
-  font-weight: 950;
-  line-height: 1;
-  color: #111827;
+  min-width: 0;
+  gap: 1px;
 }
 
-.shortCue {
+.shortTitle,
+.shortTime {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.shortTitle {
+  font-size: 10.5px;
+  font-weight: 950;
+  line-height: 1;
+  color: #0f172a;
+}
+
+.shortTime {
   font-size: 10px;
   font-weight: 900;
   color: #475569;
 }
 
-.shortCueIcon {
+.shortStatusCue {
   display: inline-flex;
   align-items: center;
+  gap: 3px;
+  border-radius: 999px;
+  background: rgba(255, 251, 235, 0.96);
+  padding: 3px 5px;
+  font-size: 9px;
+  font-weight: 950;
+  line-height: 1;
+  color: #92400e;
+}
+
+.shortStatusText {
+  display: inline-block;
+  max-width: 42px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eventCardCompleted .shortStatusCue,
+.eventCardNoShow .shortStatusCue {
+  background: rgba(241, 245, 249, 0.96);
   color: #475569;
 }
 

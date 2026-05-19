@@ -1,7 +1,7 @@
 'use client';
 
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { AlertCircle, GripVertical, MessageCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle2, GripVertical, MessageCircle } from 'lucide-react';
 import type { CalendarV2CalendarBlock } from '..';
 import type { NativeSchedulerRect } from './native-scheduler-geometry';
 import styles from './native-scheduler.module.css';
@@ -33,11 +33,13 @@ export function NativeSchedulerEventCard({
   const isShort = rect.height <= 38;
   const isRoomy = rect.height >= 72;
   const accent = block.color ?? appointment?.service.color ?? appointment?.staff.color ?? '#64748b';
-  const cues = getCardCues(block);
   const title = summary?.title ?? block.title;
   const subtitle = summary?.subtitle ?? block.subtitle;
   const timeLabel = summary?.timeLabel ?? formatRange(block);
-  const durationLabel = formatDurationLabel(block);
+  const statusCue = getStatusCue(block);
+  const hasAttention = appointment?.actionState === 'requires_action';
+  const hasMessage = appointment?.communicationState !== undefined && appointment.communicationState !== 'none';
+  const isTerminal = appointment?.schedulingState === 'completed' || appointment?.schedulingState === 'no_show';
 
   return (
     <div
@@ -47,6 +49,9 @@ export function NativeSchedulerEventCard({
         isSelected ? styles.eventCardSelected : '',
         isDragging ? styles.eventCardDragging : '',
         readOnly ? styles.eventCardReadOnly : '',
+        hasAttention ? styles.eventCardNeedsAction : '',
+        appointment?.schedulingState === 'completed' ? styles.eventCardCompleted : '',
+        appointment?.schedulingState === 'no_show' ? styles.eventCardNoShow : '',
       ].filter(Boolean).join(' ')}
       style={{
         top: rect.top,
@@ -59,6 +64,9 @@ export function NativeSchedulerEventCard({
         ['--event-ring' as string]: colorWithAlpha(accent, '24'),
       }}
       data-native-scheduler-card={isShort ? 'short' : 'normal'}
+      data-native-scheduler-card-tone={summary?.tone ?? 'default'}
+      data-native-scheduler-action-needed={hasAttention ? 'true' : 'false'}
+      data-native-scheduler-terminal={isTerminal ? appointment?.schedulingState : 'false'}
     >
       {/* Regression contract: only this grip owns pointer drag; the card body stays select-only. */}
       {!readOnly && (
@@ -84,9 +92,22 @@ export function NativeSchedulerEventCard({
       >
         {isShort ? (
           <>
-            <span className={styles.shortInitials}>{getInitials(title)}</span>
-            <span className={styles.shortCue}>{timeLabel}</span>
-            {cues[0] ? <span className={styles.shortCueIcon}>{cues[0].icon}</span> : <span className={styles.cueDot} style={{ color: accent }} />}
+            <span className={styles.shortBlockText}>
+              <span className={styles.shortTitle}>{title}</span>
+              <span className={styles.shortTime}>{timeLabel}</span>
+            </span>
+            {statusCue ? (
+              <span className={styles.shortStatusCue}>
+                {statusCue.icon}
+                <span className={styles.shortStatusText}>{statusCue.shortLabel}</span>
+              </span>
+            ) : hasMessage ? (
+              <span className={styles.shortStatusCue} aria-label="Има съобщение">
+                <MessageCircle size={11} strokeWidth={2.5} />
+              </span>
+            ) : (
+              <span className={styles.cueDot} style={{ color: accent }} />
+            )}
           </>
         ) : (
           <>
@@ -97,21 +118,22 @@ export function NativeSchedulerEventCard({
               </span>
               <span className={styles.eventTime}>{timeLabel}</span>
             </span>
-            {cues.length > 0 && (
-              <span className={styles.cueRow}>
-                {cues.map((cue) => (
-                  <span key={cue.label} className={styles.cuePill}>
-                    {cue.icon}
-                    {cue.label}
+            {(statusCue || hasMessage) && (
+              <span className={styles.eventCueRow}>
+                {statusCue && (
+                  <span className={styles.eventStatusCue}>
+                    {statusCue.icon}
+                    {statusCue.label}
                   </span>
-                ))}
+                )}
+                {hasMessage && (
+                  <span className={styles.eventIconCue} aria-label="Има съобщение">
+                    <MessageCircle size={12} strokeWidth={2.4} />
+                  </span>
+                )}
               </span>
             )}
-            {isRoomy && (
-              <span className={styles.eventMetaRow}>
-                <span>{durationLabel}</span>
-              </span>
-            )}
+            {isRoomy && !statusCue && <span className={styles.eventBlockFill} aria-hidden="true" />}
           </>
         )}
       </button>
@@ -119,38 +141,35 @@ export function NativeSchedulerEventCard({
   );
 }
 
-function getCardCues(block: CalendarV2CalendarBlock) {
+function getStatusCue(block: CalendarV2CalendarBlock) {
   const appointment = block.appointment;
-  if (!appointment) return [];
-
-  const cues: Array<{ label: string; icon: React.ReactNode }> = [];
-
-  if (appointment.communicationState !== 'none') {
-    cues.push({
-      label: 'Ново',
-      icon: <MessageCircle size={12} strokeWidth={2.4} />,
-    });
-  }
+  if (!appointment) return null;
 
   if (appointment.actionState === 'requires_action') {
-    cues.push({
-      label: 'Чака',
+    return {
+      label: getActionNeededLabel(appointment.rawOwnerState ?? appointment.rawStatus ?? appointment.requestState),
+      shortLabel: 'Чака',
       icon: <AlertCircle size={12} strokeWidth={2.4} />,
-    });
+    };
   }
 
-  return cues;
-}
+  if (appointment.schedulingState === 'completed') {
+    return {
+      label: 'Приключен',
+      shortLabel: 'Готов',
+      icon: <CheckCircle2 size={12} strokeWidth={2.4} />,
+    };
+  }
 
-function getInitials(value: string) {
-  const parts = value.trim().split(/\s+/).filter(Boolean);
-  if (!parts.length) return '?';
+  if (appointment.schedulingState === 'no_show') {
+    return {
+      label: 'Неявил се',
+      shortLabel: 'Неяв.',
+      icon: <AlertCircle size={12} strokeWidth={2.4} />,
+    };
+  }
 
-  return parts
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join('')
-    .toUpperCase();
+  return null;
 }
 
 function formatRange(block: CalendarV2CalendarBlock) {
@@ -160,19 +179,10 @@ function formatRange(block: CalendarV2CalendarBlock) {
   return `${formatTime(start)}-${formatTime(end)}`;
 }
 
-function formatDurationLabel(block: CalendarV2CalendarBlock) {
-  const minutes = Math.max(
-    0,
-    Math.round((new Date(block.endAt).getTime() - new Date(block.startAt).getTime()) / 60000),
-  );
-
-  if (minutes >= 60) {
-    const hours = Math.floor(minutes / 60);
-    const remainder = minutes % 60;
-    return remainder ? `${hours} ч ${remainder} мин` : `${hours} ч`;
-  }
-
-  return `${minutes} мин`;
+function getActionNeededLabel(status: string) {
+  if (status === 'proposal_pending' || status === 'proposed') return 'Чака избор';
+  if (status === 'pending' || status === 'requested') return 'Чака потвърждение';
+  return 'Чака действие';
 }
 
 function formatTime(date: Date) {

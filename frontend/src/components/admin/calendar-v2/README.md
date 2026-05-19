@@ -43,6 +43,9 @@ This folder contains the renderer-independent contracts and current admin Calend
 - Untimed demand belongs in demand/request/waitlist projections, not in scheduled calendar blocks.
 - Future write interactions should go through typed commands before they are wired to API calls.
 - Calendar V2 keeps committed mutation success separate from follow-up refresh/sync success. If a backend write commits but the board cannot be re-synchronized automatically, the UI does **not** present that as a failed write; it shows `Промяната е запазена, но календарът не се обнови автоматично. Обновете страницата.` and keeps backend/refetched board data as the only canonical source.
+- Calendar V2 action failures now use the shared frontend normalizer in `native-scheduler-spike/native-scheduler-action-errors.ts`. Manual booking, request placement, cancel, confirm, reschedule, board-load failure, and refresh-warning copy map through stable frontend categories before reaching the UI.
+- The normalizer covers `past_time`, `conflict`, `unavailable`, `stale`, `already_cancelled`, `already_confirmed`, `terminal`, `request_already_handled`, `unauthorized`, `forbidden`, `network`, `server`, `unknown`, and `refresh_warning`. It uses HTTP status, known error codes when present, and backend message matching only as a fallback.
+- Known Calendar V2 action-error categories render calm Bulgarian copy and do not expose raw backend messages, JSON, or stack-like text in the operator UI.
 - Calendar V2 can create manual bookings only in real-data mode through `POST /appointments/admin`; after success it refetches `appointments-calendar-board`, invalidates board/context queries, and trusts backend truth instead of creating optimistic committed cards.
 - Calendar V2 can reschedule eligible real-data timed bookings only through the existing `PATCH /appointments/:id/reschedule` endpoint with `{ startAt, staffId }`; after success it refetches `appointments-calendar-board`, invalidates board/context queries, exits reschedule mode, keeps the selected date, and keeps the moved booking selected only when it remains visible after the refreshed backend read. If sync is ambiguous, the stale selection is cleared instead of invented.
 - Calendar V2 can confirm eligible real-data timed bookings only through the existing `PATCH /appointments/:id/status` endpoint with `{ status: "confirmed" }`; after success it refetches `appointments-calendar-board`, invalidates board/context queries, keeps the selected date and booking only when refreshed backend truth confirms it, and never fabricates committed status locally.
@@ -61,7 +64,8 @@ This folder contains the renderer-independent contracts and current admin Calend
 - The phone-width experience is still intentionally incomplete and uses the separate agenda notice instead of a full placement flow.
 - Manual new booking is desktop/tablet-landscape only for now; phone width intentionally keeps the separate limited experience rather than compressing the desktop modal flow into an unfinished mobile calendar.
 - Existing disabled/coming-next states should remain honest until the backend scheduling path supports the corresponding write.
-- Remaining production hardening after this pass: run/review the pilot-tenant allocation backfill report, tighten structured stale/terminal recovery, finish the most visible real-mode copy cleanup, then continue with the phone-specific calendar flow; realtime remains later.
+- Remaining production hardening after this pass: run/review the pilot-tenant allocation backfill report, complete deployed desktop smoke QA with test-safe records, then continue with the phone-specific calendar flow; realtime remains later.
+- Backend structured error codes and richer stale/conflict recovery remain future improvements beyond the current frontend-only normalization layer.
 
 ## Production Copy Cleanup Pass
 

@@ -15,16 +15,18 @@ It is **not yet ready for a first controlled salon pilot** without a short stabi
 The remaining blockers are not missing “big features.” They are trust and recovery gaps:
 
 1. **The allocation model is still transitional.** New standard writes maintain `calendar_allocations`, but the production dry-run/backfill result has not been executed and reviewed in the inspected repo state, old appointments can still lack allocations, and allocation-only authority remains intentionally disabled.
-2. **Error handling is still partly string-parsed and uneven across actions.** The Bulgarian UX is decent for common conflicts and past-time cases, but stale/terminal/retry cases are not yet consistently explicit enough for a real operator under pressure.
+2. **Calendar V2 action error copy now has a shared frontend normalization layer.** This closes the previous uneven-copy gap for the existing desktop write flows, but it is not a backend structured error-code contract.
 3. **The main real-mode operator copy cleanup is now complete.** The primary `/admin` surface no longer exposes preview/sample/read-only framing in ordinary real use, and the visible loading/error/empty states are now calm Bulgarian copy.
 
 Completed on 2026-05-18: the post-write refresh trust gap was hardened. Calendar V2 now keeps mutation success separate from follow-up sync failure across manual booking, request placement, cancel, confirm, and reschedule. A committed write that cannot be re-synchronized automatically is no longer reported as a failed write; the operator instead sees `Промяната е запазена, но календарът не се обнови автоматично. Обновете страницата.` and the scheduler exits unsafe write state without inventing canonical appointment data.
+
+Completed on 2026-05-19: the existing Calendar V2 desktop action errors were standardized through `native-scheduler-action-errors.ts`. Manual booking, request placement, cancel, confirm, reschedule, board-load failure, and refresh-warning states now normalize known HTTP/status/code/message shapes into stable frontend categories and calm Bulgarian copy. Backend structured error codes remain a future improvement.
 
 ### Answer to the primary question
 
 - **Internal dogfooding on desktop:** yes.
 - **First controlled desktop salon pilot:** not yet.
-- **What must be fixed first now:** run and review the allocation dry-run report for the pilot tenant, then tighten the remaining stale/terminal action wording where needed.
+- **What must be fixed first now:** run and review the allocation dry-run report for the pilot tenant, then complete the deployed desktop smoke matrix with test-safe records.
 
 ## 2. Completed capability checklist
 
@@ -67,21 +69,20 @@ Completed on 2026-05-18: the post-write refresh trust gap was hardened. Calendar
 
 | Case | Current Bulgarian handling | Audit verdict |
 | --- | --- | --- |
-| Past time | Manual booking click: `Изберете бъдещ час.` Placement save/backend: `Не може да запишете час в миналото.` Reschedule: `Не може да преместите час в миналото.` | Good. UI and backend both enforce the rule. |
-| Conflict | Placement/manual create map conflict-like `409` responses to `Този час вече е зает.` Reschedule uses the same message. Local previews also surface conflict hints. | Good for common conflicts, but still string-parsed rather than structured. |
-| Unavailable slot | Placement/manual create map generic `400/404/409` to `Този час не е наличен.` Reschedule maps working-hours/blocked-interval failures to the same idea. | Acceptable, but broad. Several distinct backend causes collapse into one operator message. |
-| Already cancelled | Cancel maps invalid status transition to `Този час вече не може да бъде отказан.` | Partial. Safe, but not as explicit as “already cancelled,” and it depends on parsing the backend status-transition message. |
-| Already confirmed | Confirm maps the relevant invalid transition to `Този час вече е потвърден.` | Good. |
-| Stale appointment | Confirm/cancel/reschedule map `404` or some `409` cases to `Часът е променен. Обновете календара и опитайте отново.` | Acceptable baseline, but not fully consistent or structured. |
-| Request already handled | Placement maps the backend message to `Заявката вече е обработена.` | Good. |
-| Backend `400` | Usually becomes unavailable/past/terminal copy if recognized; otherwise flow-specific generic fallback. | Partial. Usable, but too coarse for pilot confidence in rarer cases. |
-| Backend `409` | Usually becomes occupied/unavailable/stale copy depending on message text. | Partial. Works today, but message parsing is brittle. |
-| Backend `500` | Flow-specific generic retry messages such as `Не успяхме да ... Опитайте отново.` | Acceptable as a final fallback, but there is no richer recovery guidance. |
-| Refresh failure after successful write | Placement, confirm, cancel, and reschedule await refresh/invalidation inside the same `try` as the write; a refresh rejection after commit falls into the same error path as a failed mutation. Manual create shows success first, then refreshes separately without a dedicated stale-view warning. | **Weak spot / P0.** This can produce false failure feedback or stale UI after a real write. It is the clearest trust blocker before a salon pilot. |
+| Past time | Manual booking maps to `Не може да запишете час в миналото.` Request placement maps to `Не може да поставите заявка в миналото.` Reschedule maps to `Не може да преместите час в миналото.` Local past-slot clicks remain blocked before writes. | Good. UI and backend both enforce the rule, with action-specific copy. |
+| Conflict | Manual create, request placement, and reschedule normalize conflict-like responses to `Този час вече е зает.` Local previews also surface conflict hints. | Good for the controlled desktop pilot. Still frontend-normalized, not a final backend structured conflict contract. |
+| Unavailable slot | Manual create, request placement, and reschedule normalize unavailable/working-hours/blocked/staff-or-service missing cases to `Този час не е наличен.` | Acceptable. Several backend causes intentionally collapse into one operator-safe message. |
+| Already cancelled / terminal cancel | Cancel maps already-cancelled and terminal status-transition cases to `Този час вече не може да бъде отказан.` | Good for pilot safety. The operator is not encouraged to repeat a destructive action. |
+| Already confirmed | Confirm maps already-confirmed status-transition cases to `Този час вече е потвърден.` | Good. |
+| Terminal confirm | Confirm maps other terminal status-transition cases to `Този час вече не може да бъде потвърден.` | Good for pilot safety. |
+| Stale appointment | Confirm/cancel/reschedule map stale/not-found/conflicting update cases to `Часът е променен. Обновете календара и опитайте отново.` | Good pilot baseline. Richer recovery still belongs in a future backend structured contract. |
+| Request already handled | Request placement maps already-handled request responses to `Заявката вече е обработена.` | Good. |
+| Network / auth / server | Shared general categories map to `Няма връзка със сървъра...`, `Сесията е изтекла. Влезте отново.`, `Нямате права за това действие.`, and `Възникна проблем със сървъра...`. | Good. Known categories no longer render raw backend text. |
+| Refresh failure after successful write | Manual booking, request placement, confirm, cancel, and reschedule keep committed mutation success separate from follow-up refresh failure and show `Промяната е запазена, но календарът не се обнови автоматично. Обновете страницата.`. | Good. This previous P0 trust gap is closed for the existing desktop write flows. |
 
 ### Summary of the error-state picture
 
-Calendar V2 now has **good narrow-path Bulgarian copy** for the most common scheduling failures. It does **not** yet have the durable production-grade error contract described in the architecture docs: structured conflict codes, explicit stale-version handling, and action-specific recovery semantics independent of message parsing.
+Calendar V2 now has a **shared frontend error-normalization layer** for the existing desktop write flows. It uses HTTP status, known error codes when present, and message matching only as a fallback. It does **not** yet have the durable production-grade backend error contract described in the architecture docs: structured conflict codes, explicit stale-version handling, and action-specific recovery semantics independent of message parsing.
 
 ## 5. Data/backend safety audit
 
@@ -224,7 +225,7 @@ Use this as a concrete gate before allowing one real salon to operate on desktop
 
 1. **Run and review the read-only allocation backfill report** for the actual pilot tenant data before claiming the backend transition state is acceptable for live use.
 2. **Keep the cleaned-up real-mode copy contract intact**: no ordinary-operator sample/demo language in real mode, and Bulgarian loading/error/empty states.
-3. **Tighten the most important stale/terminal action messages** so confirm/cancel/reschedule/request-placement failures are consistently understandable in Bulgarian without overloading “unavailable.”
+3. **Complete the deployed desktop smoke matrix** for manual booking, request placement, cancel, confirm, reschedule, no-past guards, conflict handling, sample mode, and legacy fallback with test-safe records.
 
 ### P1 — should fix soon after pilot
 

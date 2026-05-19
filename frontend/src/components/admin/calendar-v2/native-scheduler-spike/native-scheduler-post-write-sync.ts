@@ -1,5 +1,6 @@
-export const CALENDAR_V2_POST_WRITE_REFRESH_WARNING =
-  'Промяната е запазена, но календарът не се обнови автоматично. Обновете страницата.';
+import { CALENDAR_V2_REFRESH_WARNING_MESSAGE } from './native-scheduler-action-errors';
+
+export const CALENDAR_V2_POST_WRITE_REFRESH_WARNING = CALENDAR_V2_REFRESH_WARNING_MESSAGE;
 
 export type NativeSchedulerPostWriteSyncStatus = 'synced' | 'refresh_warning';
 

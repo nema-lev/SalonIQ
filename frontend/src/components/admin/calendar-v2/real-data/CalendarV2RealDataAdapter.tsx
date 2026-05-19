@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
-import axios from 'axios';
 import { useQueryClient } from '@tanstack/react-query';
 import { addDays, endOfDay, format, startOfDay } from 'date-fns';
 import { ChevronLeft, ChevronRight, Plus, RotateCcw } from 'lucide-react';
@@ -21,6 +20,7 @@ import type { NativeSchedulerManualBookingIntent } from '../native-scheduler-spi
 import type { NativeSchedulerNotice } from '../native-scheduler-spike/NativeSchedulerGrid';
 import type { WaitlistPlacementSaveRequest } from '../native-scheduler-spike/native-scheduler-drag';
 import type { AppointmentRescheduleSaveRequest } from '../native-scheduler-spike/native-scheduler-reschedule-booking';
+import { getCalendarV2ActionErrorMessage } from '../native-scheduler-spike/native-scheduler-action-errors';
 import {
   attemptNativeSchedulerPostWriteSync,
   CALENDAR_V2_POST_WRITE_REFRESH_WARNING,
@@ -158,7 +158,7 @@ export function CalendarV2RealDataAdapter() {
           syncStatus: syncResult.status,
         };
       } catch (error) {
-        const message = getPlacementSaveErrorMessage(error);
+        const message = getCalendarV2ActionErrorMessage(error, 'request_placement');
         toast.error(message);
         throw new Error(message);
       }
@@ -239,7 +239,7 @@ export function CalendarV2RealDataAdapter() {
           syncStatus: syncResult.status,
         };
       } catch (error) {
-        const message = getCancelBookingErrorMessage(error);
+        const message = getCalendarV2ActionErrorMessage(error, 'cancel_booking');
         toast.error(message);
         throw new Error(message);
       }
@@ -284,7 +284,7 @@ export function CalendarV2RealDataAdapter() {
           syncStatus: syncResult.status,
         };
       } catch (error) {
-        const message = getConfirmBookingErrorMessage(error);
+        const message = getCalendarV2ActionErrorMessage(error, 'confirm_booking');
         toast.error(message);
         throw new Error(message);
       }
@@ -337,7 +337,7 @@ export function CalendarV2RealDataAdapter() {
           syncStatus: syncResult.status,
         };
       } catch (error) {
-        const message = getRescheduleBookingErrorMessage(error);
+        const message = getCalendarV2ActionErrorMessage(error, 'reschedule_booking');
         toast.error(message);
         throw new Error(message);
       }
@@ -409,7 +409,7 @@ export function CalendarV2RealDataAdapter() {
             Опитайте отново.
           </p>
           <p className="mt-3 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">
-            {getApiErrorMessage(error, 'Възникна неочаквана грешка при зареждането.')}
+            {getCalendarV2ActionErrorMessage(error, 'board_load')}
           </p>
           <div className="mt-5 flex flex-wrap items-center gap-3">
             <button
@@ -524,176 +524,6 @@ export function CalendarV2RealDataAdapter() {
       />
     </>
   );
-}
-
-function getApiErrorMessage(error: unknown, fallback: string) {
-  if (axios.isAxiosError(error)) {
-    const message = error.response?.data?.message;
-    const normalizedMessage =
-      typeof message === 'string'
-        ? message
-        : Array.isArray(message)
-          ? message.find((entry): entry is string => typeof entry === 'string')
-          : null;
-
-    if (normalizedMessage) {
-      return normalizedMessage;
-    }
-  }
-
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-
-  return fallback;
-}
-
-function getPlacementSaveErrorMessage(error: unknown) {
-  const fallback = 'Не успяхме да запишем часа. Опитайте отново.';
-
-  if (!axios.isAxiosError(error)) {
-    return error instanceof Error && error.message ? error.message : fallback;
-  }
-
-  const status = error.response?.status;
-  const message = extractApiMessage(error);
-
-  if (isRequestAlreadyHandledMessage(message)) {
-    return 'Заявката вече е обработена.';
-  }
-
-  if (isPastSchedulingMessage(message)) {
-    return 'Не може да запишете час в миналото.';
-  }
-
-  if (status === 409 && isConflictMessage(message)) {
-    return 'Този час вече е зает.';
-  }
-
-  if (status === 400 || status === 404 || status === 409) {
-    return 'Този час не е наличен.';
-  }
-
-  return fallback;
-}
-
-function getCancelBookingErrorMessage(error: unknown) {
-  const fallback = 'Не успяхме да откажем часа. Опитайте отново.';
-
-  if (!axios.isAxiosError(error)) {
-    return fallback;
-  }
-
-  const status = error.response?.status;
-  const message = extractApiMessage(error)?.toLocaleLowerCase('bg-BG') ?? '';
-
-  if (status === 400 && message.includes('не може да се смени статус')) {
-    return 'Този час вече не може да бъде отказан.';
-  }
-
-  if (status === 404 || status === 409) {
-    return 'Часът е променен. Обновете календара и опитайте отново.';
-  }
-
-  return fallback;
-}
-
-function getConfirmBookingErrorMessage(error: unknown) {
-  const fallback = 'Не успяхме да потвърдим часа. Опитайте отново.';
-
-  if (!axios.isAxiosError(error)) {
-    return fallback;
-  }
-
-  const status = error.response?.status;
-  const message = extractApiMessage(error)?.toLocaleLowerCase('bg-BG') ?? '';
-
-  if (
-    status === 400 &&
-    message.includes('не може да се смени статус') &&
-    message.includes("'confirmed'") &&
-    message.includes("на 'confirmed'")
-  ) {
-    return 'Този час вече е потвърден.';
-  }
-
-  if (status === 400 && message.includes('не може да се смени статус')) {
-    return 'Този час вече не може да бъде потвърден.';
-  }
-
-  if (status === 404 || status === 409) {
-    return 'Часът е променен. Обновете календара и опитайте отново.';
-  }
-
-  return fallback;
-}
-
-function getRescheduleBookingErrorMessage(error: unknown) {
-  const fallback = 'Не успяхме да преместим часа. Опитайте отново.';
-
-  if (!axios.isAxiosError(error)) {
-    return fallback;
-  }
-
-  const status = error.response?.status;
-  const message = extractApiMessage(error);
-  const normalizedMessage = message?.toLocaleLowerCase('bg-BG') ?? '';
-
-  if (isPastSchedulingMessage(message)) {
-    return 'Не може да преместите час в миналото.';
-  }
-
-  if (status === 409 && isConflictMessage(message)) {
-    return 'Този час вече е зает.';
-  }
-
-  if (
-    status === 409 &&
-    (normalizedMessage.includes('не работи') ||
-      normalizedMessage.includes('извън работното време') ||
-      normalizedMessage.includes('блокиран интервал'))
-  ) {
-    return 'Този час не е наличен.';
-  }
-
-  if (status === 400 && normalizedMessage.includes('не може да бъде преместен')) {
-    return 'Часът е променен. Обновете календара и опитайте отново.';
-  }
-
-  if (status === 404 && normalizedMessage.includes('специалист')) {
-    return 'Този час не е наличен.';
-  }
-
-  if (status === 404) {
-    return 'Часът е променен. Обновете календара и опитайте отново.';
-  }
-
-  return fallback;
-}
-
-function extractApiMessage(error: unknown) {
-  if (!axios.isAxiosError(error)) return null;
-
-  const message = error.response?.data?.message;
-  if (typeof message === 'string') return message;
-  if (Array.isArray(message)) {
-    return message.find((entry): entry is string => typeof entry === 'string') ?? null;
-  }
-
-  return null;
-}
-
-function isRequestAlreadyHandledMessage(message: string | null) {
-  return Boolean(message?.toLocaleLowerCase('bg-BG').includes('заявката вече е обработена'));
-}
-
-function isConflictMessage(message: string | null) {
-  const normalized = message?.toLocaleLowerCase('bg-BG') ?? '';
-  return normalized.includes('зает') || normalized.includes('няма свободни места');
-}
-
-function isPastSchedulingMessage(message: string | null) {
-  return Boolean(message?.toLocaleLowerCase('bg-BG').includes('миналото'));
 }
 
 function getAppointmentIdFromReschedulePath(path: string) {

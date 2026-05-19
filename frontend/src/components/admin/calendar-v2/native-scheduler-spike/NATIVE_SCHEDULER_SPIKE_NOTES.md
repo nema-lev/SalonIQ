@@ -25,6 +25,7 @@
 - Desktop real-data route now supports confirming eligible `pending` and `proposal_pending` timed bookings from Booking Detail through the existing appointment-status endpoint, with an explicit confirmation step and backend-truth refresh after success.
 - Desktop real-data route now supports cancelling eligible `pending`, `proposal_pending`, and `confirmed` bookings from Booking Detail through the existing appointment-status endpoint, with an explicit confirmation step and backend-truth refresh after success.
 - All committed desktop real-data writes now separate mutation success from follow-up refresh/sync success. If the write commits but automatic synchronization is unavailable or returns unusable data, Calendar V2 shows `Промяната е запазена, но календарът не се обнови автоматично. Обновете страницата.` instead of a false failed-write message.
+- Desktop real-data action errors now share `native-scheduler-action-errors.ts`. Manual booking, request placement, cancel, confirm, reschedule, board load failure, and refresh-warning states normalize known HTTP/status/code/message shapes to stable frontend categories and calm Bulgarian copy before any UI rendering.
 - Real-data and sample routes now allow a click-to-place preview for Action Inbox waitlist/demand items. The owner selects `Постави в графика`, clicks a staff/time slot, and sees a lightweight placement preview.
 - Real-data route can save only that waitlist/request placement when `NEXT_PUBLIC_ENABLE_CALENDAR_V2_PLACEMENT_SAVE === "true"`. Sample mode and flag-off real mode remain non-writing.
 - The local preview emits a typed `placeRequest` command-shaped object with the request id, target staff/start/end, source surface, idempotency key, appointment draft details, and `localOnly: true`.
@@ -369,3 +370,16 @@ Wire these regression checks into the project's future frontend test workflow, t
 - Real-mode loading, empty, error, navigation, and inbox labels were tightened into calm Bulgarian copy.
 - Explicit sample mode remains clearly labeled `Примерен ден · само преглед` and stays non-writing.
 - The `native-scheduler-spike` folder name is retained as internal technical debt only; it is no longer a user-facing product label.
+
+## Structured error-state polish pass
+
+- Date of pass: 2026-05-19.
+- Added a narrow frontend-only action error normalizer at `native-scheduler-action-errors.ts`.
+- Covered categories: `past_time`, `conflict`, `unavailable`, `stale`, `already_cancelled`, `already_confirmed`, `terminal`, `request_already_handled`, `unauthorized`, `forbidden`, `network`, `server`, `unknown`, and `refresh_warning`.
+- Manual booking, request placement, cancel, confirm, reschedule, and board-load failure now use shared calm Bulgarian copy instead of duplicated local parsing.
+- Known categories do not render raw backend messages, JSON, or stack-like text in Calendar V2 UI.
+- The committed-write refresh warning remains separate from mutation failure copy and still says `Промяната е запазена, но календарът не се обнови автоматично. Обновете страницата.`.
+- Sample mode remains non-writing: no appointment create, request placement save, confirm, cancel, or reschedule callbacks are exposed in sample mode.
+- This pass does not change backend endpoints, database schema, scheduling semantics, notifications, realtime behavior, drag/drop persistence, resize, recurring bookings, tenant resolution, deployment config, `/admin`, or `/admin/calendar-legacy`.
+- Remaining pilot blockers: run and review the read-only allocation report for the actual pilot tenant, then complete the deployed desktop smoke matrix with test-safe records.
+- Recommended next task: run and record the actual pilot-tenant allocation backfill report result; a backend structured error-code contract remains a later improvement.

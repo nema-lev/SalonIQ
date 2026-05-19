@@ -930,7 +930,7 @@ export function NativeSchedulerV2Spike({
     } catch (error) {
       const message = error instanceof Error
         ? error.message
-        : 'Не успяхме да запишем часа. Опитайте отново.';
+        : 'Не успяхме да поставим заявката. Опитайте отново.';
       setPlacementSaveStatus({ state: 'error', message });
       setPlacementMessage(message);
     }

@@ -193,12 +193,21 @@ The fallback route is `/admin/calendar-legacy`. It must remain reachable for the
 | Rollback plan accepted | Operator knows `/admin/calendar-legacy` and evidence capture steps. |  |  |  |
 | Production data mutation policy accepted | No manual deletes/direct DB fixes/backfill without separate approval. |  |  |  |
 
-## 11. Recommended next implementation task
+## 11. Current implementation status and recommended next task
 
-Recommended next task: **structured error-state polish**.
+Completed on 2026-05-19: **structured error-state polish**.
 
-Do not implement it as part of this document task.
+Calendar V2 action failures now go through a shared frontend normalization layer for manual booking, request placement, cancel, confirm, reschedule, board load failure, and the committed-write refresh warning. Known categories such as past-time, conflict, unavailable, stale, terminal, already-confirmed, already-handled request, unauthorized, forbidden, network, server, and refresh-warning states map to calm Bulgarian copy before they reach the operator UI. Raw backend messages remain available only as implementation inputs to the normalizer; known categories are not rendered directly.
 
-Reason: the strongest remaining pilot-safety improvement is to make conflict, stale, terminal, already-handled, retry, and backend failure states deterministic and operator-readable without depending on brittle message parsing. This improves safety for the write flows already exposed in Calendar V2 without adding new major workflow surface.
+This is still a frontend-side stabilization layer, not the final backend structured error-code contract. A backend contract with durable error codes and richer stale/conflict recovery remains a future improvement.
+
+Remaining pilot blockers after this task:
+
+- Run and review the read-only allocation backfill report for the actual pilot tenant/schema.
+- Complete the deployed desktop write-flow smoke matrix with an authenticated OWNER/ADMIN user and test-safe records.
+- Record notification expectations for the pilot operator before using real client data.
+- Keep `/admin/calendar-legacy` available as the fallback route during the pilot window.
+
+Recommended next task: **run and review the read-only allocation backfill report for the actual pilot tenant data**, then record the returned readiness status and anomaly counts in the pilot evidence.
 
 Avoid next: drag/drop persistence, resize, realtime, broad mobile rewrite, or new major workflow before the pilot safety gates above are consistently passing.

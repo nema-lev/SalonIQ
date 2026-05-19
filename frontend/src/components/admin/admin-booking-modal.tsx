@@ -1,6 +1,5 @@
 'use client';
 
-import axios from 'axios';
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2, Mail, X } from 'lucide-react';
@@ -8,6 +7,7 @@ import { toast } from 'sonner';
 import { apiClient } from '@/lib/api-client';
 import { formatBulgarianPhoneForDisplay, normalizeBulgarianPhone } from '@/lib/phone';
 import { useTenant } from '@/lib/tenant-context';
+import { getCalendarV2ActionErrorMessage } from './calendar-v2/native-scheduler-spike/native-scheduler-action-errors';
 import type { ClientSuggestion, Service, Slot, StaffMember } from './calendar-model';
 
 function timeLabelToMinutes(value: string) {
@@ -469,47 +469,5 @@ export function AdminBookingModal({
 }
 
 function getAdminBookingCreateErrorMessage(error: unknown) {
-  const fallback = 'Не успяхме да създадем часа. Опитайте отново.';
-
-  if (!axios.isAxiosError(error)) {
-    return fallback;
-  }
-
-  const status = error.response?.status;
-  const message = extractApiMessage(error);
-
-  if (isPastSchedulingMessage(message)) {
-    return 'Не може да запишете час в миналото.';
-  }
-
-  if (status === 409 && isConflictMessage(message)) {
-    return 'Този час вече е зает.';
-  }
-
-  if (status === 400 || status === 404 || status === 409) {
-    return 'Този час не е наличен.';
-  }
-
-  return fallback;
-}
-
-function extractApiMessage(error: unknown) {
-  if (!axios.isAxiosError(error)) return null;
-
-  const message = error.response?.data?.message;
-  if (typeof message === 'string') return message;
-  if (Array.isArray(message)) {
-    return message.find((entry): entry is string => typeof entry === 'string') ?? null;
-  }
-
-  return null;
-}
-
-function isConflictMessage(message: string | null) {
-  const normalized = message?.toLocaleLowerCase('bg-BG') ?? '';
-  return normalized.includes('зает') || normalized.includes('няма свободни места');
-}
-
-function isPastSchedulingMessage(message: string | null) {
-  return Boolean(message?.toLocaleLowerCase('bg-BG').includes('миналото'));
+  return getCalendarV2ActionErrorMessage(error, 'manual_booking');
 }

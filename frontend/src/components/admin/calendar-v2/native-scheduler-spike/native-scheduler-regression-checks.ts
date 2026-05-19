@@ -51,6 +51,11 @@ import {
   runNativeSchedulerPostWriteMutation,
   shouldClearNativeSchedulerSelectionAfterPostWriteSync,
 } from './native-scheduler-post-write-sync';
+import {
+  getCalendarV2ActionErrorMessage,
+  getCalendarV2ActionErrorMessageForCategory,
+  normalizeCalendarV2ActionError,
+} from './native-scheduler-action-errors';
 
 export type NativeSchedulerRegressionCheckResult = {
   name: string;
@@ -281,6 +286,110 @@ const checks: RegressionCheck[] = [
         mutationFailureMessage,
         'mutation failed',
         'mutation failure should stay distinguishable from refresh failure',
+      );
+    },
+  },
+  {
+    name: 'Calendar V2 action errors normalize to calm Bulgarian copy',
+    run: () => {
+      const conflictError = apiError(409, 'Избраният час вече е зает. Моля, изберете друг.');
+
+      assertEqual(
+        getCalendarV2ActionErrorMessage(conflictError, 'manual_booking'),
+        'Този час вече е зает.',
+        'manual booking conflicts should use the shared occupied-slot copy',
+      );
+      assertEqual(
+        getCalendarV2ActionErrorMessage(conflictError, 'request_placement'),
+        'Този час вече е зает.',
+        'request placement conflicts should use the shared occupied-slot copy',
+      );
+      assertEqual(
+        getCalendarV2ActionErrorMessage(conflictError, 'reschedule_booking'),
+        'Този час вече е зает.',
+        'reschedule conflicts should use the shared occupied-slot copy',
+      );
+
+      assertEqual(
+        getCalendarV2ActionErrorMessage(apiError(400, 'Не може да запишете час в миналото.'), 'manual_booking'),
+        'Не може да запишете час в миналото.',
+        'manual booking past-time errors should use manual booking copy',
+      );
+      assertEqual(
+        getCalendarV2ActionErrorMessage(apiError(400, 'Не може да запишете час в миналото.'), 'request_placement'),
+        'Не може да поставите заявка в миналото.',
+        'request placement past-time errors should use request placement copy',
+      );
+      assertEqual(
+        getCalendarV2ActionErrorMessage(apiError(400, 'Не може да запишете час в миналото.'), 'reschedule_booking'),
+        'Не може да преместите час в миналото.',
+        'reschedule past-time errors should use reschedule copy',
+      );
+
+      assertEqual(
+        getCalendarV2ActionErrorMessage(
+          apiError(400, "Не може да се смени статус от 'completed' на 'cancelled'"),
+          'cancel_booking',
+        ),
+        'Този час вече не може да бъде отказан.',
+        'terminal cancel errors should use safe cancel copy',
+      );
+      assertEqual(
+        getCalendarV2ActionErrorMessage(
+          apiError(400, "Не може да се смени статус от 'completed' на 'confirmed'"),
+          'confirm_booking',
+        ),
+        'Този час вече не може да бъде потвърден.',
+        'terminal confirm errors should use safe confirm copy',
+      );
+      assertEqual(
+        getCalendarV2ActionErrorMessage(
+          apiError(400, "Не може да се смени статус от 'confirmed' на 'confirmed'"),
+          'confirm_booking',
+        ),
+        'Този час вече е потвърден.',
+        'already-confirmed errors should use explicit confirm copy',
+      );
+      assertEqual(
+        getCalendarV2ActionErrorMessage(apiError(409, 'Заявката вече е обработена.'), 'request_placement'),
+        'Заявката вече е обработена.',
+        'already-handled request errors should use explicit request copy',
+      );
+
+      assertEqual(
+        getCalendarV2ActionErrorMessage(networkError(), 'manual_booking'),
+        'Няма връзка със сървъра. Проверете интернет връзката и опитайте отново.',
+        'network errors should use calm shared Bulgarian copy',
+      );
+      assertEqual(
+        getCalendarV2ActionErrorMessage(apiError(500, 'database stack trace'), 'request_placement'),
+        'Възникна проблем със сървъра. Опитайте отново след малко.',
+        'server errors should use calm shared Bulgarian copy',
+      );
+      assertEqual(
+        getCalendarV2ActionErrorMessage(apiError(401, 'JWT expired'), 'cancel_booking'),
+        'Сесията е изтекла. Влезте отново.',
+        'unauthorized errors should use calm shared Bulgarian copy',
+      );
+      assertEqual(
+        getCalendarV2ActionErrorMessage(apiError(403, 'Forbidden raw text'), 'confirm_booking'),
+        'Нямате права за това действие.',
+        'forbidden errors should use calm shared Bulgarian copy',
+      );
+      assertEqual(
+        getCalendarV2ActionErrorMessageForCategory('refresh_warning', 'manual_booking'),
+        'Промяната е запазена, но календарът не се обнови автоматично. Обновете страницата.',
+        'committed mutation plus refresh failure should remain a refresh warning',
+      );
+      assertEqual(
+        getCalendarV2ActionErrorMessage(apiError(409, 'SQL overlap detail: Избраният час вече е зает.'), 'manual_booking'),
+        'Този час вече е зает.',
+        'known categories should not surface raw backend error text',
+      );
+      assertEqual(
+        normalizeCalendarV2ActionError(apiError(409, 'Заявката вече е обработена.'), 'request_placement').category,
+        'request_already_handled',
+        'request already handled should normalize to the stable category',
       );
     },
   },
@@ -736,21 +845,23 @@ function getSourceChecks(sourceDir: string): RegressionCheck[] {
         const adapterSource = readSource(sourceDir, '../real-data/CalendarV2RealDataAdapter.tsx');
         const schedulerSource = readSource(sourceDir, 'NativeSchedulerV2Spike.tsx');
         const syncSource = readSource(sourceDir, 'native-scheduler-post-write-sync.ts');
+        const actionErrorSource = readSource(sourceDir, 'native-scheduler-action-errors.ts');
 
         assert(
-          syncSource.includes('Промяната е запазена, но календарът не се обнови автоматично. Обновете страницата.'),
-          'shared post-write sync helper should define the refresh-warning copy',
+          syncSource.includes('CALENDAR_V2_REFRESH_WARNING_MESSAGE') &&
+            actionErrorSource.includes('Промяната е запазена, но календарът не се обнови автоматично. Обновете страницата.'),
+          'shared action-error helper should define the refresh-warning copy used by post-write sync',
         );
         assert(
           adapterSource.includes('toast.warning(CALENDAR_V2_POST_WRITE_REFRESH_WARNING)'),
           'real-data writes should surface refresh warnings separately from write failures',
         );
         assert(
-          adapterSource.includes('Не успяхме да запишем часа. Опитайте отново.') &&
-            adapterSource.includes('Не успяхме да откажем часа. Опитайте отново.') &&
-            adapterSource.includes('Не успяхме да потвърдим часа. Опитайте отново.') &&
-            adapterSource.includes('Не успяхме да преместим часа. Опитайте отново.'),
-          'action-specific write failures should remain present',
+          actionErrorSource.includes('Не успяхме да поставим заявката. Опитайте отново.') &&
+            actionErrorSource.includes('Не успяхме да откажем часа. Опитайте отново.') &&
+            actionErrorSource.includes('Не успяхме да потвърдим часа. Опитайте отново.') &&
+            actionErrorSource.includes('Не успяхме да преместим часа. Опитайте отново.'),
+          'action-specific write failures should remain present in the shared action-error helper',
         );
         assert(
           schedulerSource.includes("const refreshWarning = result?.syncStatus === 'refresh_warning'"),
@@ -1538,6 +1649,25 @@ function assertNoWriteTransportMarkers(value: unknown, message: string) {
   const leakedFragment = forbiddenFragments.find((fragment) => serialized.includes(fragment));
 
   assert(!leakedFragment, `${message}. Found ${String(leakedFragment)}.`);
+}
+
+function apiError(status: number, message: string, code?: string) {
+  return {
+    response: {
+      status,
+      data: {
+        message,
+        code,
+      },
+    },
+  };
+}
+
+function networkError() {
+  return {
+    code: 'ERR_NETWORK',
+    request: {},
+  };
 }
 
 function assert(value: unknown, message: string): asserts value {

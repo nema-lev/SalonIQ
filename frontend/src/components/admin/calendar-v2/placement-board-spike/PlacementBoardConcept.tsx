@@ -7,7 +7,6 @@ import {
   ChevronRight,
   Clock3,
   Plus,
-  Sparkles,
   Users,
   X,
 } from 'lucide-react';
@@ -26,7 +25,7 @@ type TimedObject = {
 type AppointmentObjectData = TimedObject & {
   client: string;
   service: string;
-  meta: string;
+  status: string;
 };
 
 type FitPocketData = TimedObject & {
@@ -53,19 +52,19 @@ type RequestData = {
 const appointments: AppointmentObjectData[] = [
   {
     id: 'appt-lora',
-    start: '09:10',
-    end: '09:55',
+    start: '09:05',
+    end: '09:40',
     client: 'Лора Димитрова',
     service: 'Подстригване',
-    meta: '45 мин · потвърден',
+    status: 'потвърден',
   },
   {
     id: 'appt-irina',
-    start: '10:05',
+    start: '10:20',
     end: '10:50',
     client: 'Ирина Стоянова',
     service: 'Стайлинг',
-    meta: '45 мин · редовен клиент',
+    status: 'потвърден',
   },
   {
     id: 'appt-gergana',
@@ -73,23 +72,7 @@ const appointments: AppointmentObjectData[] = [
     end: '13:05',
     client: 'Гергана Петрова',
     service: 'Тониране',
-    meta: '50 мин · тиха зона',
-  },
-  {
-    id: 'appt-vera',
-    start: '16:25',
-    end: '17:05',
-    client: 'Вера Николова',
-    service: 'Сешоар',
-    meta: '40 мин · потвърден',
-  },
-  {
-    id: 'appt-milena',
-    start: '17:15',
-    end: '17:50',
-    client: 'Милена Георгиева',
-    service: 'Поддръжка',
-    meta: '35 мин · кратък час',
+    status: 'потвърден',
   },
 ];
 
@@ -125,7 +108,7 @@ const invalidZones: InvalidZoneData[] = [
     id: 'invalid-break',
     start: '13:15',
     end: '13:45',
-    reason: 'Почивка',
+    reason: 'почивка',
     detail: 'Не пасва',
     variant: 'break',
   },
@@ -134,14 +117,14 @@ const invalidZones: InvalidZoneData[] = [
     start: '12:15',
     end: '13:05',
     reason: 'Заето',
-    detail: 'Не пасва',
+    detail: 'Заето',
     variant: 'booked',
   },
   {
     id: 'invalid-short',
     start: '17:50',
     end: '18:00',
-    reason: 'Няма 60 мин',
+    reason: 'няма 60 мин',
     detail: 'Не пасва',
     variant: 'short',
   },
@@ -204,8 +187,8 @@ function TopUtilityStrip() {
       <div className={styles.brandLockup}>
         <div className={styles.logoMark}>SQ</div>
         <div>
-          <p className={styles.brandEyebrow}>SalonIQ Calendar V2</p>
-          <h1 className={styles.brandTitle}>Calm Precision Placement Board</h1>
+          <p className={styles.brandEyebrow}>SalonIQ</p>
+          <h1 className={styles.brandTitle}>Placement Board</h1>
         </div>
       </div>
 
@@ -254,9 +237,9 @@ function SpecialistFocusHeader() {
       <div className={styles.specialistIdentity}>
         <div className={styles.avatar}>НС</div>
         <div>
-          <p className={styles.headerKicker}>Избран специалист</p>
+          <p className={styles.headerKicker}>Дневен фокус</p>
           <h2>Никол Стоянова</h2>
-          <p className={styles.roleLine}>Колорист и стилист · Sofia Studio</p>
+          <p className={styles.roleLine}>Колорист и стилист · Studio Aurora</p>
         </div>
       </div>
 
@@ -266,25 +249,15 @@ function SpecialistFocusHeader() {
           <strong>09:00-18:00</strong>
         </div>
         <div className={styles.metric}>
-          <span>резервации днес</span>
-          <strong>5</strong>
+          <span>Днес</span>
+          <strong>5 резервации</strong>
         </div>
         <div className={styles.availabilityPill}>
           <Check aria-hidden="true" />
-          3 точни места за 60 мин
+          3 подходящи места
         </div>
-        <ConceptBadge />
       </div>
     </section>
-  );
-}
-
-function ConceptBadge() {
-  return (
-    <div className={styles.conceptBadge}>
-      <Sparkles aria-hidden="true" />
-      Само визуален preview
-    </div>
   );
 }
 
@@ -293,23 +266,10 @@ function PlacementDayBoard() {
     <section className={styles.boardSection} aria-label="Еднодневна placement board сцена">
       <div className={styles.boardHeader}>
         <div>
-          <p className={styles.headerKicker}>Един специалист · един ден</p>
-          <h3>Заявката е избрана, местата са видими преди запис.</h3>
+          <p className={styles.headerKicker}>Избрана заявка · Анна Петрова · 60 мин</p>
+          <h3>Най-добрите места са подсказани преди запис.</h3>
         </div>
-        <div className={styles.boardLegend} aria-label="Легенда">
-          <span>
-            <i className={styles.legendFit} />
-            пасва
-          </span>
-          <span>
-            <i className={styles.legendInvalid} />
-            не пасва
-          </span>
-          <span>
-            <i className={styles.legendBooked} />
-            обект
-          </span>
-        </div>
+        <p className={styles.previewOnlyLine}>Само preview · часът още не е записан</p>
       </div>
 
       <div className={styles.boardFrame}>
@@ -374,7 +334,7 @@ function AppointmentObject({ appointment }: { appointment: AppointmentObjectData
         <h4>{appointment.client}</h4>
       </div>
       <p>{appointment.service}</p>
-      <span>{appointment.meta}</span>
+      <span>{appointment.status}</span>
     </article>
   );
 }
@@ -417,17 +377,17 @@ function InvalidZone({ zone }: { zone: InvalidZoneData }) {
       className={`${styles.invalidZone} ${styles[`invalidZone-${zone.variant}`]}`}
       style={timeBoxStyle(zone.start, zone.end)}
     >
-      <span>{zone.detail}</span>
-      <strong>{zone.reason}</strong>
+      {zone.detail !== zone.reason ? <span>{zone.detail}</span> : null}
+      <strong>{zone.detail === 'Заето' ? zone.reason : `Не пасва · ${zone.reason}`}</strong>
     </div>
   );
 }
 
 function PlacementPreviewCard() {
   return (
-    <aside className={styles.previewCard} style={timePointStyle('13:52')} aria-label="Преглед преди поставяне">
+    <aside className={styles.previewCard} aria-label="Преглед преди поставяне">
       <div className={styles.previewAnchor} aria-hidden="true" />
-      <p>Готово за поставяне</p>
+      <p>Преглед преди поставяне</p>
       <h4>Анна Петрова</h4>
       <dl>
         <div>
@@ -435,11 +395,15 @@ function PlacementPreviewCard() {
           <dd>Боядисване корени</dd>
         </div>
         <div>
-          <dt>Избрано време</dt>
+          <dt>Времетраене</dt>
+          <dd>60 мин</dd>
+        </div>
+        <div>
+          <dt>Място</dt>
           <dd>14:00-15:00 · Никол</dd>
         </div>
       </dl>
-      <div className={styles.previewNote}>Само визуален preview · не е записано</div>
+      <div className={styles.previewNote}>Само preview · часът още не е записан</div>
       <div className={styles.previewActions}>
         <button type="button">Постави резервация</button>
         <button type="button">
@@ -456,10 +420,10 @@ function RequestTray() {
     <section className={styles.requestTray} aria-label="Заявки за поставяне">
       <div className={styles.trayHeader}>
         <div>
-          <p className={styles.headerKicker}>Тава със заявки</p>
+          <p className={styles.headerKicker}>Чакащи заявки</p>
           <h3>Заявки за поставяне</h3>
         </div>
-        <span>избрана заявка · показани места</span>
+        <span>Анна е избрана</span>
       </div>
       <div className={styles.requestStack}>
         {requests.map((request) => (

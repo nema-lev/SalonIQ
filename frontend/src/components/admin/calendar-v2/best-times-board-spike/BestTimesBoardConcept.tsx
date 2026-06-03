@@ -24,6 +24,15 @@ type TimelineItem = {
   title: string;
   detail: string;
   type?: 'appointment' | 'break';
+  tone?: 'cut' | 'style' | 'care';
+};
+
+type TimelineHint = {
+  id: string;
+  start: string;
+  end: string;
+  label: string;
+  variant: 'best' | 'available' | 'unavailable';
 };
 
 type BestTime = {
@@ -49,6 +58,7 @@ const appointments: TimelineItem[] = [
     end: '09:40',
     title: 'Лора Димитрова',
     detail: 'Подстригване',
+    tone: 'cut',
   },
   {
     id: 'irina',
@@ -56,6 +66,7 @@ const appointments: TimelineItem[] = [
     end: '11:00',
     title: 'Ирина Стоянова',
     detail: 'Стайлинг',
+    tone: 'style',
   },
   {
     id: 'break',
@@ -71,6 +82,7 @@ const appointments: TimelineItem[] = [
     end: '16:30',
     title: 'Симона Димитрова',
     detail: 'Подстригване',
+    tone: 'cut',
   },
   {
     id: 'victoria',
@@ -78,6 +90,7 @@ const appointments: TimelineItem[] = [
     end: '18:00',
     title: 'Виктория Иванова',
     detail: 'Кератинова терапия',
+    tone: 'care',
   },
 ];
 
@@ -113,6 +126,30 @@ const unavailableTimes: UnavailableTime[] = [
   { id: 'break', time: '12:00–12:45', reason: 'Почивка' },
   { id: 'booked', time: '15:30–16:30', reason: 'Заето' },
   { id: 'short', time: '10:20–11:00', reason: 'Няма 60 мин' },
+];
+
+const timelineHints: TimelineHint[] = [
+  {
+    id: 'best-preview-window',
+    start: '11:00',
+    end: '12:00',
+    label: 'Най-добро предложение',
+    variant: 'best',
+  },
+  {
+    id: 'afternoon-window',
+    start: '13:30',
+    end: '15:30',
+    label: 'Свободен прозорец',
+    variant: 'available',
+  },
+  {
+    id: 'short-window',
+    start: '10:20',
+    end: '11:00',
+    label: 'Няма 60 мин',
+    variant: 'unavailable',
+  },
 ];
 
 export function BestTimesBoardConcept() {
@@ -193,10 +230,10 @@ function SpecialistFocusHeader() {
         </div>
         <div>
           <dt>Днес</dt>
-          <dd>5 резервации</dd>
+          <dd>5 резервации днес</dd>
         </div>
         <div>
-          <dt>Предложения</dt>
+          <dt>Предложени часове</dt>
           <dd>3 препоръчани часа</dd>
         </div>
       </dl>
@@ -209,7 +246,7 @@ function DayTimeline() {
     <section className={styles.timelineCard} aria-label="Ден на Никол Стоянова">
       <div className={styles.timelineHeader}>
         <div>
-          <p>Един специалист</p>
+          <p>Никол Стоянова · един специалист</p>
           <h2>Дневен график</h2>
         </div>
         <span className={styles.previewBadge}>Само preview</span>
@@ -227,6 +264,9 @@ function DayTimeline() {
           {timeLabels.map((label) => (
             <span key={label} className={styles.hourLine} style={timePositionStyle(label)} aria-hidden="true" />
           ))}
+          {timelineHints.map((hint) => (
+            <TimelineHintBlock key={hint.id} hint={hint} />
+          ))}
           {appointments.map((appointment) => (
             <AppointmentCard key={appointment.id} appointment={appointment} />
           ))}
@@ -241,12 +281,26 @@ function AppointmentCard({ appointment }: { appointment: TimelineItem }) {
   return (
     <article
       className={appointment.type === 'break' ? styles.breakCard : styles.appointmentCard}
+      data-tone={appointment.tone}
       style={timelineBlockStyle(appointment.start, appointment.end)}
     >
-      <span>{`${appointment.start}–${appointment.end}`}</span>
+      <span className={styles.appointmentTime}>{`${appointment.start}–${appointment.end}`}</span>
       <strong>{appointment.title}</strong>
       <small>{appointment.detail}</small>
     </article>
+  );
+}
+
+function TimelineHintBlock({ hint }: { hint: TimelineHint }) {
+  return (
+    <div
+      className={styles.timelineHint}
+      data-variant={hint.variant}
+      style={timelineBlockStyle(hint.start, hint.end)}
+      aria-hidden="true"
+    >
+      <span>{hint.label}</span>
+    </div>
   );
 }
 
@@ -255,10 +309,14 @@ function PreviewSlot() {
     <article className={styles.previewSlot} style={timelineBlockStyle('11:00', '12:00')} aria-label="Preview за Анна Петрова">
       <div className={styles.previewSlotHeader}>
         <span>11:00–12:00</span>
-        <em>Избран</em>
+        <div className={styles.previewChips}>
+          <em>Най-добро</em>
+          <em>Избран</em>
+        </div>
       </div>
       <strong>Анна Петрова</strong>
-      <small>Боядисване корени · 60 мин · Само preview</small>
+      <small>Боядисване корени · 60 мин</small>
+      <p>Само preview · часът още не е записан</p>
     </article>
   );
 }
@@ -270,8 +328,8 @@ function BestTimesPanel() {
 
       <div className={styles.panelHeader}>
         <div>
-          <p>Асистент за записване</p>
-          <h2>Най-добри часове</h2>
+          <p>Временен асистент</p>
+          <h2>Предложени часове</h2>
           <span>За Анна Петрова · Боядисване корени · 60 мин</span>
         </div>
         <Sparkles aria-hidden="true" />
@@ -300,8 +358,7 @@ function BestTimesPanel() {
       <section className={styles.unavailableList} aria-label="Недостъпни часове">
         {unavailableTimes.map((time) => (
           <div key={time.id}>
-            <span>{time.time}</span>
-            <strong>{time.reason}</strong>
+            <span>{`${time.time} · ${time.reason}`}</span>
           </div>
         ))}
       </section>
@@ -329,7 +386,7 @@ function SelectedRequestCard() {
         </div>
         <div>
           <dt>Предпочитание</dt>
-          <dd>предпочита следобед</dd>
+          <dd>Предпочита следобед</dd>
         </div>
       </dl>
     </section>

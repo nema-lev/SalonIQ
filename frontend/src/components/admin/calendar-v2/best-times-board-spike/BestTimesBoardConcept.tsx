@@ -31,7 +31,6 @@ type TimelineHint = {
   id: string;
   start: string;
   end: string;
-  label: string;
   variant: 'best' | 'available' | 'unavailable';
 };
 
@@ -133,21 +132,18 @@ const timelineHints: TimelineHint[] = [
     id: 'best-preview-window',
     start: '11:00',
     end: '12:00',
-    label: 'Най-добро предложение',
     variant: 'best',
   },
   {
     id: 'afternoon-window',
     start: '13:30',
     end: '15:30',
-    label: 'Свободен прозорец',
     variant: 'available',
   },
   {
     id: 'short-window',
     start: '10:20',
     end: '11:00',
-    label: 'Няма 60 мин',
     variant: 'unavailable',
   },
 ];
@@ -223,20 +219,11 @@ function SpecialistFocusHeader() {
         </div>
       </div>
 
-      <dl className={styles.focusFacts}>
-        <div>
-          <dt>Работно време</dt>
-          <dd>09:00–18:00</dd>
-        </div>
-        <div>
-          <dt>Днес</dt>
-          <dd>5 резервации днес</dd>
-        </div>
-        <div>
-          <dt>Предложени часове</dt>
-          <dd>3 препоръчани часа</dd>
-        </div>
-      </dl>
+      <div className={styles.focusMeta} aria-label="Дневни данни за специалиста">
+        <span>Работно време 09:00–18:00</span>
+        <span>5 резервации днес</span>
+        <span>3 препоръчани часа</span>
+      </div>
     </section>
   );
 }
@@ -284,9 +271,8 @@ function AppointmentCard({ appointment }: { appointment: TimelineItem }) {
       data-tone={appointment.tone}
       style={timelineBlockStyle(appointment.start, appointment.end)}
     >
-      <span className={styles.appointmentTime}>{`${appointment.start}–${appointment.end}`}</span>
+      <span className={styles.appointmentTime}>{`${appointment.start}–${appointment.end} · ${appointment.detail}`}</span>
       <strong>{appointment.title}</strong>
-      <small>{appointment.detail}</small>
     </article>
   );
 }
@@ -298,9 +284,7 @@ function TimelineHintBlock({ hint }: { hint: TimelineHint }) {
       data-variant={hint.variant}
       style={timelineBlockStyle(hint.start, hint.end)}
       aria-hidden="true"
-    >
-      <span>{hint.label}</span>
-    </div>
+    />
   );
 }
 

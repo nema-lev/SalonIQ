@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { BestTimesBoardConcept } from '@/components/admin/calendar-v2/best-times-board-spike';
 import { CalendarV2RealDataAdapter } from '@/components/admin/calendar-v2/real-data/CalendarV2RealDataAdapter';
 import { PlacementBoardConcept } from '@/components/admin/calendar-v2/placement-board-spike';
 
@@ -20,11 +21,16 @@ export default function AdminCalendarV2Page({ searchParams }: AdminCalendarV2Pag
     );
   }
 
-  if (
-    getSearchParam(searchParams, 'sample') === '1' &&
-    getSearchParam(searchParams, 'concept') === 'placement-board'
-  ) {
-    return <PlacementBoardConcept />;
+  if (getSearchParam(searchParams, 'sample') === '1') {
+    const concept = getSearchParam(searchParams, 'concept');
+
+    if (concept === 'best-times-board') {
+      return <BestTimesBoardConcept />;
+    }
+
+    if (concept === 'placement-board') {
+      return <PlacementBoardConcept />;
+    }
   }
 
   return <CalendarV2RealDataAdapter />;

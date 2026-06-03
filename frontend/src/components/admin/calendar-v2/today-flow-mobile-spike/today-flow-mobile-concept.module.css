@@ -1,0 +1,547 @@
+.shell {
+  display: grid;
+  min-height: calc(100dvh - 84px);
+  place-items: center;
+  margin-bottom: calc(-1 * (env(safe-area-inset-bottom, 0px) + 104px));
+  overflow: hidden;
+  border: 1px solid #e6eae4;
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(13, 91, 75, 0.08), transparent 34%),
+    linear-gradient(180deg, #fbfbf8, #f5f7f3);
+  color: #171b18;
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+}
+
+.phoneFrame {
+  position: relative;
+  width: 390px;
+  height: 820px;
+  overflow: hidden;
+  border: 1px solid rgba(23, 31, 26, 0.1);
+  border-radius: 46px;
+  background: #101512;
+  padding: 10px;
+  box-shadow:
+    0 34px 90px rgba(18, 24, 20, 0.18),
+    0 0 0 8px rgba(255, 255, 255, 0.5);
+}
+
+.phoneChrome {
+  position: absolute;
+  z-index: 3;
+  top: 15px;
+  left: 50%;
+  width: 118px;
+  height: 28px;
+  border-radius: 999px;
+  background: #101512;
+  transform: translateX(-50%);
+}
+
+.phoneChrome span {
+  position: absolute;
+  top: 9px;
+  left: 50%;
+  width: 46px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  transform: translateX(-50%);
+}
+
+.phoneScreen {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 38px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 247, 0.98)),
+    #fbfbf8;
+  padding: 26px 14px 224px;
+}
+
+.mobileTopBar,
+.mobileBrand,
+.dateCluster,
+.specialistCard,
+.needsActionCard,
+.timelineSection h2,
+.appointmentBody,
+.sheetHeader,
+.quickActions,
+.sheetActions,
+.quickAction {
+  display: flex;
+  align-items: center;
+}
+
+.mobileTopBar {
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 2px 12px;
+}
+
+.mobileBrand {
+  gap: 8px;
+  color: #1b211d;
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.logoMark {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 10px;
+  background: #0d5b4b;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 780;
+}
+
+.dateCluster {
+  flex-direction: column;
+  gap: 1px;
+}
+
+.dateCluster span {
+  color: #7a837d;
+  font-size: 11px;
+  font-weight: 680;
+}
+
+.dateCluster strong {
+  color: #171b18;
+  font-size: 14px;
+  font-weight: 760;
+}
+
+.inboxButton {
+  position: relative;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid rgba(23, 31, 26, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #25302a;
+  box-shadow: 0 8px 20px rgba(24, 32, 27, 0.05);
+}
+
+.inboxButton svg {
+  width: 16px;
+  height: 16px;
+}
+
+.inboxButton span {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  display: grid;
+  width: 17px;
+  height: 17px;
+  place-items: center;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  background: #0d5b4b;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 760;
+}
+
+.specialistCard {
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid rgba(23, 31, 26, 0.075);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.82);
+  padding: 11px;
+  box-shadow: 0 12px 30px rgba(24, 32, 27, 0.045);
+}
+
+.avatar {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border: 1px solid rgba(13, 91, 75, 0.14);
+  border-radius: 17px;
+  background: #eef8f4;
+  color: #0d5b4b;
+  font-size: 14px;
+  font-weight: 760;
+}
+
+.specialistCard div:nth-child(2) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.specialistCard h1 {
+  margin: 0;
+  color: #151a17;
+  font-size: 20px;
+  font-weight: 740;
+  letter-spacing: 0;
+  line-height: 1.1;
+}
+
+.specialistCard p,
+.specialistCard span {
+  display: block;
+  margin: 4px 0 0;
+  color: #66706a;
+  font-size: 12px;
+  font-weight: 560;
+}
+
+.specialistCard svg {
+  width: 16px;
+  height: 16px;
+  color: #748078;
+}
+
+.needsActionCard {
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 9px;
+  border: 1px solid rgba(13, 91, 75, 0.15);
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(238, 248, 244, 0.95), rgba(255, 255, 255, 0.9)),
+    #f4faf7;
+  padding: 12px;
+  box-shadow: 0 14px 32px rgba(13, 91, 75, 0.075);
+}
+
+.needsActionCard span {
+  color: #0d5b4b;
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.needsActionCard h2 {
+  margin: 5px 0 0;
+  color: #151a17;
+  font-size: 18px;
+  font-weight: 760;
+  line-height: 1.1;
+}
+
+.needsActionCard p {
+  margin: 5px 0 0;
+  color: #59625c;
+  font-size: 12px;
+}
+
+.recommendation {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.recommendation small {
+  color: #7a837d;
+  font-size: 10px;
+  font-weight: 680;
+}
+
+.recommendation strong {
+  color: #0d5b4b;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 780;
+}
+
+.recommendation button {
+  height: 30px;
+  border: 0;
+  border-radius: 999px;
+  background: #0d5b4b;
+  color: #ffffff;
+  padding: 0 11px;
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.timeline {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding-left: 14px;
+}
+
+.timeline::before {
+  position: absolute;
+  top: 18px;
+  bottom: 10px;
+  left: 5px;
+  width: 1px;
+  background: linear-gradient(180deg, rgba(13, 91, 75, 0.18), rgba(23, 31, 26, 0.05));
+  content: "";
+}
+
+.nowMarker {
+  position: absolute;
+  top: 14px;
+  left: 0;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+}
+
+.nowMarker span {
+  width: 10px;
+  height: 10px;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  background: #0d5b4b;
+  box-shadow: 0 0 0 3px rgba(13, 91, 75, 0.12);
+}
+
+.nowMarker strong {
+  color: #0d5b4b;
+  font-size: 10px;
+  font-weight: 760;
+  transform: translateX(-2px);
+}
+
+.timelineSection {
+  display: grid;
+  gap: 8px;
+}
+
+.timelineSection h2 {
+  justify-content: space-between;
+  margin: 0 0 1px;
+  color: #737c75;
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.appointmentCard,
+.selectedAppointment,
+.mutedAppointment {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 10px;
+  min-height: 60px;
+  border-radius: 20px;
+  padding: 10px 11px;
+}
+
+.appointmentCard {
+  border: 1px solid rgba(23, 31, 26, 0.075);
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 8px 20px rgba(24, 32, 27, 0.042);
+}
+
+.selectedAppointment {
+  border: 1px solid rgba(13, 91, 75, 0.34);
+  background:
+    linear-gradient(180deg, rgba(238, 248, 244, 0.98), rgba(255, 255, 255, 0.92)),
+    #ffffff;
+  box-shadow: 0 16px 38px rgba(13, 91, 75, 0.12);
+}
+
+.mutedAppointment {
+  border: 1px dashed rgba(111, 117, 112, 0.17);
+  background: rgba(247, 248, 245, 0.7);
+}
+
+.timeRail span {
+  display: block;
+  color: #6f7871;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 680;
+  line-height: 1.2;
+}
+
+.appointmentBody {
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.appointmentBody h3 {
+  margin: 0;
+  overflow: hidden;
+  color: #171b18;
+  font-size: 14px;
+  font-weight: 740;
+  letter-spacing: 0;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appointmentBody p {
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: #687069;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appointmentBody small,
+.appointmentBody strong {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 4px 7px;
+  font-size: 10px;
+  font-weight: 720;
+}
+
+.appointmentBody small {
+  background: rgba(243, 245, 241, 0.82);
+  color: #69736c;
+}
+
+.appointmentBody strong {
+  background: #0d5b4b;
+  color: #ffffff;
+}
+
+.bottomSheet {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  border: 1px solid rgba(23, 31, 26, 0.08);
+  border-bottom: 0;
+  border-radius: 30px 30px 0 0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(249, 251, 248, 0.98)),
+    #ffffff;
+  padding: 8px 14px 14px;
+  box-shadow: 0 -22px 54px rgba(24, 32, 27, 0.14);
+}
+
+.grabHandle {
+  width: 42px;
+  height: 5px;
+  margin: 0 auto 10px;
+  border-radius: 999px;
+  background: rgba(23, 31, 26, 0.16);
+}
+
+.sheetHeader {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sheetHeader span {
+  color: #0d5b4b;
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.sheetHeader h2 {
+  margin: 5px 0 0;
+  color: #151a17;
+  font-size: 22px;
+  font-weight: 780;
+  letter-spacing: 0;
+  line-height: 1.08;
+}
+
+.sheetHeader p,
+.sheetHeader small {
+  display: block;
+  margin: 5px 0 0;
+  color: #5f6862;
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.previewBadge {
+  flex: 0 0 auto;
+  border: 1px solid rgba(114, 98, 204, 0.18);
+  border-radius: 999px;
+  background: #f5f3ff;
+  color: #584da0;
+  padding: 7px 9px;
+  font-size: 11px;
+  font-weight: 740;
+}
+
+.unsavedCopy {
+  margin: 10px 0 0;
+  border-radius: 15px;
+  background: rgba(247, 248, 245, 0.82);
+  color: #59625c;
+  padding: 10px 11px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.quickActions {
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.quickAction {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 52px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  border: 1px solid rgba(23, 31, 26, 0.075);
+  border-radius: 17px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #2c342f;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.quickAction svg {
+  width: 17px;
+  height: 17px;
+  color: #0d5b4b;
+}
+
+.quickAction span {
+  overflow: visible;
+  max-width: 100%;
+  line-height: 1.08;
+  text-align: center;
+  white-space: normal;
+}
+
+.sheetActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.primaryAction,
+.secondaryAction {
+  height: 42px;
+  border-radius: 16px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.primaryAction {
+  border: 1px solid #0d5b4b;
+  background: #0d5b4b;
+  color: #ffffff;
+  box-shadow: 0 12px 24px rgba(13, 91, 75, 0.18);
+}
+
+.secondaryAction {
+  border: 1px solid rgba(23, 31, 26, 0.08);
+  background: rgba(255, 255, 255, 0.88);
+  color: #35413a;
+}

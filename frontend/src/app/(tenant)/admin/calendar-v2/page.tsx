@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { BestTimesBoardConcept } from '@/components/admin/calendar-v2/best-times-board-spike';
 import { CalendarV2RealDataAdapter } from '@/components/admin/calendar-v2/real-data/CalendarV2RealDataAdapter';
+import { TodayFlowMobileConcept } from '@/components/admin/calendar-v2/today-flow-mobile-spike';
 import { PlacementBoardConcept } from '@/components/admin/calendar-v2/placement-board-spike';
 
 export const metadata: Metadata = {
@@ -26,6 +27,10 @@ export default function AdminCalendarV2Page({ searchParams }: AdminCalendarV2Pag
 
     if (concept === 'best-times-board') {
       return <BestTimesBoardConcept />;
+    }
+
+    if (concept === 'today-flow-mobile') {
+      return <TodayFlowMobileConcept />;
     }
 
     if (concept === 'placement-board') {
